@@ -119,10 +119,4 @@ This open-source software is intended solely for educational purposes, specifica
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=MengMengCode%2FCLICD&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=MengMengCode/CLICD&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=MengMengCode/CLICD&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=MengMengCode/CLICD&type=date&legend=top-left" />
- </picture>
-</a>
+[![MengMengCode/CLICD Star History](http://mengmeng.meteor-history.com/api/embed/MengMengCode/CLICD.svg?sig=YT8i1bxihL6_GcFAa0CWRbQb35-B0XXyh-ZAxIsmV0U&theme=light&style=xkcd&color=dd4528&background=ffffff&textColor=000000&width=900&height=600&lineWidth=3&showTitle=true&showLegend=true&showDots=false&v=3)](https://meteor-history.com)
