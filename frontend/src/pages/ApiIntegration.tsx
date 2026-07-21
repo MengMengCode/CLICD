@@ -81,7 +81,7 @@ const scopeGroups = [
       ['container:delete', '删除容器'],
       ['container:resize', '资源/到期'],
       ['container:traffic', '流量管理'],
-      ['container:network', '端口映射'],
+      ['container:network', '网络与端口映射'],
       ['container:password', '重置密码'],
       ['ipv6:assign', '分配 IPv6'],
     ],
@@ -140,6 +140,8 @@ const endpointGroups: Array<{ title: string; endpoints: EndpointTuple[] }> = [
     endpoints: [
       ['GET', '/api/v1/dashboard', '控制面板统计'],
       ['GET', '/api/v1/host-info', '主机资源'],
+      ['GET', '/api/v1/host-history', '宿主机历史指标（后台每 30 秒采集）'],
+      ['GET', '/api/v1/host-report', '宿主机硬件、网络与运行环境探测报告'],
       ['GET', '/api/v1/routing', 'NAT/IPv4/IPv6 路由'],
       ['PUT', '/api/v1/routing', '更新公网 IPv4/IPv6 池'],
       ['POST', '/api/v1/routing/ipv4-scan', '扫描公网 IPv4 段'],
@@ -161,6 +163,7 @@ const endpointGroups: Array<{ title: string; endpoints: EndpointTuple[] }> = [
       ['POST', '/api/v1/containers/{id}/reinstall', '重装'],
       ['DELETE', '/api/v1/containers/{id}/delete', '删除'],
       ['GET', '/api/v1/containers/{id}/usage', '资源用量'],
+      ['GET', '/api/v1/containers/{id}/history', '容器历史指标（后台每 30 秒采集）'],
       ['GET', '/api/v1/containers/{id}/traffic', '流量统计'],
       ['POST', '/api/v1/containers/{id}/traffic-reset', '重置流量'],
       ['PUT', '/api/v1/containers/{id}/traffic-limit', '调整流量限制'],
@@ -168,6 +171,8 @@ const endpointGroups: Array<{ title: string; endpoints: EndpointTuple[] }> = [
       ['PUT', '/api/v1/containers/{id}/expiry', '调整到期时间'],
       ['POST', '/api/v1/containers/{id}/reset-password', '重置 SSH 密码'],
       ['POST', '/api/v1/containers/{id}/ipv6', '分配 IPv6'],
+      ['PUT', '/api/v1/containers/{id}/public-ipv4', '更新独立公网 IPv4 地址'],
+      ['PUT', '/api/v1/containers/{id}/ipv6-addresses', '更新独立 IPv6 地址'],
     ],
   },
   {
@@ -193,6 +198,7 @@ const endpointGroups: Array<{ title: string; endpoints: EndpointTuple[] }> = [
     endpoints: [
       ['GET', '/api/v1/templates', '模板列表'],
       ['GET', '/api/v1/images', '镜像管理列表'],
+      ['GET', '/api/v1/images/enabled?type=lxc&container={id}', '可用于创建或重装的已启用镜像'],
       ['POST', '/api/v1/images/download', '下载镜像'],
       ['POST', '/api/v1/images/cancel', '取消镜像下载'],
       ['DELETE', '/api/v1/images/delete', '删除镜像缓存'],
@@ -209,6 +215,21 @@ const endpointGroups: Array<{ title: string; endpoints: EndpointTuple[] }> = [
       ['POST', '/api/v1/batch-action', '批量开关机/删除/重装'],
       ['POST', '/api/v1/ssh-ticket', '创建 WebSSH 票据'],
       ['POST', '/api/v1/vnc-ticket', '创建 WebVNC 票据'],
+    ],
+  },
+  {
+    title: '主机与设置',
+    endpoints: [
+      ['GET', '/api/v1/storage', '已挂载磁盘、存储池和空间占用'],
+      ['PUT', '/api/v1/storage', '更新各磁盘的存储用途和默认盘'],
+      ['GET', '/api/v1/task-queue/settings', '任务队列并发状态'],
+      ['PUT', '/api/v1/task-queue/settings', '调整任务并发数量'],
+      ['GET', '/api/v1/ssl', 'SSL 配置和证书状态'],
+      ['PUT', '/api/v1/ssl', '更新 SSL 配置'],
+      ['GET', '/api/v1/webssh-origins', 'WebSSH/VNC Origin 白名单'],
+      ['PUT', '/api/v1/webssh-origins', '更新 WebSSH/VNC Origin 白名单'],
+      ['GET', '/api/v1/language', '面板语言'],
+      ['PUT', '/api/v1/language', '更新面板语言'],
     ],
   },
   {
@@ -728,6 +749,7 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
     name: 'demo-lxc-01',
     virtualization: 'lxc',
     template_id: 'debian-bookworm',
+    storage_pool_id: 'disk-root',
     vcpu: 1,
     ram_mb: 512,
     disk_gb: 10,
@@ -744,7 +766,14 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
     extra_ports: [8080],
     port_mapping_count: 2,
     assign_nat: true,
+    lan_ipv4_mode: '',
+    lan_interface: '',
+    lan_ipv4_address: '',
+    lan_ipv4_prefix_len: 24,
+    lan_ipv4_gateway: '',
     snapshot_limit: 1,
+    allowed_image_ids: ['debian-bookworm'],
+    image_limit_configured: true,
     assign_ipv4: false,
     ipv4_count: 1,
     public_ipv4s: [],
@@ -780,6 +809,14 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
   },
   'PUT /api/v1/containers/{id}/expiry': { expires_at: '2026-12-31 23:59:59' },
   'POST /api/v1/containers/{id}/reset-password': { password: 'NewPass123456' },
+  'PUT /api/v1/containers/{id}/public-ipv4': {
+    mode: 'random',
+    count: 1,
+  },
+  'PUT /api/v1/containers/{id}/ipv6-addresses': {
+    mode: 'custom',
+    addresses: ['2001:db8:100::1005'],
+  },
   'POST /api/v1/containers/{id}/port-mappings': {
     container_port: 8080,
     host_port: 61320,
@@ -792,6 +829,7 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
     protocol: 'tcp',
     description: 'HTTP',
   },
+  'POST /api/v1/containers/{id}/snapshots': { storage_pool_id: 'disk-root' },
   'POST /api/v1/containers/{id}/snapshots/schedule': {
     enabled: true,
     interval_hours: 24,
@@ -802,6 +840,31 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
   'POST /api/v1/images/cancel': { template_id: 'debian-bookworm' },
   'DELETE /api/v1/images/delete': { template_id: 'debian-bookworm' },
   'PUT /api/v1/images/toggle': { template_id: 'debian-bookworm', enabled: true },
+  'PUT /api/v1/storage': {
+    pools: [
+      {
+        id: 'disk-root',
+        name: 'system (/)',
+        path: '/var/lib/clicd',
+        mount_point: '/',
+        content_types: ['lxc', 'kvm', 'images', 'snapshots', 'backups'],
+        default_contents: ['lxc', 'kvm', 'images', 'snapshots', 'backups'],
+        enabled: true,
+      },
+    ],
+  },
+  'PUT /api/v1/task-queue/settings': { concurrency: 4 },
+  'PUT /api/v1/ssl': {
+    enabled: true,
+    mode: 'letsencrypt',
+    target: 'panel.example.com',
+    email: 'admin@example.com',
+    apply_now: false,
+  },
+  'PUT /api/v1/webssh-origins': {
+    origins: ['https://panel.example.com'],
+  },
+  'PUT /api/v1/language': { language: 'zh' },
   'PUT /api/v1/routing': {
     items: [
       {
@@ -910,6 +973,37 @@ const responseSamples: Record<string, unknown> = {
       load: { load1: 0.01, load5: 0.03, load15: 0.01 },
     },
   },
+  'GET /api/v1/host-history': {
+    success: true,
+    data: [
+      {
+        ts: 1784642400000,
+        cpu: 8.4,
+        memory: 21.3,
+        network: 12288,
+        network_rx: 10240,
+        network_tx: 2048,
+        disk_io: 1052672,
+        disk_read: 4096,
+        disk_write: 1048576,
+        disk_usage_pct: 18.8,
+      },
+    ],
+  },
+  'GET /api/v1/host-report': {
+    success: true,
+    data: {
+      generated_at: '2026-07-21 14:00:00',
+      hostname: 'ubuntu',
+      os: 'Ubuntu 22.04.5 LTS',
+      kernel: 'Linux 6.8.0-1054-oracle aarch64 GNU/Linux',
+      cpu: { model: 'Neoverse-N1', cores: 4, threads: 4, architecture: 'arm64', virtualization: true },
+      memory: { total_mb: 11980, used_mb: 2100, free_mb: 9880, modules: [] },
+      runtime: { lxc_available: true, kvm_available: false, support_mode: 'lxc_only' },
+      public_ipv4: [{ address: '203.0.113.10', interface: 'eth0' }],
+      ipv6_prefixes: [],
+    },
+  },
   'GET /api/v1/routing': {
     success: true,
     data: {
@@ -1016,6 +1110,12 @@ const responseSamples: Record<string, unknown> = {
       load15: 0.01,
     },
   },
+  'GET /api/v1/containers/{id}/history': {
+    success: true,
+    data: [
+      { ts: 1784642400000, cpu: 1.2, memory: 5.6, network: 4096, network_rx: 3072, network_tx: 1024, disk_io: 8192, disk_read: 2048, disk_write: 6144 },
+    ],
+  },
   'GET /api/v1/containers/{id}/traffic': {
     success: true,
     data: {
@@ -1036,6 +1136,16 @@ const responseSamples: Record<string, unknown> = {
   'PUT /api/v1/containers/{id}/expiry': { success: true, message: 'Expiry updated' },
   'POST /api/v1/containers/{id}/reset-password': { success: true, message: 'SSH password reset successfully', data: { password: '***' } },
   'POST /api/v1/containers/{id}/ipv6': { success: true, message: 'IPv6 assigned', data: { id: 5, name: 'example-vm', ipv6: '2001:db8:100::1005' } },
+  'PUT /api/v1/containers/{id}/public-ipv4': {
+    success: true,
+    message: 'Public IPv4 assignments updated',
+    data: { id: 5, name: 'example-vm', public_ipv4s: ['203.0.113.10'] },
+  },
+  'PUT /api/v1/containers/{id}/ipv6-addresses': {
+    success: true,
+    message: 'IPv6 assignments updated',
+    data: { id: 5, name: 'example-vm', ipv6_addresses: ['2001:db8:100::1005'] },
+  },
   'GET /api/v1/containers/{id}/random-port': { success: true, data: { port: 61320 } },
   'POST /api/v1/containers/{id}/port-mappings': {
     success: true,
@@ -1100,10 +1210,57 @@ const responseSamples: Record<string, unknown> = {
       { id: 'ubuntu-noble', name: 'Ubuntu 24.04', type: 'lxc', downloaded: true, enabled: true, downloading: false, progress: 0, size_bytes: 135005452 },
     ],
   },
+  'GET /api/v1/images/enabled?type=lxc&container={id}': {
+    success: true,
+    data: [
+      { id: 'debian-bookworm', name: 'Debian 12', distro: 'debian', release: 'bookworm', arch: 'amd64', type: 'lxc', downloaded: true, enabled: true },
+    ],
+  },
   'POST /api/v1/images/download': { success: true, message: 'Already downloaded' },
   'POST /api/v1/images/cancel': { success: true, message: 'Cancel requested' },
   'DELETE /api/v1/images/delete': { success: true, message: 'Deleted' },
   'PUT /api/v1/images/toggle': { success: true, message: 'OK' },
+  'GET /api/v1/storage': {
+    success: true,
+    data: {
+      pools: [
+        {
+          id: 'disk-root',
+          name: 'system (/)',
+          path: '/var/lib/clicd',
+          mount_point: '/',
+          content_types: ['lxc', 'kvm', 'images', 'snapshots', 'backups'],
+          default_contents: ['lxc', 'kvm', 'images', 'snapshots', 'backups'],
+          enabled: true,
+          available: true,
+          free_bytes: 54653493248,
+        },
+      ],
+      disks: [
+        { name: 'sda2', path: '/dev/sda2', fstype: 'ext4', mount_point: '/', size_bytes: 67331063808, used_bytes: 12677570560, free_bytes: 54653493248 },
+      ],
+      content_types: ['lxc', 'kvm', 'images', 'snapshots', 'backups'],
+    },
+  },
+  'PUT /api/v1/storage': {
+    success: true,
+    data: {
+      pools: [{ id: 'disk-root', path: '/var/lib/clicd', mount_point: '/', content_types: ['lxc', 'kvm', 'images', 'snapshots', 'backups'], enabled: true, available: true }],
+      disks: [],
+      content_types: ['lxc', 'kvm', 'images', 'snapshots', 'backups'],
+    },
+  },
+  'GET /api/v1/task-queue/settings': { success: true, data: { concurrency: 4, active: 1, pending: 2 } },
+  'PUT /api/v1/task-queue/settings': { success: true, message: '任务队列设置已保存', data: { concurrency: 4, active: 1, pending: 2 } },
+  'GET /api/v1/ssl': {
+    success: true,
+    data: { enabled: true, mode: 'letsencrypt', target: 'panel.example.com', email: 'admin@example.com', detected_host: 'panel.example.com', certificate: { subject: 'panel.example.com', issuer: "Let's Encrypt", dns_names: ['panel.example.com'], ip_names: [], valid: true } },
+  },
+  'PUT /api/v1/ssl': { success: true, message: 'SSL settings saved', data: { enabled: true, mode: 'letsencrypt', target: 'panel.example.com', needs_restart: true } },
+  'GET /api/v1/webssh-origins': { success: true, data: { origins: ['https://panel.example.com'], current_origin: 'https://panel.example.com' } },
+  'PUT /api/v1/webssh-origins': { success: true, message: 'Origin allowlist saved', data: { origins: ['https://panel.example.com'], current_origin: 'https://panel.example.com' } },
+  'GET /api/v1/language': { success: true, data: { language: 'zh' } },
+  'PUT /api/v1/language': { success: true, data: { language: 'zh' } },
   'GET /api/v1/security/alerts': { success: true, data: [] },
   'POST /api/v1/security/check': { success: true, message: 'Security check completed' },
   'GET /api/v1/security/logs?container={name}': { success: true, data: [] },
@@ -1182,12 +1339,14 @@ function endpointNoteFor(key: string) {
   if (key === 'POST /api/v1/containers') {
     notes.push('Linux container creation supports ssh_auth_mode=auto_password|password|key. Public IPv4, IPv6, and NAT can be configured with assign_nat, assign_ipv4, and assign_ipv6.')
     notes.push('Supports independent upload/download bandwidth limits and read/write I/O limits. network_bw_mbps and io_speed_mbps are deprecated symmetric compatibility aliases. New integrations should use network_down_mbps, network_up_mbps, io_read_mbps, and io_write_mbps.')
+    notes.push('storage_pool_id selects an enabled disk for the runtime. For an LXC with an independent LAN address, set lan_ipv4_mode=dhcp or static and set assign_nat=false; static mode also requires lan_ipv4_address, lan_ipv4_prefix_len, and lan_ipv4_gateway.')
+    notes.push('allowed_image_ids and image_limit_configured define which downloaded images the container owner may use for reinstall. Include the initial template ID when it should remain reinstallable.')
   }
   if (key === 'POST /api/v1/containers/{id}/reinstall') {
     notes.push('Reinstall supports ssh_auth_mode=keep|auto_password|password|key. keep is only for reinstall requests; if SSH fields are omitted, the existing behavior is kept.')
   }
   if (key === 'POST /api/v1/batch-create') {
-    notes.push('Each containers[] item in batch creation supports the same network and SSH authentication fields as POST /api/v1/containers.')
+    notes.push('Each containers[] item in batch creation supports the same storage, network, image allowlist, and SSH authentication fields as POST /api/v1/containers.')
   }
   if (key === 'PUT /api/v1/containers/{id}/resource-limit') {
     notes.push('Supports independent download/upload bandwidth limits and read/write I/O limits. Omitted fields keep their current values, and explicitly passing 0 makes that direction unlimited. network_bw_mbps and io_speed_mbps are deprecated symmetric compatibility aliases.')
@@ -1203,6 +1362,30 @@ function endpointNoteFor(key: string) {
   }
   if (key === 'POST /api/v1/routing/ipv4-scan') {
     notes.push('Scanning public IPv4 prefixes requires routing:write. When verify=true, the API also attempts to check address availability.')
+  }
+  if (key === 'GET /api/v1/host-history' || key === 'GET /api/v1/containers/{id}/history') {
+    notes.push('Metrics are collected in the background every 30 seconds, even when the statistics page is closed.')
+  }
+  if (key === 'PUT /api/v1/containers/{id}/public-ipv4' || key === 'PUT /api/v1/containers/{id}/ipv6-addresses') {
+    notes.push('mode accepts random, custom, or clear. random uses count, custom uses addresses, and clear removes all assignments of that address family.')
+  }
+  if (key === 'GET /api/v1/images/enabled?type=lxc&container={id}') {
+    notes.push('type accepts lxc or kvm. Supplying container applies that container image allowlist; omit container when listing images for a new container.')
+  }
+  if (key === 'POST /api/v1/containers/{id}/snapshots') {
+    notes.push('storage_pool_id is optional. The selected pool must be enabled for snapshots; otherwise the server chooses an available snapshot pool by free space and default priority.')
+  }
+  if (key === 'PUT /api/v1/storage') {
+    notes.push('Start from GET /api/v1/storage and submit mounted disks returned by the server. Paths and mount points are server-managed and custom paths are rejected. content_types enables a disk for each workload; only one pool may be the default for each type.')
+  }
+  if (key.includes('/api/v1/storage') || key.includes('/task-queue/settings') || key.includes('/api/v1/ssl') || key.includes('/webssh-origins')) {
+    notes.push('This endpoint requires an API key with admin:access.')
+  }
+  if (key === 'PUT /api/v1/task-queue/settings') {
+    notes.push('concurrency must be between 1 and 16. Tasks targeting the same container are still serialized.')
+  }
+  if (key === 'PUT /api/v1/ssl') {
+    notes.push('mode accepts disabled, letsencrypt, self_signed, or uploaded. uploaded mode uses cert_pem and key_pem. apply_now requests a service restart after saving.')
   }
   if (key.includes('/vnc-ticket')) notes.push('WebVNC only applies to KVM VMs; LXC containers return "VNC console is only available for KVM VMs".')
   if (key.includes('/containers/{id}/delete') || key.includes('/batch-action')) notes.push('This API enters the task queue. Call GET /api/v1/tasks afterward to check execution status.')
