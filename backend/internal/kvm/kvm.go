@@ -1724,12 +1724,12 @@ func ensureDefaultNetwork() error {
 	// Ensure libvirtd is running
 	if err := exec.Command("systemctl", "start", "libvirtd").Run(); err != nil {
 		// Non-systemd systems may use a different init, try virsh connect
-		if exec.Command("virsh", "connect").Run() != nil {
+		if virshCLocaleCommand("connect").Run() != nil {
 			return fmt.Errorf("libvirtd is not running and could not be started")
 		}
 	}
 	// Ensure default network is defined
-	if exec.Command("virsh", "net-info", "default").Run() != nil {
+	if virshCLocaleCommand("net-info", "default").Run() != nil {
 		// Default network may not be defined; try to define it
 		netXML := `<network>
   <name>default</name>
@@ -1746,7 +1746,7 @@ func ensureDefaultNetwork() error {
 			return fmt.Errorf("failed to write default network XML: %v", err)
 		}
 		defer os.Remove(tmpFile)
-		if out, err := exec.Command("virsh", "net-define", tmpFile).CombinedOutput(); err != nil {
+		if out, err := virshCLocaleCommand("net-define", tmpFile).CombinedOutput(); err != nil {
 			return fmt.Errorf("failed to define libvirt default network: %v, output: %s", err, string(out))
 		}
 		if err := os.MkdirAll(filepath.Dir(libvirtDefaultNetworkMarker), 0755); err == nil {
@@ -1754,17 +1754,25 @@ func ensureDefaultNetwork() error {
 		}
 	}
 	// Start and autostart the default network
-	if out, err := exec.Command("virsh", "net-info", "default").Output(); err == nil {
+	if out, err := virshCLocaleCommand("net-info", "default").Output(); err == nil {
 		if !libvirtNetworkActive(string(out)) {
-			if startOut, startErr := exec.Command("virsh", "net-start", "default").CombinedOutput(); startErr != nil {
-				return fmt.Errorf("failed to start libvirt default network: %v, output: %s", startErr, string(startOut))
+			if startOut, startErr := virshCLocaleCommand("net-start", "default").CombinedOutput(); startErr != nil {
+				if verifyOut, verifyErr := virshCLocaleCommand("net-info", "default").Output(); verifyErr != nil || !libvirtNetworkActive(string(verifyOut)) {
+					return fmt.Errorf("failed to start libvirt default network: %v, output: %s", startErr, string(startOut))
+				}
 			}
 		}
 	}
-	if out, err := exec.Command("virsh", "net-autostart", "default").CombinedOutput(); err != nil {
+	if out, err := virshCLocaleCommand("net-autostart", "default").CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to set autostart for libvirt default network: %v, output: %s", err, string(out))
 	}
 	return nil
+}
+
+func virshCLocaleCommand(args ...string) *exec.Cmd {
+	cmd := exec.Command("virsh", args...)
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LC_MESSAGES=C", "LANG=C", "LANGUAGE=C")
+	return cmd
 }
 
 func libvirtNetworkActive(info string) bool {

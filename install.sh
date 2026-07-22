@@ -1326,7 +1326,9 @@ setup_runtime_services() {
 
 
 libvirt_network_active() {
-    virsh net-info default 2>/dev/null | awk -F: 'tolower($1) ~ /^[[:space:]]*active[[:space:]]*$/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print tolower($2)}' | grep -qx yes
+    LC_ALL=C LANG=C virsh net-info default 2>/dev/null \
+        | awk -F: '$1 ~ /^[[:space:]]*Active[[:space:]]*$/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print tolower($2)}' \
+        | grep -qx yes
 }
 
 setup_default_libvirt_network() {
@@ -1355,7 +1357,13 @@ EOF
         touch "$LIBVIRT_DEFAULT_MARKER"
     fi
     if ! libvirt_network_active; then
-        virsh net-start default
+        if ! start_output="$(LC_ALL=C LANG=C virsh net-start default 2>&1)"; then
+            # Another process may have activated the network after our check.
+            if ! libvirt_network_active; then
+                printf '%s\n' "$start_output" >&2
+                die "libvirt default 网络仍未启动。请执行 virsh net-info default 查看详情。"
+            fi
+        fi
     fi
     virsh net-autostart default >/dev/null
     if ! libvirt_network_active; then

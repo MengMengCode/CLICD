@@ -24,6 +24,27 @@ func TestImagePathUsesAllowlistedImageID(t *testing.T) {
 	}
 }
 
+func TestLibvirtNetworkActiveParsesCLocaleOutput(t *testing.T) {
+	tests := []struct {
+		name string
+		info string
+		want bool
+	}{
+		{name: "active", info: "Name: default\nActive: yes\n", want: true},
+		{name: "spacing and case", info: "  Active  :  YES  \r\n", want: true},
+		{name: "inactive", info: "Name: default\nActive: no\n", want: false},
+		{name: "missing field", info: "Name: default\nAutostart: yes\n", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := libvirtNetworkActive(tc.info); got != tc.want {
+				t.Fatalf("libvirtNetworkActive(%q) = %v, want %v", tc.info, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestChpasswdStdinPreservesShellMetacharacters(t *testing.T) {
 	password := `pa'";$(touch /tmp/pwned); echo #\\word`
 	got, err := chpasswdStdin("root", password)
