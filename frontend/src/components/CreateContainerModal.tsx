@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { CalendarClock, RefreshCw, X } from 'lucide-react'
+import { ArrowRight, CalendarClock, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { batchCreate, getIPv6Status, getEnabledImages, getHostInfo, getHostReport, getStorageInfo, CreateContainerRequest, HostInfo, HostProbeReport, IPv6Status, StorageInfo, Template } from '../services/api'
+import { batchCreate, getIPv6Status, getEnabledImages, getHostInfo, getHostReport, getStorageInfo, CreateContainerRequest, HostInfo, HostProbeReport, IPv6Status, PortMapping, StorageInfo, Template } from '../services/api'
 import { useDialog } from './Dialog'
 import { useLanguage, type Language } from '../contexts/LanguageContext'
 import { generateSSHPassword, sshPasswordError, sshPublicKeyError, type SSHAuthMode } from '../utils/sshAuth'
@@ -33,6 +33,8 @@ const defaultForm: CreateContainerRequest = {
   io_read_mbps: 0,
   io_write_mbps: 0,
   extra_ports: [],
+  nat_port_mappings: [],
+  management_port: 0,
   port_mapping_count: 2,
   assign_nat: true,
   lan_ipv4_mode: '',
@@ -159,20 +161,28 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
   const natEnabled = form.assign_nat !== false && !lanIPv4Enabled
   const lanInterfaces = useMemo(() => getLANDHCPInterfaces(hostReport), [hostReport])
   const defaultLANInterface = lanInterfaces[0]?.name || ''
-  const customNATPorts = form.extra_ports || []
-  const natPortCount = natEnabled ? Math.max(2, form.port_mapping_count || 2, customNATPorts.length + 1) : 0
+  const customNATMappings = form.nat_port_mappings || []
+  const natPortCount = natEnabled
+    ? (customNATMappings.length > 0 ? customNATMappings.length + 1 : Math.max(2, form.port_mapping_count || 2))
+    : 0
   const linuxTemplate = !isWindowsTemplate(form.template_id)
   const sshAuthMode = (form.ssh_auth_mode || 'auto_password') as SSHAuthMode
 
-  const autoPorts = useMemo(() => {
+  const autoPortMappings = useMemo(() => {
     if (!natEnabled) return []
     const count = natPortCount
-    return Array.from({ length: count - 1 }, (_, index) => 22002 + index)
+    return Array.from({ length: count - 1 }, (_, index) => ({
+      host_port: 22002 + index,
+      container_port: 22002 + index,
+      protocol: 'tcp',
+      description: `Port-${22002 + index}`,
+    }))
   }, [natEnabled, natPortCount])
-  const natPreviewPorts = customNATPorts.length > 0 ? customNATPorts : autoPorts
+  const natPreviewMappings = customNATMappings.length > 0 ? customNATMappings : autoPortMappings
 
-  // SSH port preview (will be allocated sequentially, starting around 22000+)
-  const sshPortPreview = 22000
+  const managementPort = Math.round(Number(form.management_port) || 0)
+  // Automatic allocation starts around 22000; an explicit value is exact.
+  const sshPortPreview = managementPort || 22000
 
   // Find next available batch index to avoid name conflicts
   const batchStartIndex = useMemo(() => {
@@ -230,6 +240,14 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
       return
     }
 
+    const natMappingError = natEnabled
+      ? validateBatchNATPortMappings(customNATMappings, managementPort, batchCount)
+      : ''
+    if (natMappingError) {
+      dialog.alert('NAT 端口配置有误', natMappingError)
+      return
+    }
+
     const authError = validateSSHAuthInputs(form)
     if (authError) {
       dialog.alert('登录方式有误', authError)
@@ -244,15 +262,23 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
     const startIndex = batchStartIndex
     for (let i = 0; i < batchCount; i++) {
       const name = batchCount > 1 ? `${boundedForm.name}-${startIndex + i}` : boundedForm.name
+      const expandedNAT = wantsNAT
+        ? expandBatchNATConfig(boundedForm.nat_port_mappings || [], boundedForm.management_port || 0, i, batchCount)
+        : { mappings: [], managementPort: 0 }
+      const natPortMappings = expandedNAT.mappings
       containers.push({
         ...boundedForm,
         name,
         assign_nat: wantsNAT,
-        port_mapping_count: wantsNAT ? Math.max(2, boundedForm.port_mapping_count || 2, (boundedForm.extra_ports || []).length + 1) : 0,
+        port_mapping_count: wantsNAT
+          ? (natPortMappings.length > 0 ? natPortMappings.length + 1 : Math.max(2, boundedForm.port_mapping_count || 2))
+          : 0,
         snapshot_limit: Math.max(1, boundedForm.snapshot_limit || 3),
         ipv4_count: boundedForm.assign_ipv4 ? Math.max(1, boundedForm.ipv4_count || 1) : 0,
         ipv6_count: boundedForm.assign_ipv6 ? Math.max(1, boundedForm.ipv6_count || 1) : 0,
-        extra_ports: wantsNAT ? (boundedForm.extra_ports || []) : [],
+        extra_ports: [],
+        nat_port_mappings: natPortMappings,
+        management_port: expandedNAT.managementPort,
       })
     }
 
@@ -478,7 +504,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                   ...form,
                   assign_ipv4: event.target.checked,
                   public_ipv4s: event.target.checked ? form.public_ipv4s : [],
-                  ...(event.target.checked ? { assign_nat: false, port_mapping_count: 0, extra_ports: [], lan_ipv4_mode: '', lan_interface: '' } : {}),
+                  ...(event.target.checked ? { assign_nat: false, port_mapping_count: 0, extra_ports: [], nat_port_mappings: [], management_port: 0, lan_ipv4_mode: '', lan_interface: '' } : {}),
                 })}
                 className="mt-1"
               />
@@ -560,6 +586,8 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                       assign_nat: checked ? false : form.assign_nat,
                       port_mapping_count: checked ? 0 : form.port_mapping_count,
                       extra_ports: checked ? [] : form.extra_ports,
+                      nat_port_mappings: checked ? [] : form.nat_port_mappings,
+                      management_port: checked ? 0 : form.management_port,
                       assign_ipv4: checked ? false : form.assign_ipv4,
                       public_ipv4s: checked ? [] : form.public_ipv4s,
                       ipv4_count: checked ? 0 : form.ipv4_count,
@@ -712,6 +740,8 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                       assign_nat: checked,
                       port_mapping_count: checked ? Math.max(2, form.port_mapping_count || 2) : 0,
                       extra_ports: [],
+                      nat_port_mappings: [],
+                      management_port: checked ? form.management_port : 0,
                       ...(checked ? { assign_ipv4: false, public_ipv4s: [], ipv4_count: 0, lan_ipv4_mode: '', lan_interface: '' } : {}),
                     })
                   }}
@@ -724,58 +754,184 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                   </span>
                 </span>
               </label>
-              {natEnabled && customNATPorts.length === 0 && (
+              {natEnabled && customNATMappings.length === 0 && (
                 <span className="block w-24 shrink-0">
                   <NumberInput
                     value={natPortCount}
                     min={2}
                     max={64}
-                    onChange={(value) => setForm({ ...form, port_mapping_count: Math.max(2, value || 2), assign_nat: true, extra_ports: [] })}
+                    onChange={(value) => setForm({ ...form, port_mapping_count: Math.max(2, value || 2), assign_nat: true, extra_ports: [], nat_port_mappings: [] })}
                   />
                 </span>
               )}
             </div>
             {natEnabled && (
               <div className="mt-2 space-y-2 pl-6">
+                <div className="space-y-1">
+                  <div className="grid grid-cols-[minmax(0,1fr)_20px_minmax(0,1fr)_56px] items-end gap-2">
+                    <label className="min-w-0 text-[11px] text-gray-500">
+                      <span className="mb-1 block">
+                        {language === 'en'
+                          ? `${isWindowsTemplate(form.template_id) ? 'RDP' : 'SSH'} public source port`
+                          : `${isWindowsTemplate(form.template_id) ? 'RDP' : 'SSH'} 公网源端口`}
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={managementPort || ''}
+                        onChange={(event) => setForm({
+                          ...form,
+                          management_port: Number(event.target.value) || 0,
+                          assign_nat: true,
+                        })}
+                        className={`${inputClass} min-w-0 font-mono text-xs`}
+                        placeholder={language === 'en' ? 'Auto' : '自动'}
+                      />
+                    </label>
+                    <ArrowRight className="mb-3 h-4 w-4 text-gray-400" />
+                    <label className="min-w-0 text-[11px] text-gray-500">
+                      <span className="mb-1 block">{language === 'en' ? 'Container target port' : '容器目标端口'}</span>
+                      <input
+                        type="number"
+                        readOnly
+                        value={isWindowsTemplate(form.template_id) ? 3389 : 22}
+                        className={`${inputClass} min-w-0 bg-gray-50 font-mono text-xs text-gray-500`}
+                      />
+                    </label>
+                    <span className="mb-1 inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-gray-50 text-xs text-gray-600">
+                      TCP
+                    </span>
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <label className="flex items-center gap-2 text-xs text-gray-600">
                     <input
                       type="radio"
-                      checked={customNATPorts.length === 0}
-                      onChange={() => setForm({ ...form, extra_ports: [], port_mapping_count: Math.max(2, form.port_mapping_count || 2) })}
+                      checked={customNATMappings.length === 0}
+                      onChange={() => setForm({ ...form, extra_ports: [], nat_port_mappings: [], port_mapping_count: Math.max(2, form.port_mapping_count || 2) })}
                     />
-                    Auto ports
+                    {language === 'en' ? 'Auto ports' : '自动端口'}
                   </label>
                   <label className="flex items-center gap-2 text-xs text-gray-600">
                     <input
                       type="radio"
-                      checked={customNATPorts.length > 0}
+                      checked={customNATMappings.length > 0}
                       onChange={() => {
-                        const next = customNATPorts.length > 0 ? customNATPorts : [22002]
-                        setForm({ ...form, extra_ports: next, port_mapping_count: Math.max(2, next.length + 1), assign_nat: true })
+                        const next = customNATMappings.length > 0
+                          ? customNATMappings
+                          : [{ host_port: 22002, container_port: 22002, protocol: 'tcp', description: 'Port-22002' }]
+                        setForm({ ...form, extra_ports: [], nat_port_mappings: next, port_mapping_count: next.length + 1, assign_nat: true })
                       }}
                     />
-                    Custom ports
+                    {language === 'en' ? 'Custom mappings' : '自定义映射'}
                   </label>
                 </div>
-                {customNATPorts.length > 0 && (
-                  <textarea
-                    value={customNATPorts.join('\n')}
-                    onChange={(event) => {
-                      const next = parsePortList(event.target.value)
-                      setForm({ ...form, extra_ports: next, port_mapping_count: Math.max(2, next.length + 1), assign_nat: true })
-                    }}
-                    className={`${inputClass} min-h-16 font-mono text-xs`}
-                    placeholder={'22002\n8080\n8443'}
-                  />
+                {customNATMappings.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-[minmax(0,1fr)_20px_minmax(0,1fr)_72px_32px] items-center gap-2 px-1 text-[11px] text-gray-500">
+                      <span>{language === 'en' ? 'Public source port' : '源端口（公网）'}</span>
+                      <span />
+                      <span>{language === 'en' ? 'Container target port' : '目标端口（容器）'}</span>
+                      <span>{language === 'en' ? 'Protocol' : '协议'}</span>
+                      <span />
+                    </div>
+                    {customNATMappings.map((mapping, index) => (
+                      <div key={index} className="grid grid-cols-[minmax(0,1fr)_20px_minmax(0,1fr)_72px_32px] items-center gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          max={65535}
+                          value={mapping.host_port || ''}
+                          onChange={(event) => {
+                            const next = customNATMappings.map((item, itemIndex) => itemIndex === index
+                              ? { ...item, host_port: Number(event.target.value) }
+                              : item)
+                            setForm({ ...form, extra_ports: [], nat_port_mappings: next, port_mapping_count: next.length + 1 })
+                          }}
+                          className={`${inputClass} min-w-0 font-mono text-xs`}
+                          placeholder="30080"
+                        />
+                        <ArrowRight className="h-4 w-4 text-gray-400" />
+                        <input
+                          type="number"
+                          min={1}
+                          max={65535}
+                          value={mapping.container_port || ''}
+                          onChange={(event) => {
+                            const targetPort = Number(event.target.value)
+                            const next = customNATMappings.map((item, itemIndex) => itemIndex === index
+                              ? { ...item, container_port: targetPort, description: `Port-${targetPort}` }
+                              : item)
+                            setForm({ ...form, extra_ports: [], nat_port_mappings: next, port_mapping_count: next.length + 1 })
+                          }}
+                          className={`${inputClass} min-w-0 font-mono text-xs`}
+                          placeholder="80"
+                        />
+                        <select
+                          value={mapping.protocol || 'tcp'}
+                          onChange={(event) => {
+                            const next = customNATMappings.map((item, itemIndex) => itemIndex === index
+                              ? { ...item, protocol: event.target.value }
+                              : item)
+                            setForm({ ...form, nat_port_mappings: next })
+                          }}
+                          className="h-10 rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-700"
+                        >
+                          <option value="tcp">TCP</option>
+                          <option value="udp">UDP</option>
+                        </select>
+                        <button
+                          type="button"
+                          disabled={customNATMappings.length <= 1}
+                          onClick={() => {
+                            const next = customNATMappings.filter((_, itemIndex) => itemIndex !== index)
+                            setForm({ ...form, nat_port_mappings: next, port_mapping_count: next.length + 1 })
+                          }}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
+                          title={language === 'en' ? 'Remove mapping' : '删除映射'}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      disabled={customNATMappings.length >= 63}
+                      onClick={() => {
+                        const previous = customNATMappings[customNATMappings.length - 1]
+                        const hostPort = Math.min(65535, (previous?.host_port || 22001) + 1)
+                        const containerPort = Math.min(65535, (previous?.container_port || 22001) + 1)
+                        const next = [...customNATMappings, {
+                          host_port: hostPort,
+                          container_port: containerPort,
+                          protocol: 'tcp',
+                          description: `Port-${containerPort}`,
+                        }]
+                        setForm({ ...form, nat_port_mappings: next, port_mapping_count: next.length + 1 })
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      {language === 'en' ? 'Add mapping' : '添加映射'}
+                    </button>
+                    {batchCount > 1 && (
+                      <p className="text-[11px] text-gray-500">
+                        {language === 'en'
+                          ? 'Batch mode shifts the public source-port group for each container; target ports stay unchanged.'
+                          : '批量创建时，每台容器使用不重叠的公网源端口组，容器目标端口保持不变。'}
+                      </p>
+                    )}
+                  </div>
                 )}
                 <div className="flex flex-wrap gap-1.5">
                   <span className="inline-flex px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-xs font-mono">
                     {isWindowsTemplate(form.template_id) ? 'RDP' : 'SSH'}: {sshPortPreview} -&gt; {isWindowsTemplate(form.template_id) ? 3389 : 22}
+                    {managementPort === 0 ? (language === 'en' ? ' (auto)' : '（自动）') : ''}
                   </span>
-                  {natPreviewPorts.map((port, index) => (
-                    <span key={`${port}-${index}`} className="inline-flex px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-mono">
-                      {port} -&gt; {port}
+                  {natPreviewMappings.map((mapping, index) => (
+                    <span key={`${mapping.host_port}-${mapping.container_port}-${mapping.protocol}-${index}`} className="inline-flex px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-mono">
+                      {mapping.host_port} -&gt; {mapping.container_port}/{mapping.protocol.toUpperCase()}
                     </span>
                   ))}
                 </div>
@@ -1001,8 +1157,19 @@ function normalizeCreateForm(form: CreateContainerRequest): CreateContainerReque
   const wantsIPv6 = !!normalized.assign_ipv6
   // IPv4 and NAT are mutually exclusive
   const wantsNAT = wantsLANIPv4 || wantsIPv4 ? false : normalized.assign_nat !== false
-  const extraPorts = wantsNAT ? normalizePortList(normalized.extra_ports || []) : []
-  const portMappingCount = wantsNAT ? clampInt(Math.max(normalized.port_mapping_count || 2, extraPorts.length + 1), 2, 64, 2) : 0
+  const legacyMappings = normalizePortList(normalized.extra_ports || []).map((port) => ({
+    host_port: port,
+    container_port: port,
+    protocol: 'tcp',
+    description: `Port-${port}`,
+  }))
+  const natPortMappings = wantsNAT
+    ? normalizeNATPortMappings((normalized.nat_port_mappings?.length ? normalized.nat_port_mappings : legacyMappings))
+    : []
+  const managementPort = wantsNAT ? Math.round(Number(normalized.management_port) || 0) : 0
+  const portMappingCount = wantsNAT
+    ? (natPortMappings.length > 0 ? natPortMappings.length + 1 : clampInt(normalized.port_mapping_count || 2, 2, 64, 2))
+    : 0
   const linuxTemplate = !isWindowsTemplate(normalized.template_id)
   const sshAuthMode = linuxTemplate ? (normalized.ssh_auth_mode || 'auto_password') : 'auto_password'
   return {
@@ -1012,7 +1179,9 @@ function normalizeCreateForm(form: CreateContainerRequest): CreateContainerReque
     disk_gb: Math.round(normalized.disk_gb),
     assign_nat: wantsNAT,
     port_mapping_count: portMappingCount,
-    extra_ports: extraPorts,
+    extra_ports: [],
+    nat_port_mappings: natPortMappings,
+    management_port: managementPort,
     lan_ipv4_mode: wantsLANDHCP ? 'dhcp' : (wantsLANStatic ? 'static' : ''),
     lan_interface: wantsLANIPv4 ? (normalized.lan_interface || '').trim() : '',
     lan_ipv4_address: wantsLANStatic ? (normalized.lan_ipv4_address || '').trim() : '',
@@ -1075,14 +1244,6 @@ function clampInt(value: number, min: number, max?: number, fallback = min) {
   return Math.min(Math.max(next, min), max ?? next)
 }
 
-function parsePortList(value: string) {
-  return normalizePortList(
-    value
-      .split(/[\s,，;；]+/)
-      .map((item) => Number(item.trim()))
-  )
-}
-
 function normalizePortList(ports: number[]) {
   const seen = new Set<number>()
   const result: number[] = []
@@ -1095,6 +1256,111 @@ function normalizePortList(ports: number[]) {
     if (result.length >= 63) break
   }
   return result
+}
+
+function normalizeNATPortMappings(mappings: PortMapping[]) {
+  return mappings.slice(0, 63).map((mapping) => {
+    const hostPort = Math.round(Number(mapping.host_port) || 0)
+    const containerPort = Math.round(Number(mapping.container_port) || 0)
+    const protocol = (mapping.protocol || 'tcp').toLowerCase() === 'udp' ? 'udp' : 'tcp'
+    return {
+      host_port: hostPort,
+      container_port: containerPort,
+      protocol,
+      description: mapping.description?.trim() || `Port-${containerPort}`,
+    }
+  })
+}
+
+function expandBatchNATConfig(mappings: PortMapping[], managementPort: number, batchIndex: number, batchCount: number) {
+  const stride = batchNATPortStride(batchNATSourceMappings(mappings, managementPort), batchCount)
+  const offset = batchIndex * stride
+  return {
+    mappings: mappings.map((mapping) => ({
+      ...mapping,
+      host_port: mapping.host_port + offset,
+    })),
+    managementPort: managementPort > 0 ? managementPort + offset : 0,
+  }
+}
+
+function batchNATSourceMappings(mappings: PortMapping[], managementPort: number) {
+  if (managementPort <= 0) return mappings
+  return [
+    {
+      host_port: managementPort,
+      container_port: 0,
+      protocol: 'tcp',
+      description: 'Management',
+    },
+    ...mappings,
+  ]
+}
+
+function batchNATPortStride(mappings: PortMapping[], batchCount: number) {
+  if (mappings.length === 0 || batchCount <= 1) return 1
+  const invalid = new Set<number>()
+  for (let left = 0; left < mappings.length; left++) {
+    for (let right = left + 1; right < mappings.length; right++) {
+      const leftProtocol = (mappings[left].protocol || 'tcp').toLowerCase()
+      const rightProtocol = (mappings[right].protocol || 'tcp').toLowerCase()
+      if (leftProtocol !== rightProtocol) continue
+      const difference = Math.abs(
+        Math.round(Number(mappings[left].host_port) || 0)
+        - Math.round(Number(mappings[right].host_port) || 0)
+      )
+      for (let distance = 1; difference > 0 && distance < batchCount; distance++) {
+        if (difference % distance === 0) invalid.add(difference / distance)
+      }
+    }
+  }
+  let stride = 1
+  while (invalid.has(stride)) stride++
+  return stride
+}
+
+function validateBatchNATPortMappings(mappings: PortMapping[], managementPort: number, batchCount: number) {
+  if (mappings.length === 0 && managementPort === 0) return ''
+  if (managementPort < 0 || managementPort > 65535) {
+    return 'SSH/RDP 公网源端口必须在 1-65535 之间，留空则自动分配'
+  }
+  if (mappings.length > 63) return '每个容器最多可配置 63 条自定义 NAT 映射'
+
+  const used = new Map<string, string>()
+  const stride = batchNATPortStride(batchNATSourceMappings(mappings, managementPort), batchCount)
+  for (let batchIndex = 0; batchIndex < batchCount; batchIndex++) {
+    if (managementPort > 0) {
+      const expandedManagementPort = managementPort + batchIndex * stride
+      if (expandedManagementPort > 65535) {
+        return '批量展开后的 SSH/RDP 公网源端口超出 1-65535'
+      }
+      const managementKey = `${expandedManagementPort}/tcp`
+      const managementOwner = used.get(managementKey)
+      if (managementOwner) {
+        return `批量端口冲突：${managementKey} 同时被 ${managementOwner} 和第 ${batchIndex + 1} 台容器的管理端口使用`
+      }
+      used.set(managementKey, `第 ${batchIndex + 1} 台容器的管理端口`)
+    }
+    for (let mappingIndex = 0; mappingIndex < mappings.length; mappingIndex++) {
+      const mapping = mappings[mappingIndex]
+      const hostPort = Math.round(Number(mapping.host_port) || 0) + batchIndex * stride
+      const containerPort = Math.round(Number(mapping.container_port) || 0)
+      const protocol = (mapping.protocol || 'tcp').toLowerCase() === 'udp' ? 'udp' : 'tcp'
+      if (hostPort < 1 || hostPort > 65535) {
+        return `第 ${mappingIndex + 1} 条映射展开后的公网端口超出 1-65535`
+      }
+      if (containerPort < 1 || containerPort > 65535) {
+        return `第 ${mappingIndex + 1} 条映射的容器端口必须在 1-65535 之间`
+      }
+      const key = `${hostPort}/${protocol}`
+      const owner = used.get(key)
+      if (owner) {
+        return `批量端口冲突：${key} 同时被 ${owner} 和第 ${batchIndex + 1} 台容器使用`
+      }
+      used.set(key, `第 ${batchIndex + 1} 台容器`)
+    }
+  }
+  return ''
 }
 
 function isIPv4Address(value: string) {

@@ -247,6 +247,8 @@ type ContainerConfig struct {
 	IOReadMBps           int                        `json:"io_read_mbps"`
 	IOWriteMBps          int                        `json:"io_write_mbps"`
 	ExtraPorts           []int                      `json:"extra_ports"`
+	NATPortMappings      []config.PortMapping       `json:"nat_port_mappings,omitempty"`
+	ManagementPort       int                        `json:"management_port,omitempty"`
 	PortMappingCount     int                        `json:"port_mapping_count"`
 	AssignNAT            *bool                      `json:"assign_nat,omitempty"`
 	LANIPv4Mode          string                     `json:"lan_ipv4_mode,omitempty"`
@@ -319,6 +321,120 @@ func (cfg ContainerConfig) WantsNAT() bool {
 	return cfg.AssignNAT == nil || *cfg.AssignNAT
 }
 
+func (cfg *ContainerConfig) NormalizeCreateNATMappings() error {
+	if cfg == nil {
+		return nil
+	}
+	if !cfg.WantsNAT() {
+		cfg.ExtraPorts = nil
+		cfg.NATPortMappings = nil
+		cfg.ManagementPort = 0
+		cfg.PortMappingCount = 0
+		return nil
+	}
+	if cfg.ManagementPort < 0 || cfg.ManagementPort > 65535 {
+		return fmt.Errorf("management_port must be 1-65535 or 0 for automatic allocation")
+	}
+	if cfg.ManagementPort > 0 && !config.NATPortInRange(cfg.ManagementPort) {
+		start, end := config.NATPortRange()
+		return fmt.Errorf("management_port must be within configured NAT4 range %d-%d", start, end)
+	}
+
+	mappings := append([]config.PortMapping(nil), cfg.NATPortMappings...)
+	if len(mappings) == 0 && len(cfg.ExtraPorts) > 0 {
+		mappings = make([]config.PortMapping, 0, len(cfg.ExtraPorts))
+		for _, port := range cfg.ExtraPorts {
+			mappings = append(mappings, config.PortMapping{
+				HostPort:      port,
+				ContainerPort: port,
+				Protocol:      "tcp",
+			})
+		}
+	}
+	if len(mappings) == 0 {
+		cfg.ExtraPorts = nil
+		if cfg.PortMappingCount < 2 {
+			cfg.PortMappingCount = 2
+		}
+		return nil
+	}
+	if len(mappings) > 63 {
+		return fmt.Errorf("custom NAT port mappings cannot exceed 63")
+	}
+
+	seen := map[string]bool{}
+	if cfg.ManagementPort > 0 {
+		seen[fmt.Sprintf("%d/tcp", cfg.ManagementPort)] = true
+	}
+	for i := range mappings {
+		pm := &mappings[i]
+		pm.HostIP = strings.TrimSpace(pm.HostIP)
+		if pm.HostIP != "" {
+			return fmt.Errorf("nat_port_mappings[%d].host_ip is not supported during creation", i)
+		}
+		if pm.HostPort < 1 || pm.HostPort > 65535 {
+			return fmt.Errorf("nat_port_mappings[%d].host_port must be 1-65535", i)
+		}
+		if !config.NATPortInRange(pm.HostPort) {
+			start, end := config.NATPortRange()
+			return fmt.Errorf("nat_port_mappings[%d].host_port must be within configured NAT4 range %d-%d", i, start, end)
+		}
+		if pm.ContainerPort < 1 || pm.ContainerPort > 65535 {
+			return fmt.Errorf("nat_port_mappings[%d].container_port must be 1-65535", i)
+		}
+		pm.Protocol = strings.ToLower(strings.TrimSpace(pm.Protocol))
+		if pm.Protocol == "" {
+			pm.Protocol = "tcp"
+		}
+		if pm.Protocol != "tcp" && pm.Protocol != "udp" {
+			return fmt.Errorf("nat_port_mappings[%d].protocol must be tcp or udp", i)
+		}
+		key := fmt.Sprintf("%d/%s", pm.HostPort, pm.Protocol)
+		if seen[key] {
+			if pm.HostPort == cfg.ManagementPort && pm.Protocol == "tcp" {
+				return fmt.Errorf("NAT host port mapping %s conflicts with management_port", key)
+			}
+			return fmt.Errorf("duplicate NAT host port mapping: %s", key)
+		}
+		seen[key] = true
+		pm.Description = strings.TrimSpace(pm.Description)
+		if pm.Description == "" {
+			pm.Description = fmt.Sprintf("Port-%d", pm.ContainerPort)
+		}
+	}
+
+	cfg.NATPortMappings = mappings
+	cfg.ExtraPorts = nil
+	cfg.PortMappingCount = len(mappings) + 1
+	return nil
+}
+
+func (cfg ContainerConfig) RequestedNATHostPorts() []int {
+	ports := make([]int, 0, len(cfg.NATPortMappings)+1)
+	if cfg.ManagementPort > 0 {
+		ports = append(ports, cfg.ManagementPort)
+	}
+	for _, pm := range cfg.NATPortMappings {
+		if pm.HostPort > 0 {
+			ports = append(ports, pm.HostPort)
+		}
+	}
+	return ports
+}
+
+func ValidateCreateNATPortAvailability(cfg ContainerConfig) error {
+	candidate := &config.Container{ID: -1}
+	if cfg.ManagementPort > 0 && !HostPortAvailable(candidate, "", cfg.ManagementPort, "tcp") {
+		return fmt.Errorf("NAT management port %d/tcp is already in use", cfg.ManagementPort)
+	}
+	for _, pm := range cfg.NATPortMappings {
+		if !HostPortAvailable(candidate, "", pm.HostPort, pm.Protocol) {
+			return fmt.Errorf("NAT host port %d/%s is already in use", pm.HostPort, pm.Protocol)
+		}
+	}
+	return nil
+}
+
 func (cfg ContainerConfig) WantsLANDHCP() bool {
 	return strings.EqualFold(strings.TrimSpace(cfg.LANIPv4Mode), config.LANIPv4ModeDHCP)
 }
@@ -339,11 +455,8 @@ func (m *Manager) CreateContainer(cfg ContainerConfig) error {
 	if tmpl == nil {
 		return fmt.Errorf("template not found: %s", cfg.TemplateID)
 	}
-	if cfg.WantsNAT() && cfg.PortMappingCount < 2 {
-		cfg.PortMappingCount = 2
-	} else if !cfg.WantsNAT() {
-		cfg.PortMappingCount = 0
-		cfg.ExtraPorts = nil
+	if err := cfg.NormalizeCreateNATMappings(); err != nil {
+		return err
 	}
 	if cfg.SnapshotLimit <= 0 {
 		cfg.SnapshotLimit = config.DefaultSnapshotLimit
@@ -362,6 +475,15 @@ func (m *Manager) CreateContainer(cfg ContainerConfig) error {
 	sshAccess, err := ResolveCreateSSHAccess(cfg)
 	if err != nil {
 		return err
+	}
+	sshPort := 0
+	releaseNATReservation := func() {}
+	if cfg.WantsNAT() {
+		sshPort, releaseNATReservation, err = ReserveCreateNATPorts(cfg)
+		if err != nil {
+			return err
+		}
+		defer releaseNATReservation()
 	}
 
 	// Allocate ID and build LXC name
@@ -443,40 +565,17 @@ func (m *Manager) CreateContainer(cfg ContainerConfig) error {
 
 	sshPassword := sshAccess.Password
 
-	sshPort := 0
 	portMappings := []config.PortMapping{}
 	if cfg.WantsNAT() {
-		sshPort, err = config.AllocateSSHPort()
-		if err != nil {
-			_ = m.cleanupContainerStorage(lxcName)
-			return err
-		}
-
 		// Setup default port mappings (SSH only)
 		portMappings = SetupDefaultPortMappings(sshPort)
 		// NAT4 port mappings should bind to the host IP, not the container's independent public IPv4.
 		tempC := &config.Container{ID: id, PublicIPv4s: publicIPv4s, PortMappings: portMappings}
 
-		extraPorts := cfg.ExtraPorts
-		if len(extraPorts) == 0 && cfg.PortMappingCount > 1 {
-			extraPorts = allocateDefaultEqualPorts(tempC, cfg.PortMappingCount-1)
-		}
-		for _, containerPort := range extraPorts {
-			if containerPort <= 0 {
-				continue
-			}
-			pm, err := normalizePortMapping(tempC, -1, config.PortMapping{
-				ContainerPort: containerPort,
-				HostPort:      containerPort,
-				HostIP:        "",
-				Protocol:      "tcp",
-				Description:   fmt.Sprintf("Port-%d", containerPort),
-			})
-			if err != nil {
-				continue
-			}
-			tempC.PortMappings = append(tempC.PortMappings, pm)
-			portMappings = tempC.PortMappings
+		portMappings, err = SetupCreatePortMappings(tempC, cfg)
+		if err != nil {
+			_ = m.cleanupContainerStorage(lxcName)
+			return err
 		}
 	}
 

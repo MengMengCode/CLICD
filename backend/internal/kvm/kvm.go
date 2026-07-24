@@ -415,11 +415,8 @@ func (m *Manager) CreateContainer(cfg lxc.ContainerConfig) error {
 	}
 	cfg.StoragePoolID = pool.ID
 	m = NewManagerForStoragePool(pool.ID)
-	if cfg.WantsNAT() && cfg.PortMappingCount < 2 {
-		cfg.PortMappingCount = 2
-	} else if !cfg.WantsNAT() {
-		cfg.PortMappingCount = 0
-		cfg.ExtraPorts = nil
+	if err := cfg.NormalizeCreateNATMappings(); err != nil {
+		return err
 	}
 	if cfg.SnapshotLimit <= 0 {
 		cfg.SnapshotLimit = config.DefaultSnapshotLimit
@@ -428,10 +425,19 @@ func (m *Manager) CreateContainer(cfg lxc.ContainerConfig) error {
 		cfg.AllowedImageIDs = []string{cfg.TemplateID}
 		cfg.ImageLimitConfigured = true
 	}
+	managementPort := 0
+	releaseNATReservation := func() {}
+	if cfg.WantsNAT() {
+		managementPort, releaseNATReservation, err = lxc.ReserveCreateNATPorts(cfg)
+		if err != nil {
+			return err
+		}
+		defer releaseNATReservation()
+	}
 
 	id := config.AllocateContainerID()
 	vmName := fmt.Sprintf("vm-%d", id)
-	c, err := m.defineContainer(id, vmName, cfg, true)
+	c, err := m.defineContainer(id, vmName, cfg, true, managementPort)
 	if err != nil {
 		_ = m.cleanupVM(vmName)
 		return err
@@ -440,7 +446,7 @@ func (m *Manager) CreateContainer(cfg lxc.ContainerConfig) error {
 	return nil
 }
 
-func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig, allocatePorts bool) (*config.Container, error) {
+func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig, allocatePorts bool, managementPort int) (*config.Container, error) {
 	image := FindImage(cfg.TemplateID)
 	if image == nil {
 		return nil, fmt.Errorf("KVM image not found: %s", cfg.TemplateID)
@@ -547,9 +553,9 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 	portMappings := []config.PortMapping{}
 	if allocatePorts && cfg.WantsNAT() {
 		cfg.ReportProgress("nat", "分配并配置 NAT 端口")
-		sshPort, err = config.AllocateSSHPort()
-		if err != nil {
-			return nil, err
+		sshPort = managementPort
+		if sshPort <= 0 {
+			return nil, fmt.Errorf("NAT management port was not reserved")
 		}
 		if IsWindowsImage(image.ID) {
 			// Windows: RDP (3389) instead of SSH (22)
@@ -569,23 +575,10 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 			}
 		}
 		tempC := &config.Container{ID: id, PublicIPv4s: publicIPv4s, PortMappings: portMappings}
-		extraPorts := cfg.ExtraPorts
-		if len(extraPorts) == 0 && cfg.PortMappingCount > 1 {
-			extraPorts = allocateDefaultEqualPorts(tempC, cfg.PortMappingCount-1)
+		portMappings, err = lxc.SetupCreatePortMappings(tempC, cfg)
+		if err != nil {
+			return nil, err
 		}
-		for _, port := range extraPorts {
-			if port <= 0 {
-				continue
-			}
-			tempC.PortMappings = append(tempC.PortMappings, config.PortMapping{
-				ContainerPort: port,
-				HostPort:      port,
-				HostIP:        defaultHostIP,
-				Protocol:      "tcp",
-				Description:   fmt.Sprintf("Port-%d", port),
-			})
-		}
-		portMappings = tempC.PortMappings
 	}
 
 	now := time.Now().Format("2006-01-02 15:04:05")
@@ -886,7 +879,7 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...lx
 		}
 		cfg.SSHPassword = sshAccess.Password
 	}
-	next, err := m.defineContainer(id, name, cfg, false)
+	next, err := m.defineContainer(id, name, cfg, false, 0)
 	if err != nil {
 		return err
 	}
@@ -4167,35 +4160,6 @@ func verifyKVMHostKey(c *config.Container, key ssh.PublicKey, save func() error)
 func sshHostKeyFingerprint(key ssh.PublicKey) string {
 	sum := sha256.Sum256(key.Marshal())
 	return hex.EncodeToString(sum[:])
-}
-
-func allocateDefaultEqualPorts(c *config.Container, count int) []int {
-	if count <= 0 {
-		return nil
-	}
-	used := map[int]bool{}
-	// Mark current container's ports
-	for _, pm := range c.PortMappings {
-		used[pm.HostPort] = true
-		used[pm.ContainerPort] = true
-	}
-	// Also mark all other containers' host ports (LXC + KVM)
-	for _, oc := range config.AppConfig.Containers {
-		if oc.ID == c.ID {
-			continue
-		}
-		for _, pm := range oc.PortMappings {
-			used[pm.HostPort] = true
-		}
-	}
-	ports := make([]int, 0, count)
-	start, end := config.NATPortRange()
-	for next := start; next <= end && len(ports) < count; next++ {
-		if !used[next] {
-			ports = append(ports, next)
-		}
-	}
-	return ports
 }
 
 func runStdin(command string, stdin []byte, args ...string) error {

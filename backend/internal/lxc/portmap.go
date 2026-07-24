@@ -6,8 +6,15 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 
 	"clicd/internal/config"
+)
+
+var (
+	createNATReservationMu     sync.Mutex
+	createNATReservationNextID uint64
+	createNATReservations      = map[uint64][]config.PortMapping{}
 )
 
 // ApplyPortMappings applies iptables DNAT rules for a container's port mappings
@@ -507,6 +514,96 @@ func normalizePortMapping(c *config.Container, skipIndex int, pm config.PortMapp
 		}
 	}
 	return pm, nil
+}
+
+// SetupCreatePortMappings appends validated custom or automatically allocated
+// mappings to a container's management port mapping.
+func SetupCreatePortMappings(c *config.Container, cfg ContainerConfig) ([]config.PortMapping, error) {
+	if c == nil {
+		return nil, fmt.Errorf("container is required")
+	}
+	requested := append([]config.PortMapping(nil), cfg.NATPortMappings...)
+	if len(requested) == 0 && cfg.PortMappingCount > 1 {
+		for _, port := range allocateDefaultEqualPorts(c, cfg.PortMappingCount-1) {
+			requested = append(requested, config.PortMapping{
+				ContainerPort: port,
+				HostPort:      port,
+				Protocol:      "tcp",
+				Description:   fmt.Sprintf("Port-%d", port),
+			})
+		}
+	}
+	for _, mapping := range requested {
+		pm, err := normalizePortMapping(c, -1, mapping)
+		if err != nil {
+			return nil, err
+		}
+		c.PortMappings = append(c.PortMappings, pm)
+	}
+	return c.PortMappings, nil
+}
+
+// ReserveCreateNATPorts keeps concurrent create tasks from selecting each
+// other's custom or management ports before their containers are persisted.
+func ReserveCreateNATPorts(cfg ContainerConfig) (int, func(), error) {
+	if !cfg.WantsNAT() {
+		return 0, func() {}, nil
+	}
+
+	createNATReservationMu.Lock()
+	defer createNATReservationMu.Unlock()
+
+	if err := ValidateCreateNATPortAvailability(cfg); err != nil {
+		return 0, nil, err
+	}
+	requestedReservations := append([]config.PortMapping(nil), cfg.NATPortMappings...)
+	if cfg.ManagementPort > 0 {
+		requestedReservations = append(requestedReservations, config.PortMapping{
+			HostPort: cfg.ManagementPort,
+			Protocol: "tcp",
+		})
+	}
+	for _, requested := range requestedReservations {
+		for _, reservations := range createNATReservations {
+			for _, reserved := range reservations {
+				if requested.HostPort == reserved.HostPort && protocolsOverlap(requested.Protocol, reserved.Protocol) {
+					return 0, nil, fmt.Errorf("NAT host port %d/%s is reserved by another create task", requested.HostPort, requested.Protocol)
+				}
+			}
+		}
+	}
+
+	excluded := cfg.RequestedNATHostPorts()
+	for _, reservations := range createNATReservations {
+		for _, reserved := range reservations {
+			excluded = append(excluded, reserved.HostPort)
+		}
+	}
+	managementPort := cfg.ManagementPort
+	if managementPort == 0 {
+		var err error
+		managementPort, err = config.AllocateSSHPortExcluding(excluded)
+		if err != nil {
+			return 0, nil, err
+		}
+	}
+
+	createNATReservationNextID++
+	reservationID := createNATReservationNextID
+	reservations := make([]config.PortMapping, 0, len(cfg.NATPortMappings)+1)
+	reservations = append(reservations, config.PortMapping{HostPort: managementPort, Protocol: "tcp"})
+	reservations = append(reservations, cfg.NATPortMappings...)
+	createNATReservations[reservationID] = reservations
+
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			createNATReservationMu.Lock()
+			delete(createNATReservations, reservationID)
+			createNATReservationMu.Unlock()
+		})
+	}
+	return managementPort, release, nil
 }
 
 func allocateDefaultEqualPorts(c *config.Container, count int) []int {

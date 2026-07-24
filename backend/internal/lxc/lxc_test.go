@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"clicd/internal/config"
 )
 
 func TestRootfsCommandAddsSeparatorForAllowedCommand(t *testing.T) {
@@ -24,6 +26,158 @@ func TestRootfsCommandAddsSeparatorForAllowedCommand(t *testing.T) {
 	want := []string{"chroot", "--", rootfs, "chpasswd"}
 	if !reflect.DeepEqual(cmd.Args, want) {
 		t.Fatalf("cmd.Args = %#v, want %#v", cmd.Args, want)
+	}
+}
+
+func TestNormalizeCreateNATMappingsSupportsDifferentHostAndContainerPorts(t *testing.T) {
+	previous := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = previous })
+	config.AppConfig = &config.ClicdConfig{NATPortStart: 20000, NATPortEnd: 65535}
+
+	cfg := ContainerConfig{
+		PortMappingCount: 2,
+		NATPortMappings: []config.PortMapping{{
+			HostPort:      30080,
+			ContainerPort: 80,
+			Protocol:      "TCP",
+		}},
+	}
+	if err := cfg.NormalizeCreateNATMappings(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PortMappingCount != 2 || len(cfg.NATPortMappings) != 1 {
+		t.Fatalf("normalized config = %+v", cfg)
+	}
+	mapping := cfg.NATPortMappings[0]
+	if mapping.HostPort != 30080 || mapping.ContainerPort != 80 || mapping.Protocol != "tcp" {
+		t.Fatalf("normalized mapping = %+v", mapping)
+	}
+
+	container := &config.Container{
+		ID: -1,
+		PortMappings: []config.PortMapping{{
+			HostPort:      22000,
+			ContainerPort: 22,
+			Protocol:      "tcp",
+			Description:   "SSH",
+		}},
+	}
+	mappings, err := SetupCreatePortMappings(container, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != 2 || mappings[1].HostPort != 30080 || mappings[1].ContainerPort != 80 {
+		t.Fatalf("created mappings = %+v", mappings)
+	}
+}
+
+func TestNormalizeCreateNATMappingsKeepsLegacyExtraPortsCompatible(t *testing.T) {
+	previous := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = previous })
+	config.AppConfig = &config.ClicdConfig{NATPortStart: 20000, NATPortEnd: 65535}
+
+	cfg := ContainerConfig{ExtraPorts: []int{30080, 30443}}
+	if err := cfg.NormalizeCreateNATMappings(); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ExtraPorts) != 0 || len(cfg.NATPortMappings) != 2 {
+		t.Fatalf("legacy ports were not converted: %+v", cfg)
+	}
+	for _, mapping := range cfg.NATPortMappings {
+		if mapping.HostPort != mapping.ContainerPort {
+			t.Fatalf("legacy mapping changed semantics: %+v", mapping)
+		}
+	}
+}
+
+func TestNormalizeCreateNATMappingsRejectsDuplicateHostPort(t *testing.T) {
+	previous := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = previous })
+	config.AppConfig = &config.ClicdConfig{NATPortStart: 20000, NATPortEnd: 65535}
+
+	cfg := ContainerConfig{NATPortMappings: []config.PortMapping{
+		{HostPort: 30080, ContainerPort: 80, Protocol: "tcp"},
+		{HostPort: 30080, ContainerPort: 8080, Protocol: "tcp"},
+	}}
+	if err := cfg.NormalizeCreateNATMappings(); err == nil {
+		t.Fatal("duplicate host port was accepted")
+	}
+}
+
+func TestNormalizeCreateNATMappingsRejectsManagementPortConflict(t *testing.T) {
+	previous := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = previous })
+	config.AppConfig = &config.ClicdConfig{NATPortStart: 20000, NATPortEnd: 65535}
+
+	cfg := ContainerConfig{
+		ManagementPort: 30022,
+		NATPortMappings: []config.PortMapping{{
+			HostPort:      30022,
+			ContainerPort: 8080,
+			Protocol:      "tcp",
+		}},
+	}
+	if err := cfg.NormalizeCreateNATMappings(); err == nil || !strings.Contains(err.Error(), "management_port") {
+		t.Fatalf("management port conflict returned %v", err)
+	}
+}
+
+func TestReserveCreateNATPortsProtectsConcurrentTasks(t *testing.T) {
+	previous := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = previous })
+	config.AppConfig = &config.ClicdConfig{
+		NATPortStart: 20000,
+		NATPortEnd:   65535,
+		NextSSHPort:  22000,
+	}
+
+	createNATReservationMu.Lock()
+	createNATReservations = map[uint64][]config.PortMapping{}
+	createNATReservationMu.Unlock()
+	t.Cleanup(func() {
+		createNATReservationMu.Lock()
+		createNATReservations = map[uint64][]config.PortMapping{}
+		createNATReservationMu.Unlock()
+	})
+
+	cfg := ContainerConfig{NATPortMappings: []config.PortMapping{{
+		HostPort:      22000,
+		ContainerPort: 80,
+		Protocol:      "tcp",
+	}}}
+	if err := cfg.NormalizeCreateNATMappings(); err != nil {
+		t.Fatal(err)
+	}
+
+	managementPort, release, err := ReserveCreateNATPorts(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if managementPort == 22000 {
+		t.Fatal("management port collided with the requested custom host port")
+	}
+	if _, _, err := ReserveCreateNATPorts(cfg); err == nil {
+		t.Fatal("concurrent task reserved an already reserved custom host port")
+	}
+
+	release()
+	if _, releaseAgain, err := ReserveCreateNATPorts(cfg); err != nil {
+		t.Fatalf("released custom host port remained reserved: %v", err)
+	} else {
+		releaseAgain()
+	}
+
+	explicit := ContainerConfig{ManagementPort: 30022}
+	if err := explicit.NormalizeCreateNATMappings(); err != nil {
+		t.Fatal(err)
+	}
+	if port, releaseExplicit, err := ReserveCreateNATPorts(explicit); err != nil {
+		t.Fatal(err)
+	} else {
+		defer releaseExplicit()
+		if port != explicit.ManagementPort {
+			t.Fatalf("reserved management port = %d, want %d", port, explicit.ManagementPort)
+		}
 	}
 }
 

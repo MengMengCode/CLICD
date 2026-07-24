@@ -44,3 +44,21 @@ func TestAllocateSSHPortErrorsWhenConfiguredRangeIsFull(t *testing.T) {
 		t.Fatalf("expected exhausted NAT range error, got port %d", port)
 	}
 }
+
+func TestAllocateSSHPortExcludingRequestedMappings(t *testing.T) {
+	previous := AppConfig
+	t.Cleanup(func() { AppConfig = previous })
+	AppConfig = &ClicdConfig{
+		NATPortStart: 32000,
+		NATPortEnd:   32002,
+		NextSSHPort:  32000,
+	}
+
+	port, err := AllocateSSHPortExcluding([]int{32000, 32001})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if port != 32002 {
+		t.Fatalf("allocated port = %d, want 32002", port)
+	}
+}

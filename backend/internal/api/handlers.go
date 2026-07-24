@@ -274,11 +274,13 @@ func createContainer(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Port mapping count cannot be negative"})
 		return
 	}
-	if cfg.WantsNAT() && cfg.PortMappingCount < 2 {
-		cfg.PortMappingCount = 2
-	} else if !cfg.WantsNAT() {
-		cfg.PortMappingCount = 0
-		cfg.ExtraPorts = nil
+	if err := cfg.NormalizeCreateNATMappings(); err != nil {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: err.Error()})
+		return
+	}
+	if err := lxc.ValidateCreateNATPortAvailability(cfg); err != nil {
+		jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: err.Error()})
+		return
 	}
 	if cfg.PortMappingCount > 64 {
 		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Port mapping count cannot exceed 64"})

@@ -161,6 +161,8 @@ export interface CreateContainerRequest {
   io_read_mbps: number
   io_write_mbps: number
   extra_ports: number[]
+  nat_port_mappings?: PortMapping[]
+  management_port?: number
   port_mapping_count: number
   assign_nat?: boolean
   lan_ipv4_mode?: string

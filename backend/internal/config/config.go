@@ -1728,9 +1728,20 @@ func normalizeNATPortRangeDefaults() bool {
 
 // AllocateSSHPort allocates a new SSH port, skipping ports already used by any container
 func AllocateSSHPort() (int, error) {
+	return AllocateSSHPortExcluding(nil)
+}
+
+// AllocateSSHPortExcluding allocates a management port while reserving
+// user-requested NAT host ports for the container being created.
+func AllocateSSHPortExcluding(excluded []int) (int, error) {
 	allocationMu.Lock()
 	defer allocationMu.Unlock()
 	used := collectAllHostPorts()
+	for _, port := range excluded {
+		if port > 0 {
+			used[port] = true
+		}
+	}
 	start, end := NATPortRange()
 	port := AppConfig.NextSSHPort
 	if port < start || port > end {

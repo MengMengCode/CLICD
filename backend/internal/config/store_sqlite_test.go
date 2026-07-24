@@ -63,7 +63,7 @@ func TestSQLiteConfigMigratesLegacyJSONAndPersists(t *testing.T) {
 			ContainerName: "ct2",
 			Status:        "pending",
 			CreatedAt:     "2026-06-07 17:29:02",
-			Config:        `{"name":"ct2","template_id":"debian-12","vcpu":1,"ram_mb":512,"disk_gb":5,"extra_ports":[80,443],"assign_ipv6":true}`,
+			Config:        `{"name":"ct2","template_id":"debian-12","vcpu":1,"ram_mb":512,"disk_gb":5,"extra_ports":[80,443],"nat_port_mappings":[{"host_port":30080,"container_port":80,"protocol":"tcp","description":"HTTP"}],"management_port":30022,"assign_ipv6":true}`,
 		}},
 		EnabledImages: []string{"debian-12"},
 		Snapshots: []Snapshot{{
@@ -92,6 +92,12 @@ func TestSQLiteConfigMigratesLegacyJSONAndPersists(t *testing.T) {
 	}
 	if len(cfg.Tasks) != 1 || !strings.Contains(cfg.Tasks[0].Config, `"extra_ports":[80,443]`) {
 		t.Fatalf("task config was not restored from sqlite columns: %+v", cfg.Tasks)
+	}
+	if !strings.Contains(cfg.Tasks[0].Config, `"nat_port_mappings":[{"host_port":30080,"container_port":80`) {
+		t.Fatalf("task NAT mappings were not restored from sqlite: %+v", cfg.Tasks)
+	}
+	if !strings.Contains(cfg.Tasks[0].Config, `"management_port":30022`) {
+		t.Fatalf("task management port was not restored from sqlite: %+v", cfg.Tasks)
 	}
 	if cfg.TaskConcurrency != DefaultTaskConcurrency {
 		t.Fatalf("legacy task concurrency = %d, want default %d", cfg.TaskConcurrency, DefaultTaskConcurrency)

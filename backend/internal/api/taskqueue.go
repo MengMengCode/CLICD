@@ -750,6 +750,7 @@ func HandleBatchCreate(w http.ResponseWriter, r *http.Request) {
 
 	activeCreateNames := globalQueue.ActiveCreateNames()
 	requestNames := make(map[string]bool)
+	requestNATPorts := make(map[string]string)
 	for i := range req.Containers {
 		name := strings.TrimSpace(req.Containers[i].Name)
 		req.Containers[i].Name = name
@@ -806,11 +807,29 @@ func HandleBatchCreate(w http.ResponseWriter, r *http.Request) {
 			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: name + ": port mapping count cannot be negative"})
 			return
 		}
-		if req.Containers[i].WantsNAT() && req.Containers[i].PortMappingCount < 2 {
-			req.Containers[i].PortMappingCount = 2
-		} else if !req.Containers[i].WantsNAT() {
-			req.Containers[i].PortMappingCount = 0
-			req.Containers[i].ExtraPorts = nil
+		if err := req.Containers[i].NormalizeCreateNATMappings(); err != nil {
+			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: name + ": " + err.Error()})
+			return
+		}
+		if err := lxc.ValidateCreateNATPortAvailability(req.Containers[i]); err != nil {
+			jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: name + ": " + err.Error()})
+			return
+		}
+		if req.Containers[i].ManagementPort > 0 {
+			key := fmt.Sprintf("%d/tcp", req.Containers[i].ManagementPort)
+			if owner := requestNATPorts[key]; owner != "" {
+				jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: fmt.Sprintf("%s: NAT management port %s is also requested by %s", name, key, owner)})
+				return
+			}
+			requestNATPorts[key] = name
+		}
+		for _, mapping := range req.Containers[i].NATPortMappings {
+			key := fmt.Sprintf("%d/%s", mapping.HostPort, mapping.Protocol)
+			if owner := requestNATPorts[key]; owner != "" {
+				jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: fmt.Sprintf("%s: NAT host port %s is also requested by %s", name, key, owner)})
+				return
+			}
+			requestNATPorts[key] = name
 		}
 		if req.Containers[i].PortMappingCount > 64 {
 			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: name + ": port mapping count cannot exceed 64"})

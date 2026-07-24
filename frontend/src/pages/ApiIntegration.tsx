@@ -763,7 +763,16 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
     io_speed_mbps: 0,
     io_read_mbps: 80,
     io_write_mbps: 30,
-    extra_ports: [8080],
+    extra_ports: [],
+    nat_port_mappings: [
+      {
+        host_port: 30080,
+        container_port: 80,
+        protocol: 'tcp',
+        description: 'HTTP',
+      },
+    ],
+    management_port: 30022,
     port_mapping_count: 2,
     assign_nat: true,
     lan_ipv4_mode: '',
@@ -913,7 +922,16 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
         ram_mb: 512,
         disk_gb: 10,
         assign_nat: true,
+        management_port: 30022,
         port_mapping_count: 2,
+        nat_port_mappings: [
+          {
+            host_port: 30080,
+            container_port: 80,
+            protocol: 'tcp',
+            description: 'HTTP',
+          },
+        ],
         snapshot_limit: 1,
         assign_ipv4: false,
         ipv4_count: 1,
@@ -1338,6 +1356,8 @@ function endpointNoteFor(key: string) {
   const notes: string[] = []
   if (key === 'POST /api/v1/containers') {
     notes.push('Linux container creation supports ssh_auth_mode=auto_password|password|key. Public IPv4, IPv6, and NAT can be configured with assign_nat, assign_ipv4, and assign_ipv6.')
+    notes.push('Set management_port to choose the public/source port for SSH (target 22) or Windows RDP (target 3389). Omit it or pass 0 for automatic allocation.')
+    notes.push('For other custom NAT rules, use nat_port_mappings with host_port (public/source port), container_port (target port), and protocol=tcp|udp. extra_ports remains accepted for compatibility and maps each port to the same port inside the container.')
     notes.push('Supports independent upload/download bandwidth limits and read/write I/O limits. network_bw_mbps and io_speed_mbps are deprecated symmetric compatibility aliases. New integrations should use network_down_mbps, network_up_mbps, io_read_mbps, and io_write_mbps.')
     notes.push('storage_pool_id selects an enabled disk for the runtime. For an LXC with an independent LAN address, set lan_ipv4_mode=dhcp or static and set assign_nat=false; static mode also requires lan_ipv4_address, lan_ipv4_prefix_len, and lan_ipv4_gateway.')
     notes.push('allowed_image_ids and image_limit_configured define which downloaded images the container owner may use for reinstall. Include the initial template ID when it should remain reinstallable.')
@@ -1347,6 +1367,7 @@ function endpointNoteFor(key: string) {
   }
   if (key === 'POST /api/v1/batch-create') {
     notes.push('Each containers[] item in batch creation supports the same storage, network, image allowlist, and SSH authentication fields as POST /api/v1/containers.')
+    notes.push('Custom management_port and NAT host_port values must be unique across the batch. The panel shifts each source-port group for later containers while keeping target ports unchanged; direct API clients should submit the expanded values explicitly.')
   }
   if (key === 'PUT /api/v1/containers/{id}/resource-limit') {
     notes.push('Supports independent download/upload bandwidth limits and read/write I/O limits. Omitted fields keep their current values, and explicitly passing 0 makes that direction unlimited. network_bw_mbps and io_speed_mbps are deprecated symmetric compatibility aliases.')
