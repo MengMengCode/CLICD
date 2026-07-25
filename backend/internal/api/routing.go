@@ -22,6 +22,11 @@ type nat4PortRange struct {
 	End   int `json:"end"`
 }
 
+type nat4Networks struct {
+	LXC config.NATNetwork `json:"lxc"`
+	KVM config.NATNetwork `json:"kvm"`
+}
+
 type nat4Route struct {
 	ContainerID   int    `json:"container_id"`
 	ContainerName string `json:"container_name"`
@@ -72,6 +77,8 @@ type ipv6Route struct {
 type routingResponse struct {
 	NAT4                routeCapacity        `json:"nat4"`
 	NAT4PortRange       nat4PortRange        `json:"nat4_port_range"`
+	NAT4NextPort        int                  `json:"nat4_next_port"`
+	NAT4Networks        nat4Networks         `json:"nat4_networks"`
 	IPv4                routeCapacity        `json:"ipv4"`
 	LANDHCP             routeCapacity        `json:"lan_dhcp"`
 	IPv6                routeCapacity        `json:"ipv6"`
@@ -237,6 +244,7 @@ func handleRoutingGet(w http.ResponseWriter, r *http.Request) {
 	if nat4Remaining < 0 {
 		nat4Remaining = 0
 	}
+	nat4NextPort, _ := config.PreviewSSHPortExcluding(nil)
 
 	prefixes := lxc.DetectPublicIPv6Prefixes()
 	hostPublicIPv4 := lxc.DetectPublicIPv4()
@@ -261,6 +269,11 @@ func handleRoutingGet(w http.ResponseWriter, r *http.Request) {
 			NAT4PortRange: nat4PortRange{
 				Start: nat4StartPort,
 				End:   nat4EndPort,
+			},
+			NAT4NextPort: nat4NextPort,
+			NAT4Networks: nat4Networks{
+				LXC: config.LXCNATNetwork(),
+				KVM: config.KVMNATNetwork(),
 			},
 			IPv4: routeCapacity{
 				Used:      ipv4Used,

@@ -62,6 +62,7 @@ export default function Routing() {
   const ipv6Prefixes = routing?.ipv6_prefixes || []
   const ipv6Assignments = routing?.ipv6_assignments || []
   const nat4Range = routing?.nat4_port_range || { start: 20000, end: 65535 }
+  const nat4Networks = routing?.nat4_networks
   const defaultIPv4Interface = routing?.host_public_ipv4?.interface || publicIPv4s[0]?.interface || 'eth0'
   const defaultIPv4Gateway = routing?.host_public_ipv4?.gateway || publicIPv4s[0]?.gateway || ''
   const defaultIPv4PrefixLen = routing?.host_public_ipv4?.prefix_len || publicIPv4s[0]?.prefix_len || 32
@@ -287,7 +288,10 @@ export default function Routing() {
           used={routing?.nat4.used || 0}
           label={text.remainingTotal}
           usedLabel={text.used}
-          detail={formatNATRange(nat4Range, language)}
+          detail={[
+            formatNATRange(nat4Range, language),
+            nat4Networks ? `LXC ${nat4Networks.lxc.subnet} · KVM ${nat4Networks.kvm.subnet}` : '',
+          ].filter(Boolean).join(' · ')}
           action={
             <button onClick={startEditNAT4} className="rounded p-1.5 text-gray-500 hover:bg-gray-100 hover:text-black" title={text.editNAT4Range}>
               <Pencil className="h-4 w-4" />

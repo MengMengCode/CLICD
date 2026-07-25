@@ -54,6 +54,7 @@ var cliTranslations = map[string]string{
 	"导入现有 LXC 容器":       "Import existing LXC containers",
 	"检查并升级 CLICD":       "Check and upgrade CLICD",
 	"卸载 CLICD":          "Uninstall CLICD",
+	"面板访问白名单":           "Panel access allowlist",
 	"系统信息":              "System info",
 	"退出":                "Exit",
 	"获取容器列表失败":          "Failed to get container list",
@@ -175,10 +176,26 @@ var cliTranslations = map[string]string{
 	"LXC 版本":            "LXC version",
 	"暂无可用容器":            "No available containers",
 	"忽略无效端口":            "Ignoring invalid port",
-	"？":                 "? ",
-	"。":                 ". ",
-	"，":                 ", ",
-	"：":                 ": ",
+	"面板访问来源策略":          "Panel access source policy",
+	"当前状态":              "Current status",
+	"已启用":               "enabled",
+	"已关闭":               "disabled",
+	"允许来源":              "Allowed sources",
+	"可信代理":              "Trusted proxies",
+	"启用或修改白名单":          "Enable or update allowlist",
+	"关闭白名单限制":           "Disable allowlist",
+	"取消":                "Cancel",
+	"允许的 IP/CIDR，多个用逗号分隔":      "Allowed IP/CIDR values, comma-separated",
+	"可信代理 IP/CIDR，多个用逗号分隔，可留空": "Trusted proxy IP/CIDR values, comma-separated; optional",
+	"白名单配置无效":                  "Invalid allowlist configuration",
+	"保存访问来源策略失败":               "Failed to save access source policy",
+	"面板访问白名单已保存。":              "Panel access allowlist saved.",
+	"面板访问白名单已关闭。":              "Panel access allowlist disabled.",
+	"至少填写一个允许的 IP 或网段。":        "Enter at least one allowed IP address or network.",
+	"？": "? ",
+	"。": ". ",
+	"，": ", ",
+	"：": ": ",
 }
 
 // Run starts the CLI interface.
@@ -193,7 +210,7 @@ func Run() {
 		refreshCLILanguage()
 		clearScreen()
 		printMenu()
-		cliPrint("\n请选择操作 [1-12,l,0/q]: ")
+		cliPrint("\n请选择操作 [1-13,l,0/q]: ")
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
 
@@ -246,6 +263,10 @@ func Run() {
 			clearScreen()
 			cliUninstall(reader)
 			return
+		case "13":
+			clearScreen()
+			cliConfigurePanelAccess(reader)
+			waitEnter(reader)
 		case "0":
 			clearScreen()
 			cliShowInfo()
@@ -293,9 +314,78 @@ func printMenu() {
 	cliPrintln("  10. 导入现有 LXC 容器")
 	cliPrintln("  11. 检查并升级 CLICD")
 	cliPrintln("  12. 卸载 CLICD")
+	cliPrintln("  13. 面板访问白名单")
 	cliPrintln("  0. 系统信息")
 	cliPrintln("  l. 切换语言")
 	cliPrintln("  q. 退出")
+}
+
+func cliConfigurePanelAccess(reader *bufio.Reader) {
+	cliPrintf("\n--- %s ---\n", cliT("面板访问来源策略"))
+	policy := config.AppConfig.PanelAccessPolicy
+	status := cliT("已关闭")
+	if policy.Enabled {
+		status = cliT("已启用")
+	}
+	cliPrintf("%s: %s\n", cliT("当前状态"), status)
+	cliPrintf("%s: %s\n", cliT("允许来源"), strings.Join(policy.AllowedSources, ", "))
+	cliPrintf("%s: %s\n", cliT("可信代理"), strings.Join(policy.TrustedProxies, ", "))
+	cliPrintf("\n  1. %s\n", cliT("启用或修改白名单"))
+	cliPrintf("  2. %s\n", cliT("关闭白名单限制"))
+	cliPrintf("  0. %s\n", cliT("取消"))
+
+	choice := promptString(reader, "请选择操作", "0")
+	next := policy
+	switch strings.TrimSpace(choice) {
+	case "1":
+		allowed := promptString(reader, "允许的 IP/CIDR，多个用逗号分隔", strings.Join(policy.AllowedSources, ","))
+		allowedSources := splitPanelAccessEntries(allowed)
+		if len(allowedSources) == 0 {
+			cliPrintln("至少填写一个允许的 IP 或网段。")
+			return
+		}
+		trusted := promptString(reader, "可信代理 IP/CIDR，多个用逗号分隔，可留空", strings.Join(policy.TrustedProxies, ","))
+		next = config.PanelAccessPolicy{
+			Enabled:        true,
+			AllowedSources: allowedSources,
+			TrustedProxies: splitPanelAccessEntries(trusted),
+		}
+	case "2":
+		next.Enabled = false
+	case "0", "":
+		cliPrintln("已取消")
+		return
+	default:
+		cliPrintln("无效选择")
+		return
+	}
+
+	normalized, err := config.NormalizePanelAccessPolicy(next)
+	if err != nil {
+		cliPrintf("%s: %v\n", cliT("白名单配置无效"), err)
+		return
+	}
+	previous := config.AppConfig.PanelAccessPolicy
+	config.AppConfig.PanelAccessPolicy = normalized
+	if err := config.SaveConfig(); err != nil {
+		config.AppConfig.PanelAccessPolicy = previous
+		cliPrintf("%s: %v\n", cliT("保存访问来源策略失败"), err)
+		return
+	}
+	if normalized.Enabled {
+		cliPrintln("面板访问白名单已保存。")
+	} else {
+		cliPrintln("面板访问白名单已关闭。")
+	}
+	if isWebPanelRunning() {
+		restartWebPanelForConfigChange()
+	}
+}
+
+func splitPanelAccessEntries(value string) []string {
+	return strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	})
 }
 
 func cliSwitchLanguage(reader *bufio.Reader) {
@@ -1244,8 +1334,8 @@ func removeCLICDNATRules() {
 				break
 			}
 		}
-		deleteNATRule("POSTROUTING", "-s", "10.0.3.0/24", "-o", "eth+", "-j", "MASQUERADE")
-		deleteNATRule("POSTROUTING", "-s", "192.168.122.0/24", "-o", "eth+", "-j", "MASQUERADE")
+		deleteNATRule("POSTROUTING", "-s", config.LXCNATNetwork().Subnet, "-o", "eth+", "-j", "MASQUERADE")
+		deleteNATRule("POSTROUTING", "-s", config.KVMNATNetwork().Subnet, "-o", "eth+", "-j", "MASQUERADE")
 	}
 }
 

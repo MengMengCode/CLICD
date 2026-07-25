@@ -191,6 +191,26 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
 | `disabled` | 是否禁用该 Key。 |
 | `container_uuids` | 可选；限制该 Key 只能访问指定容器。 |
 
+## 面板访问来源策略
+
+`GET /api/v1/access-policy` 读取面板访问白名单，`PUT /api/v1/access-policy` 更新策略。两者均需要 `admin:access` 权限。策略覆盖面板页面、登录入口和全部 API。
+
+```json
+{
+  "enabled": true,
+  "allowed_sources": [
+    "203.0.113.10",
+    "192.168.1.0/24",
+    "2001:db8::/32"
+  ],
+  "trusted_proxies": [
+    "127.0.0.1"
+  ]
+}
+```
+
+`allowed_sources` 和 `trusted_proxies` 均支持 IPv4、IPv6 及 CIDR。只有直接连接来源命中 `trusted_proxies` 时，后端才会使用 `X-Forwarded-For`、`X-Real-IP` 或 `CF-Connecting-IP`；其他客户端伪造这些请求头不会绕过白名单。启用策略时至少要配置一个允许来源，且接口会拒绝排除当前管理来源的配置。本机回环直连保留为 CLI/SSH 故障恢复通道。
+
 ## Python 示例
 
 获取容器列表：
@@ -302,6 +322,8 @@ print(resp.json())
 | GET | `/api/v1/templates` | 模板列表 |
 | GET | `/api/v1/images` | 镜像管理列表 |
 | GET | `/api/v1/images/enabled` | 已启用且已下载的镜像；支持 `type=lxc\|kvm` |
+| POST | `/api/v1/images/custom` | 添加第三方 LXC/KVM 镜像源 |
+| DELETE | `/api/v1/images/custom` | 移除第三方 LXC/KVM 镜像源及缓存 |
 | POST | `/api/v1/images/download` | 下载镜像 |
 | POST | `/api/v1/images/cancel` | 取消镜像下载 |
 | DELETE | `/api/v1/images/delete` | 删除镜像缓存 |

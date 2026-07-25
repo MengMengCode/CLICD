@@ -27,6 +27,7 @@ func main() {
 	isServerMode := false
 	isCliMode := false
 	noWebAutostart := false
+	isAccessPolicyCommand := len(os.Args) > 1 && os.Args[1] == "access-policy"
 	for _, arg := range os.Args[1:] {
 		if arg == "server" || arg == "-s" || arg == "--server" {
 			isServerMode = true
@@ -47,6 +48,14 @@ func main() {
 		os.Exit(1)
 	}
 	_ = cfg
+
+	if isAccessPolicyCommand {
+		if err := cli.RunAccessPolicyCommand(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "Access policy error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if isServerMode || (!isTerminal && !isCliMode) {
 		installShutdownStateCapture()

@@ -17,6 +17,8 @@ CLICD 提供一键安装脚本。脚本默认安装 GitHub Releases 的最新版
 curl -fsSL https://raw.githubusercontent.com/MengMengCode/CLICD/main/install.sh | sudo sh
 ```
 
+安装器会分别询问 LXC 与 KVM 的 NAT 私网网段。直接回车时，脚本会扫描宿主机路由、网卡、网桥和 libvirt 网络，自动选择未冲突的 RFC1918 `/24` 网段；也可以输入 `172.28.40.0/24` 这类 CIDR。非交互安装可设置 `CLICD_LXC_SUBNET` 和 `CLICD_KVM_SUBNET`。
+
 脚本当前默认使用 `CLICD_VERSION=latest`，会按宿主架构下载 `releases/latest` 对应的 `clicd-linux-amd64.tar.gz` 或 `clicd-linux-arm64.tar.gz`。
 
 ## 安装指定版本

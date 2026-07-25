@@ -199,6 +199,8 @@ const endpointGroups: Array<{ title: string; endpoints: EndpointTuple[] }> = [
       ['GET', '/api/v1/templates', '模板列表'],
       ['GET', '/api/v1/images', '镜像管理列表'],
       ['GET', '/api/v1/images/enabled?type=lxc&container={id}', '可用于创建或重装的已启用镜像'],
+      ['POST', '/api/v1/images/custom', '添加第三方 LXC/KVM 镜像源'],
+      ['DELETE', '/api/v1/images/custom', '移除第三方 LXC/KVM 镜像源'],
       ['POST', '/api/v1/images/download', '下载镜像'],
       ['POST', '/api/v1/images/cancel', '取消镜像下载'],
       ['DELETE', '/api/v1/images/delete', '删除镜像缓存'],
@@ -228,6 +230,8 @@ const endpointGroups: Array<{ title: string; endpoints: EndpointTuple[] }> = [
       ['PUT', '/api/v1/ssl', '更新 SSL 配置'],
       ['GET', '/api/v1/webssh-origins', 'WebSSH/VNC Origin 白名单'],
       ['PUT', '/api/v1/webssh-origins', '更新 WebSSH/VNC Origin 白名单'],
+      ['GET', '/api/v1/access-policy', '面板访问来源策略'],
+      ['PUT', '/api/v1/access-policy', '更新面板访问来源策略'],
       ['GET', '/api/v1/language', '面板语言'],
       ['PUT', '/api/v1/language', '更新面板语言'],
     ],
@@ -845,6 +849,18 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
     time: '03:00',
   },
   'PUT /api/v1/containers/{id}/snapshots/quota': { snapshot_limit: 2 },
+  'POST /api/v1/images/custom': {
+    type: 'kvm',
+    name: 'Custom Ubuntu Cloud',
+    description: 'Private mirror image',
+    distro: 'ubuntu',
+    release: 'noble',
+    arch: 'amd64',
+    url: 'https://images.example.com/ubuntu-noble.qcow2',
+    provisioner: 'linux-cloud-init',
+    sha256: '',
+  },
+  'DELETE /api/v1/images/custom': { id: 'custom-kvm-a1b2c3d4e5' },
   'POST /api/v1/images/download': { template_id: 'debian-bookworm' },
   'POST /api/v1/images/cancel': { template_id: 'debian-bookworm' },
   'DELETE /api/v1/images/delete': { template_id: 'debian-bookworm' },
@@ -872,6 +888,11 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
   },
   'PUT /api/v1/webssh-origins': {
     origins: ['https://panel.example.com'],
+  },
+  'PUT /api/v1/access-policy': {
+    enabled: true,
+    allowed_sources: ['203.0.113.10', '192.168.1.0/24', '2001:db8::/32'],
+    trusted_proxies: ['127.0.0.1'],
   },
   'PUT /api/v1/language': { language: 'zh' },
   'PUT /api/v1/routing': {
@@ -1027,6 +1048,11 @@ const responseSamples: Record<string, unknown> = {
     data: {
       nat4: { used: 62, remaining: '45474', total: '45536' },
       nat4_port_range: { start: 20000, end: 65535 },
+      nat4_next_port: 22005,
+      nat4_networks: {
+        lxc: { subnet: '10.0.3.0/24', gateway: '10.0.3.1', netmask: '255.255.255.0', dhcp_start: '10.0.3.2', dhcp_end: '10.0.3.254', dhcp_max: 253, prefix_bits: 24 },
+        kvm: { subnet: '192.168.122.0/24', gateway: '192.168.122.1', netmask: '255.255.255.0', dhcp_start: '192.168.122.2', dhcp_end: '192.168.122.254', dhcp_max: 253, prefix_bits: 24 },
+      },
       ipv4: { used: 1, remaining: '3', total: '4' },
       ipv6: { used: 31, remaining: 'large', total: 'large' },
       public_ipv4_addresses: [{ address: '203.0.113.10', interface: 'eth0', prefix_len: 32, gateway: '203.0.113.1' }],
@@ -1042,6 +1068,11 @@ const responseSamples: Record<string, unknown> = {
     data: {
       nat4: { used: 62, remaining: '45474', total: '45536' },
       nat4_port_range: { start: 20000, end: 65535 },
+      nat4_next_port: 22005,
+      nat4_networks: {
+        lxc: { subnet: '10.0.3.0/24', gateway: '10.0.3.1' },
+        kvm: { subnet: '192.168.122.0/24', gateway: '192.168.122.1' },
+      },
       ipv4: { used: 1, remaining: '3', total: '4' },
       public_ipv4_addresses: [{ address: '203.0.113.10', interface: 'eth0', prefix_len: 32, gateway: '203.0.113.1' }],
       ipv6_prefixes: [{ interface: 'eth0', address: '2001:db8:100::2', prefix: '2001:db8:100::/64', prefix_len: 64, gateway: '2001:db8:100::1' }],
@@ -1234,6 +1265,12 @@ const responseSamples: Record<string, unknown> = {
       { id: 'debian-bookworm', name: 'Debian 12', distro: 'debian', release: 'bookworm', arch: 'amd64', type: 'lxc', downloaded: true, enabled: true },
     ],
   },
+  'POST /api/v1/images/custom': {
+    success: true,
+    message: 'Custom image added',
+    data: { id: 'custom-kvm-a1b2c3d4e5', name: 'Custom Ubuntu Cloud' },
+  },
+  'DELETE /api/v1/images/custom': { success: true, message: 'Custom image removed' },
   'POST /api/v1/images/download': { success: true, message: 'Already downloaded' },
   'POST /api/v1/images/cancel': { success: true, message: 'Cancel requested' },
   'DELETE /api/v1/images/delete': { success: true, message: 'Deleted' },
@@ -1277,6 +1314,8 @@ const responseSamples: Record<string, unknown> = {
   'PUT /api/v1/ssl': { success: true, message: 'SSL settings saved', data: { enabled: true, mode: 'letsencrypt', target: 'panel.example.com', needs_restart: true } },
   'GET /api/v1/webssh-origins': { success: true, data: { origins: ['https://panel.example.com'], current_origin: 'https://panel.example.com' } },
   'PUT /api/v1/webssh-origins': { success: true, message: 'Origin allowlist saved', data: { origins: ['https://panel.example.com'], current_origin: 'https://panel.example.com' } },
+  'GET /api/v1/access-policy': { success: true, data: { enabled: true, allowed_sources: ['203.0.113.10', '192.168.1.0/24'], trusted_proxies: ['127.0.0.1'], current_source: '203.0.113.10', direct_source: '127.0.0.1', using_forwarded: true } },
+  'PUT /api/v1/access-policy': { success: true, message: 'Panel access policy saved', data: { enabled: true, allowed_sources: ['203.0.113.10', '192.168.1.0/24'], trusted_proxies: ['127.0.0.1'], current_source: '203.0.113.10', direct_source: '127.0.0.1', using_forwarded: true } },
   'GET /api/v1/language': { success: true, data: { language: 'zh' } },
   'PUT /api/v1/language': { success: true, data: { language: 'zh' } },
   'GET /api/v1/security/alerts': { success: true, data: [] },
@@ -1367,7 +1406,7 @@ function endpointNoteFor(key: string) {
   }
   if (key === 'POST /api/v1/batch-create') {
     notes.push('Each containers[] item in batch creation supports the same storage, network, image allowlist, and SSH authentication fields as POST /api/v1/containers.')
-    notes.push('Custom management_port and NAT host_port values must be unique across the batch. The panel shifts each source-port group for later containers while keeping target ports unchanged; direct API clients should submit the expanded values explicitly.')
+    notes.push('Custom management_port and NAT host_port values must be unique across the batch. The panel places each later source-port group after the previous container\'s highest public port while keeping every target container_port unchanged; direct API clients should submit the expanded values explicitly.')
   }
   if (key === 'PUT /api/v1/containers/{id}/resource-limit') {
     notes.push('Supports independent download/upload bandwidth limits and read/write I/O limits. Omitted fields keep their current values, and explicitly passing 0 makes that direction unlimited. network_bw_mbps and io_speed_mbps are deprecated symmetric compatibility aliases.')
@@ -1399,8 +1438,11 @@ function endpointNoteFor(key: string) {
   if (key === 'PUT /api/v1/storage') {
     notes.push('Start from GET /api/v1/storage and submit mounted disks returned by the server. Paths and mount points are server-managed and custom paths are rejected. content_types enables a disk for each workload; only one pool may be the default for each type.')
   }
-  if (key.includes('/api/v1/storage') || key.includes('/task-queue/settings') || key.includes('/api/v1/ssl') || key.includes('/webssh-origins')) {
+  if (key.includes('/api/v1/storage') || key.includes('/task-queue/settings') || key.includes('/api/v1/ssl') || key.includes('/webssh-origins') || key.includes('/access-policy')) {
     notes.push('This endpoint requires an API key with admin:access.')
+  }
+  if (key === 'PUT /api/v1/access-policy') {
+    notes.push('allowed_sources and trusted_proxies accept IPv4, IPv6, or CIDR values. Forwarded client headers are ignored unless the direct peer matches trusted_proxies. The server rejects an enabled policy that excludes the current source.')
   }
   if (key === 'PUT /api/v1/task-queue/settings') {
     notes.push('concurrency must be between 1 and 16. Tasks targeting the same container are still serialized.')

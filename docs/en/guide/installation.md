@@ -17,6 +17,8 @@ CLICD provides a one-line installer. By default, it installs the latest version 
 curl -fsSL https://raw.githubusercontent.com/MengMengCode/CLICD/main/install.sh | sudo sh
 ```
 
+The installer asks for separate LXC and KVM NAT private subnets. Press Enter to scan host routes, interfaces, bridges, and libvirt networks and select non-overlapping RFC1918 `/24` networks, or enter a CIDR such as `172.28.40.0/24`. For unattended installation, set `CLICD_LXC_SUBNET` and `CLICD_KVM_SUBNET`.
+
 The script defaults to `CLICD_VERSION=latest` and downloads `clicd-linux-amd64.tar.gz` or `clicd-linux-arm64.tar.gz` from `releases/latest` according to the host architecture.
 
 ## Install a Specific Version

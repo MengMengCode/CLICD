@@ -1,6 +1,10 @@
 package lxc
 
-import "runtime"
+import (
+	"runtime"
+
+	"clicd/internal/config"
+)
 
 // Template represents an LXC image template
 type Template struct {
@@ -11,12 +15,15 @@ type Template struct {
 	Arch        string `json:"arch"`
 	Variant     string `json:"variant"`
 	Description string `json:"description"`
+	URL         string `json:"url,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`
+	Custom      bool   `json:"custom,omitempty"`
 }
 
 // GetTemplates returns available LXC image templates (only verified working ones)
 func GetTemplates() []Template {
 	arch := defaultTemplateArch()
-	return []Template{
+	templates := []Template{
 		{
 			ID: "ubuntu-noble", Name: "Ubuntu 24.04",
 			Distro: "ubuntu", Release: "noble", Arch: arch,
@@ -68,6 +75,23 @@ func GetTemplates() []Template {
 			Description: "Rocky Linux 10",
 		},
 	}
+	for _, custom := range config.ListCustomLXCImages() {
+		if custom.Arch != arch {
+			continue
+		}
+		templates = append(templates, Template{
+			ID:          custom.ID,
+			Name:        custom.Name,
+			Distro:      custom.Distro,
+			Release:     custom.Release,
+			Arch:        custom.Arch,
+			Description: custom.Description,
+			URL:         custom.URL,
+			SHA256:      custom.SHA256,
+			Custom:      true,
+		})
+	}
+	return templates
 }
 
 func defaultTemplateArch() string {

@@ -794,6 +794,8 @@ type ClicdConfig struct {
 	NextSSHPort          int                    `json:"next_ssh_port"`
 	NATPortStart         int                    `json:"nat_port_start"`
 	NATPortEnd           int                    `json:"nat_port_end"`
+	LXCNATSubnet         string                 `json:"lxc_nat_subnet"`
+	KVMNATSubnet         string                 `json:"kvm_nat_subnet"`
 	SetupComplete        bool                   `json:"setup_complete"`
 	SubUsers             []SubUser              `json:"sub_users"`
 	ApiKeys              []ApiKeyConfig         `json:"api_keys"`
@@ -801,16 +803,52 @@ type ClicdConfig struct {
 	Tasks                []SavedTask            `json:"tasks"`
 	LoginLogs            []SavedLoginLog        `json:"login_logs"`
 	EnabledImages        []string               `json:"enabled_images"`
+	CustomKVMImages      []CustomKVMImage       `json:"custom_kvm_images"`
+	CustomLXCImages      []CustomLXCImage       `json:"custom_lxc_images"`
 	Snapshots            []Snapshot             `json:"snapshots"`
 	PublicIPv4Pool       []PublicIPv4Assignment `json:"public_ipv4_pool"`
 	PublicIPv6Prefixes   []PublicIPv6Prefix     `json:"public_ipv6_prefixes"`
 	WebSSHAllowedOrigins []string               `json:"webssh_allowed_origins"`
+	PanelAccessPolicy    PanelAccessPolicy      `json:"panel_access_policy"`
 	SecurityAutoShutdown bool                   `json:"security_auto_shutdown"`
 	TaskConcurrency      int                    `json:"task_concurrency"`
 	Language             string                 `json:"language"`
 	SSL                  SSLConfig              `json:"ssl"`
 	SSLCertificates      map[string]SSLConfig   `json:"ssl_certificates"`
 	StoragePools         []StoragePool          `json:"storage_pools"`
+}
+
+const (
+	KVMProvisionerLinuxCloudInit = "linux-cloud-init"
+	KVMProvisionerWindows10      = "windows-10"
+	KVMProvisionerWindows11      = "windows-11"
+)
+
+// CustomKVMImage is an administrator-defined KVM image source.
+type CustomKVMImage struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Distro      string `json:"distro"`
+	Release     string `json:"release"`
+	Arch        string `json:"arch"`
+	URL         string `json:"url"`
+	Provisioner string `json:"provisioner"`
+	SHA256      string `json:"sha256,omitempty"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// CustomLXCImage is an administrator-defined LXC rootfs archive source.
+type CustomLXCImage struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Distro      string `json:"distro"`
+	Release     string `json:"release"`
+	Arch        string `json:"arch"`
+	URL         string `json:"url"`
+	SHA256      string `json:"sha256,omitempty"`
+	CreatedAt   string `json:"created_at"`
 }
 
 var configPath string
@@ -946,6 +984,8 @@ func InitConfig() (*ClicdConfig, error) {
 		NextSSHPort:          22000,
 		NATPortStart:         DefaultNATPortStart,
 		NATPortEnd:           DefaultNATPortEnd,
+		LXCNATSubnet:         configuredSubnetValue("", "CLICD_LXC_SUBNET", DefaultLXCNATSubnet),
+		KVMNATSubnet:         configuredSubnetValue("", "CLICD_KVM_SUBNET", DefaultKVMNATSubnet),
 		SetupComplete:        false,
 		SubUsers:             []SubUser{},
 		AuditLogs:            []AuditLog{},
@@ -955,8 +995,12 @@ func InitConfig() (*ClicdConfig, error) {
 		PublicIPv4Pool:       []PublicIPv4Assignment{},
 		PublicIPv6Prefixes:   []PublicIPv6Prefix{},
 		WebSSHAllowedOrigins: []string{},
-		TaskConcurrency:      DefaultTaskConcurrency,
-		StoragePools:         []StoragePool{defaultPrimaryStoragePool()},
+		PanelAccessPolicy: PanelAccessPolicy{
+			AllowedSources: []string{},
+			TrustedProxies: []string{},
+		},
+		TaskConcurrency: DefaultTaskConcurrency,
+		StoragePools:    []StoragePool{defaultPrimaryStoragePool()},
 	}
 
 	if err := SaveConfig(); err != nil {
@@ -994,6 +1038,9 @@ func normalizeConfigDefaults(dataDir string) bool {
 	if normalizeNATPortRangeDefaults() {
 		changed = true
 	}
+	if normalizeNATNetworkDefaults() {
+		changed = true
+	}
 	if AppConfig.NextContainerID == 0 {
 		AppConfig.NextContainerID = 1
 		changed = true
@@ -1027,6 +1074,18 @@ func normalizeConfigDefaults(dataDir string) bool {
 		changed = true
 	} else if normalized, err := NormalizeAllowedOrigins(AppConfig.WebSSHAllowedOrigins); err == nil && strings.Join(normalized, "\n") != strings.Join(AppConfig.WebSSHAllowedOrigins, "\n") {
 		AppConfig.WebSSHAllowedOrigins = normalized
+		changed = true
+	}
+	if normalized, err := NormalizePanelAccessPolicy(AppConfig.PanelAccessPolicy); err == nil {
+		if !panelAccessPoliciesEqual(AppConfig.PanelAccessPolicy, normalized) {
+			AppConfig.PanelAccessPolicy = normalized
+			changed = true
+		}
+	} else {
+		AppConfig.PanelAccessPolicy = PanelAccessPolicy{
+			AllowedSources: []string{},
+			TrustedProxies: []string{},
+		}
 		changed = true
 	}
 	if len(AppConfig.StoragePools) == 0 {
@@ -1065,6 +1124,14 @@ func normalizeConfigDefaults(dataDir string) bool {
 	}
 	if AppConfig.EnabledImages == nil {
 		AppConfig.EnabledImages = make([]string, 0)
+		changed = true
+	}
+	if AppConfig.CustomKVMImages == nil {
+		AppConfig.CustomKVMImages = make([]CustomKVMImage, 0)
+		changed = true
+	}
+	if AppConfig.CustomLXCImages == nil {
+		AppConfig.CustomLXCImages = make([]CustomLXCImage, 0)
 		changed = true
 	}
 	if AppConfig.Language == "" {
@@ -1435,6 +1502,104 @@ func SaveConfig() error {
 	return saveConfigToDB()
 }
 
+func ListCustomKVMImages() []CustomKVMImage {
+	allocationMu.Lock()
+	defer allocationMu.Unlock()
+	if AppConfig == nil {
+		return nil
+	}
+	return append([]CustomKVMImage(nil), AppConfig.CustomKVMImages...)
+}
+
+func AddCustomKVMImage(image CustomKVMImage) error {
+	allocationMu.Lock()
+	defer allocationMu.Unlock()
+	for _, existing := range AppConfig.CustomKVMImages {
+		if existing.ID == image.ID {
+			return fmt.Errorf("custom KVM image %q already exists", image.ID)
+		}
+	}
+	AppConfig.CustomKVMImages = append(AppConfig.CustomKVMImages, image)
+	if err := SaveConfig(); err != nil {
+		AppConfig.CustomKVMImages = AppConfig.CustomKVMImages[:len(AppConfig.CustomKVMImages)-1]
+		return err
+	}
+	return nil
+}
+
+func RemoveCustomKVMImage(id string) (bool, error) {
+	allocationMu.Lock()
+	defer allocationMu.Unlock()
+	filtered := make([]CustomKVMImage, 0, len(AppConfig.CustomKVMImages))
+	found := false
+	for _, image := range AppConfig.CustomKVMImages {
+		if image.ID == id {
+			found = true
+			continue
+		}
+		filtered = append(filtered, image)
+	}
+	if !found {
+		return false, nil
+	}
+	previous := AppConfig.CustomKVMImages
+	AppConfig.CustomKVMImages = filtered
+	if err := SaveConfig(); err != nil {
+		AppConfig.CustomKVMImages = previous
+		return false, err
+	}
+	return true, nil
+}
+
+func ListCustomLXCImages() []CustomLXCImage {
+	allocationMu.Lock()
+	defer allocationMu.Unlock()
+	if AppConfig == nil {
+		return nil
+	}
+	return append([]CustomLXCImage(nil), AppConfig.CustomLXCImages...)
+}
+
+func AddCustomLXCImage(image CustomLXCImage) error {
+	allocationMu.Lock()
+	defer allocationMu.Unlock()
+	for _, existing := range AppConfig.CustomLXCImages {
+		if existing.ID == image.ID {
+			return fmt.Errorf("custom LXC image %q already exists", image.ID)
+		}
+	}
+	AppConfig.CustomLXCImages = append(AppConfig.CustomLXCImages, image)
+	if err := SaveConfig(); err != nil {
+		AppConfig.CustomLXCImages = AppConfig.CustomLXCImages[:len(AppConfig.CustomLXCImages)-1]
+		return err
+	}
+	return nil
+}
+
+func RemoveCustomLXCImage(id string) (bool, error) {
+	allocationMu.Lock()
+	defer allocationMu.Unlock()
+	filtered := make([]CustomLXCImage, 0, len(AppConfig.CustomLXCImages))
+	found := false
+	for _, image := range AppConfig.CustomLXCImages {
+		if image.ID == id {
+			found = true
+			continue
+		}
+		filtered = append(filtered, image)
+	}
+	if !found {
+		return false, nil
+	}
+	previous := AppConfig.CustomLXCImages
+	AppConfig.CustomLXCImages = filtered
+	if err := SaveConfig(); err != nil {
+		AppConfig.CustomLXCImages = previous
+		return false, err
+	}
+	return true, nil
+}
+
 // AddContainer adds a container to the config
 func AddContainer(c Container) {
 	allocationMu.Lock()
@@ -1736,6 +1901,28 @@ func AllocateSSHPort() (int, error) {
 func AllocateSSHPortExcluding(excluded []int) (int, error) {
 	allocationMu.Lock()
 	defer allocationMu.Unlock()
+	candidate, err := previewSSHPortExcluding(excluded)
+	if err != nil {
+		return 0, err
+	}
+	start, end := NATPortRange()
+	AppConfig.NextSSHPort = candidate + 1
+	if AppConfig.NextSSHPort > end {
+		AppConfig.NextSSHPort = start
+	}
+	SaveConfig()
+	return candidate, nil
+}
+
+// PreviewSSHPortExcluding returns the management port that the allocator would
+// choose without advancing or persisting the allocation cursor.
+func PreviewSSHPortExcluding(excluded []int) (int, error) {
+	allocationMu.Lock()
+	defer allocationMu.Unlock()
+	return previewSSHPortExcluding(excluded)
+}
+
+func previewSSHPortExcluding(excluded []int) (int, error) {
 	used := collectAllHostPorts()
 	for _, port := range excluded {
 		if port > 0 {
@@ -1753,11 +1940,6 @@ func AllocateSSHPortExcluding(excluded []int) (int, error) {
 		if used[candidate] {
 			continue
 		}
-		AppConfig.NextSSHPort = candidate + 1
-		if AppConfig.NextSSHPort > end {
-			AppConfig.NextSSHPort = start
-		}
-		SaveConfig()
 		return candidate, nil
 	}
 	return 0, fmt.Errorf("no free NAT4 host port in configured range %d-%d", start, end)

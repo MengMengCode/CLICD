@@ -136,13 +136,13 @@ export default function Storage() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between gap-4">
+    <div className="min-w-0 space-y-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-black dark:text-white">{t('存储管理')}</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t('只显示已挂载磁盘；勾选后，对应功能可以选择该磁盘保存数据。')}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex shrink-0 gap-2">
           <button onClick={fetchData} className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
             <RefreshCw className="h-4 w-4" />{t('刷新')}
           </button>
@@ -169,53 +169,57 @@ export default function Storage() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-        <table className="w-full min-w-[1240px] text-sm">
-          <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
-            <tr>
-              <th className="px-4 py-3 text-left font-medium">{t('磁盘')}</th>
-              <th className="px-4 py-3 text-left font-medium">{t('空间分布')}</th>
-              <th className="px-4 py-3 text-left font-medium">{t('用于存储')}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {mountedDisks.length === 0 ? (
-              <tr><td colSpan={3} className="px-4 py-10 text-center text-gray-400">{t('未检测到已挂载磁盘')}</td></tr>
-            ) : mountedDisks.map((disk) => {
+      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white text-sm">
+        <div className="hidden grid-cols-[minmax(170px,0.65fr)_minmax(320px,1.2fr)_minmax(480px,1.8fr)] gap-4 border-b border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-500 2xl:grid">
+          <div className="font-medium">{t('磁盘')}</div>
+          <div className="font-medium">{t('空间分布')}</div>
+          <div className="font-medium">{t('用于存储')}</div>
+        </div>
+        {mountedDisks.length === 0 ? (
+          <div className="px-4 py-10 text-center text-gray-400">{t('未检测到已挂载磁盘')}</div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {mountedDisks.map((disk) => {
               const pool = pools.find((item) => poolForDisk(item, disk))
               const contentUsage = contentUsageMap(pool?.content_usage || disk.content_usage || [])
               const clicdUsed = pool?.clicd_used_bytes || disk.clicd_used_bytes || 0
               return (
-                <tr key={`${disk.path}-${disk.mount_point}`} className="align-top hover:bg-gray-50/70">
-                  <td className="px-4 py-4">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-md bg-gray-100 text-gray-600">
+                <section
+                  key={`${disk.path}-${disk.mount_point}`}
+                  className="grid min-w-0 grid-cols-1 gap-4 px-4 py-4 hover:bg-gray-50/70 2xl:grid-cols-[minmax(170px,0.65fr)_minmax(320px,1.2fr)_minmax(480px,1.8fr)]"
+                >
+                  <div className="min-w-0">
+                    <div className="mb-2 text-xs font-medium text-gray-500 2xl:hidden">{t('磁盘')}</div>
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600">
                         <HardDrive className="h-5 w-5" />
                       </div>
-                      <div>
-                        <div className="font-mono text-xs font-medium text-gray-900">{disk.path || disk.name}</div>
-                        <div className="mt-1 text-xs text-gray-500">{disk.model || disk.fstype || disk.type || '-'}</div>
-                        <div className="mt-1 font-mono text-xs text-gray-400">{disk.mount_point}</div>
+                      <div className="min-w-0">
+                        <div className="truncate font-mono text-xs font-medium text-gray-900" title={disk.path || disk.name}>{disk.path || disk.name}</div>
+                        <div className="mt-1 truncate text-xs text-gray-500" title={disk.model || disk.fstype || disk.type || '-'}>{disk.model || disk.fstype || disk.type || '-'}</div>
+                        <div className="mt-1 truncate font-mono text-xs text-gray-400" title={disk.mount_point}>{disk.mount_point}</div>
                       </div>
                     </div>
-                  </td>
-                  <td className="px-4 py-4">
+                  </div>
+                  <div className="min-w-0">
+                    <div className="mb-2 text-xs font-medium text-gray-500 2xl:hidden">{t('空间分布')}</div>
                     <DiskUsageBar disk={disk} contentUsage={contentUsage} clicdUsed={clicdUsed} />
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex min-w-[620px] flex-nowrap items-start gap-2">
+                  </div>
+                  <div className="min-w-0">
+                    <div className="mb-2 text-xs font-medium text-gray-500 2xl:hidden">{t('用于存储')}</div>
+                    <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                       {contentOptions.map(([value, label]) => {
                         const checked = (pool?.content_types || []).includes(value)
                         const isDefault = (pool?.default_contents || []).includes(value)
                         return (
-                          <div key={value} className={`w-[116px] shrink-0 rounded-md border px-2.5 py-2 ${checked ? 'border-gray-300 bg-white' : 'border-gray-200 bg-gray-50'}`}>
+                          <div key={value} className={`min-w-0 rounded-md border px-2.5 py-2 ${checked ? 'border-gray-300 bg-white' : 'border-gray-200 bg-gray-50'}`}>
                             <label className="flex cursor-pointer items-center gap-2 text-xs text-gray-700">
-                              <input type="checkbox" checked={checked} onChange={() => toggleContent(disk, value)} />
-                              {t(label)}
+                              <input className="shrink-0" type="checkbox" checked={checked} onChange={() => toggleContent(disk, value)} />
+                              <span className="truncate" title={t(label)}>{t(label)}</span>
                             </label>
                             {checked && (
                               <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-gray-100 pt-1.5">
-                                <span className="text-[11px] text-gray-500">{t('默认盘')}</span>
+                                <span className="truncate text-[11px] text-gray-500">{t('默认盘')}</span>
                                 <button
                                   type="button"
                                   role="switch"
@@ -232,12 +236,12 @@ export default function Storage() {
                         )
                       })}
                     </div>
-                  </td>
-                </tr>
+                  </div>
+                </section>
               )
             })}
-          </tbody>
-        </table>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -279,8 +283,8 @@ function DiskUsageBar({
   ].filter((segment) => segment.size > 0)
 
   return (
-    <div className="min-w-[420px] max-w-[620px]">
-      <div className="flex items-center justify-between gap-4 text-xs text-gray-600">
+    <div className="w-full min-w-0">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-gray-600">
         <span>{t('已用')} {formatBytes(used)} / {formatBytes(total)}</span>
         <span>{usagePct(used, total).toFixed(1)}% · {t('可用')} {formatBytes(free)}</span>
       </div>

@@ -12,7 +12,7 @@ export default function Layout() {
       <AutoTranslate />
       <BrowserDialogTranslator />
       <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-      <main className={`flex-1 transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-60'}`}>
+      <main className={`min-w-0 flex-1 transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-60'}`}>
         <div className="p-6">
           <Outlet />
         </div>

@@ -166,7 +166,7 @@ func DownloadImageWithProgress(ctx context.Context, image Image, progress Downlo
 		return err
 	}
 	ext := ".qcow2"
-	if image.Distro == "windows" {
+	if image.IsWindows() {
 		ext = ".iso"
 	}
 	target := filepath.Join(cacheDir, image.ID+ext)
@@ -184,7 +184,7 @@ func DownloadImageWithProgress(ctx context.Context, image Image, progress Downlo
 	}
 	tmp := target + ".tmp"
 	_ = os.Remove(tmp)
-	if image.Distro == "windows" {
+	if image.IsWindows() {
 		if err := downloadFileWithValidator(ctx, image.URL, tmp, validateWindowsISOResponse(target), progress); err != nil {
 			_ = os.Remove(tmp)
 			return err
@@ -197,7 +197,13 @@ func DownloadImageWithProgress(ctx context.Context, image Image, progress Downlo
 		_ = os.Remove(tmp)
 		return err
 	}
-	if image.Distro == "windows" {
+	if image.SHA256 != "" {
+		if err := verifyFileSHA256(tmp, image.SHA256); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+	}
+	if image.IsWindows() {
 		if err := validateWindowsISO(tmp, target); err != nil {
 			_ = os.Remove(tmp)
 			return err
@@ -218,6 +224,23 @@ func DownloadImageWithProgress(ctx context.Context, image Image, progress Downlo
 		}
 	}
 	_ = os.Chmod(target, 0644)
+	return nil
+}
+
+func verifyFileSHA256(path, expected string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return err
+	}
+	actual := hex.EncodeToString(hash.Sum(nil))
+	if !strings.EqualFold(actual, strings.TrimSpace(expected)) {
+		return fmt.Errorf("SHA-256 mismatch: expected %s, got %s", expected, actual)
+	}
 	return nil
 }
 
@@ -500,11 +523,15 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 	var xml string
 	winAdminPassword := ""
 	if IsWindowsImage(image.ID) {
-		if cfg.RAMMB < 2048 {
-			cfg.RAMMB = 2048
+		minVCPU, minRAMMB, minDiskGB := windowsMinimumResources(image.ID)
+		if cfg.VCPU < minVCPU {
+			cfg.VCPU = minVCPU
 		}
-		if cfg.DiskGB < 30 {
-			cfg.DiskGB = 30
+		if cfg.RAMMB < minRAMMB {
+			cfg.RAMMB = minRAMMB
+		}
+		if cfg.DiskGB < minDiskGB {
+			cfg.DiskGB = minDiskGB
 		}
 		cfg.ReportProgress("disk", "创建 Windows 虚拟磁盘")
 		if err := createEmptyDisk(diskPath, cfg.DiskGB); err != nil {
@@ -516,7 +543,7 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 		winAdminPassword = generateWindowsPassword()
 		unattendPath := filepath.Join(m.instanceDir(vmName), "unattend.iso")
 		cfg.ReportProgress("cloud_init", "生成 Windows 自动应答配置")
-		if err := createWindowsUnattendISO(unattendPath, cfg.Name, winAdminPassword, mac, ipv6List, ipv4List); err != nil {
+		if err := createWindowsUnattendISO(unattendPath, cfg.Name, winAdminPassword, mac, ipv6List, ipv4List, IsWindows11Image(image.ID)); err != nil {
 			return nil, err
 		}
 		xml = windowsDomainXML(vmName, int(cfg.VCPU), cfg.RAMMB, diskPath, ImagePath(image.ID), unattendPath, mac, cfg.IOReadMBps, cfg.IOWriteMBps, cfg.NetworkDownMbps, cfg.NetworkUpMbps)
@@ -1724,16 +1751,17 @@ func ensureDefaultNetwork() error {
 	// Ensure default network is defined
 	if virshCLocaleCommand("net-info", "default").Run() != nil {
 		// Default network may not be defined; try to define it
-		netXML := `<network>
+		network := config.KVMNATNetwork()
+		netXML := fmt.Sprintf(`<network>
   <name>default</name>
   <bridge name='virbr0'/>
   <forward mode='nat'/>
-  <ip address='192.168.122.1' netmask='255.255.255.0'>
+  <ip address='%s' netmask='%s'>
     <dhcp>
-      <range start='192.168.122.2' end='192.168.122.254'/>
+      <range start='%s' end='%s'/>
     </dhcp>
   </ip>
-</network>`
+</network>`, network.Gateway, network.Netmask, network.DHCPStart, network.DHCPEnd)
 		tmpFile := filepath.Join(os.TempDir(), "clicd-default-net.xml")
 		if err := os.WriteFile(tmpFile, []byte(netXML), 0644); err != nil {
 			return fmt.Errorf("failed to write default network XML: %v", err)
@@ -1832,7 +1860,7 @@ func createEmptyDisk(target string, diskGB int) error {
 	return nil
 }
 
-func createWindowsUnattendISO(target, hostname, adminPassword, mac string, ipv6s []string, ipv4s []string) error {
+func createWindowsUnattendISO(target, hostname, adminPassword, mac string, ipv6s []string, ipv4s []string, windows11 bool) error {
 	tool := firstAvailableCommand("genisoimage", "mkisofs", "xorriso")
 	if tool == "" {
 		return fmt.Errorf("one of genisoimage, mkisofs, xorriso is required for Windows unattended setup")
@@ -1852,7 +1880,7 @@ func createWindowsUnattendISO(target, hostname, adminPassword, mac string, ipv6s
 			return err
 		}
 	}
-	if err := os.WriteFile(answerPath, []byte(windowsAutounattendXML(hostname, adminPassword)), 0600); err != nil {
+	if err := os.WriteFile(answerPath, []byte(windowsAutounattendXML(hostname, adminPassword, windows11)), 0600); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(setupScriptsDir, "SetupComplete.cmd"), []byte(windowsSetupCompleteCMD()), 0600); err != nil {
@@ -1890,12 +1918,21 @@ func firstAvailableCommand(names ...string) string {
 	return ""
 }
 
-func windowsAutounattendXML(hostname, adminPassword string) string {
+func windowsAutounattendXML(hostname, adminPassword string, windows11 bool) string {
 	if strings.TrimSpace(hostname) == "" {
 		hostname = "clicd-win"
 	}
 	hostname = sanitizeWindowsComputerName(hostname)
 	setupCommand := `cmd.exe /c if exist C:\CLICD\FirstLogon.ps1 (powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\CLICD\FirstLogon.ps1) else (for %%d in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do @if exist %%d:\FirstLogon.ps1 powershell.exe -NoProfile -ExecutionPolicy Bypass -File %%d:\FirstLogon.ps1)`
+	compatibilityCommands := ""
+	if windows11 {
+		compatibilityCommands = `
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add"><Order>1</Order><Description>Allow virtual TPM compatibility</Description><Path>reg.exe add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path></RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add"><Order>2</Order><Description>Allow virtual Secure Boot compatibility</Description><Path>reg.exe add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path></RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add"><Order>3</Order><Description>Allow virtual CPU compatibility</Description><Path>reg.exe add HKLM\SYSTEM\Setup\LabConfig /v BypassCPUCheck /t REG_DWORD /d 1 /f</Path></RunSynchronousCommand>
+      </RunSynchronous>`
+	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
   <settings pass="windowsPE">
@@ -1924,7 +1961,7 @@ func windowsAutounattendXML(hostname, adminPassword string) string {
         <AcceptEula>true</AcceptEula>
         <FullName>CLICD</FullName>
         <Organization>CLICD</Organization>
-      </UserData>
+      </UserData>%s
     </component>
   </settings>
   <settings pass="specialize">
@@ -1945,7 +1982,14 @@ func windowsAutounattendXML(hostname, adminPassword string) string {
     </component>
   </settings>
 </unattend>
-`, xmlEscape(hostname), xmlEscape(adminPassword), xmlEscape(adminPassword), xmlEscape(setupCommand))
+`, compatibilityCommands, xmlEscape(hostname), xmlEscape(adminPassword), xmlEscape(adminPassword), xmlEscape(setupCommand))
+}
+
+func windowsMinimumResources(imageID string) (float64, int, int) {
+	if IsWindows11Image(imageID) {
+		return 2, 4096, 64
+	}
+	return 1, 2048, 30
 }
 
 func sanitizeWindowsComputerName(name string) string {

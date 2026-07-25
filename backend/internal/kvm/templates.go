@@ -17,15 +17,37 @@ type Image struct {
 	Description string `json:"description"`
 	URL         string `json:"url"`
 	Desktop     string `json:"desktop,omitempty"`
+	Provisioner string `json:"provisioner,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`
+	Custom      bool   `json:"custom,omitempty"`
 }
 
 func GetImages() []Image {
+	var images []Image
 	switch runtime.GOARCH {
 	case "arm64":
-		return arm64Images()
+		images = arm64Images()
 	default:
-		return amd64Images()
+		images = amd64Images()
 	}
+	for _, custom := range config.ListCustomKVMImages() {
+		if custom.Arch != runtime.GOARCH {
+			continue
+		}
+		images = append(images, Image{
+			ID:          custom.ID,
+			Name:        custom.Name,
+			Distro:      custom.Distro,
+			Release:     custom.Release,
+			Arch:        custom.Arch,
+			Description: custom.Description,
+			URL:         custom.URL,
+			Provisioner: custom.Provisioner,
+			SHA256:      custom.SHA256,
+			Custom:      true,
+		})
+	}
+	return images
 }
 
 func amd64Images() []Image {
@@ -112,6 +134,12 @@ func amd64Images() []Image {
 			URL:         "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2",
 		},
 		{
+			ID: "kvm-windows-11", Name: "Windows 11 KVM",
+			Distro: "windows", Release: "11", Arch: "amd64",
+			Description: "Windows 11 Enterprise LTSC 2024 Evaluation",
+			URL:         "https://go.microsoft.com/fwlink/?clcid=0x409&country=us&culture=en-us&linkid=2289029",
+		},
+		{
 			ID: "kvm-windows-10", Name: "Windows 10 KVM",
 			Distro: "windows", Release: "10", Arch: "amd64",
 			Description: "Windows 10 Enterprise LTSC Evaluation",
@@ -196,7 +224,7 @@ func ImagePath(id string) string {
 	if img != nil {
 		safeID = img.ID
 	}
-	if img != nil && img.Distro == "windows" {
+	if img != nil && img.IsWindows() {
 		ext = ".iso"
 	}
 	fileName := safeID + ext
@@ -213,10 +241,26 @@ func ImagePath(id string) string {
 	return filepath.Join(CacheDir(), fileName)
 }
 
-// IsWindowsImage returns true if the image distro is "windows".
+func (image Image) IsWindows() bool {
+	return image.Provisioner == config.KVMProvisionerWindows10 ||
+		image.Provisioner == config.KVMProvisionerWindows11 ||
+		(image.Provisioner == "" && image.Distro == "windows")
+}
+
+func (image Image) IsWindows11() bool {
+	return image.Provisioner == config.KVMProvisionerWindows11 ||
+		(image.Provisioner == "" && image.Distro == "windows" && image.Release == "11")
+}
+
+// IsWindowsImage returns true if the image uses Windows unattended installation.
 func IsWindowsImage(id string) bool {
 	img := FindImage(id)
-	return img != nil && img.Distro == "windows"
+	return img != nil && img.IsWindows()
+}
+
+func IsWindows11Image(id string) bool {
+	img := FindImage(id)
+	return img != nil && img.IsWindows11()
 }
 
 func virtioWinISOPath() string {

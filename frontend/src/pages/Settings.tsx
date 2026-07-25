@@ -1,17 +1,20 @@
 import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react'
-import { Clock, Globe, ListTodo, Lock, LogIn, Minus, Monitor, Plus, RefreshCw, Save, ShieldCheck, Terminal, Upload, UserCog } from 'lucide-react'
+import { Clock, Globe, ListTodo, Lock, LogIn, Minus, Monitor, Plus, RefreshCw, Save, Shield, ShieldCheck, Terminal, Upload, UserCog } from 'lucide-react'
 import {
   changePassword,
   changeUsername,
   getLoginLogs,
+  getPanelAccessPolicy,
   getSSLSettings,
   getTaskQueueSettings,
   getWebSSHOriginSettings,
   LoginLog,
+  PanelAccessPolicy,
   SSLSettings,
   TaskQueueSettings,
   updateTaskQueueSettings,
   updateSSLSettings,
+  updatePanelAccessPolicy,
   updateWebSSHOriginSettings,
   WebSSHOriginSettings,
 } from '../services/api'
@@ -19,11 +22,12 @@ import { useDialog } from '../components/Dialog'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 
-type SettingsSection = 'tasks' | 'account' | 'webssh' | 'ssl' | 'logs'
+type SettingsSection = 'tasks' | 'account' | 'access' | 'webssh' | 'ssl' | 'logs'
 
 const settingsSections = [
   { id: 'tasks', label: '任务队列', icon: ListTodo },
   { id: 'account', label: '账号设置', icon: UserCog },
+  { id: 'access', label: '访问来源', icon: Shield },
   { id: 'webssh', label: 'WebSSH 访问', icon: Terminal },
   { id: 'ssl', label: 'SSL 证书', icon: ShieldCheck },
   { id: 'logs', label: '登录日志', icon: LogIn },
@@ -57,6 +61,11 @@ export default function Settings() {
   const [taskQueue, setTaskQueue] = useState<TaskQueueSettings | null>(null)
   const [taskConcurrency, setTaskConcurrency] = useState(2)
   const [savingTaskQueue, setSavingTaskQueue] = useState(false)
+  const [accessPolicy, setAccessPolicy] = useState<PanelAccessPolicy | null>(null)
+  const [accessEnabled, setAccessEnabled] = useState(false)
+  const [allowedSourcesText, setAllowedSourcesText] = useState('')
+  const [trustedProxiesText, setTrustedProxiesText] = useState('')
+  const [savingAccessPolicy, setSavingAccessPolicy] = useState(false)
   const [activeSection, setActiveSection] = useState<SettingsSection>('tasks')
 
   const fetchLogs = useCallback(async () => {
@@ -109,18 +118,33 @@ export default function Settings() {
     }
   }, [])
 
+  const fetchAccessPolicy = useCallback(async () => {
+    try {
+      const res = await getPanelAccessPolicy()
+      const data = res.data.data
+      if (!data) return
+      setAccessPolicy(data)
+      setAccessEnabled(data.enabled)
+      setAllowedSourcesText((data.allowed_sources || []).join('\n'))
+      setTrustedProxiesText((data.trusted_proxies || []).join('\n'))
+    } catch (err) {
+      console.error(err)
+    }
+  }, [])
+
   useEffect(() => {
     fetchLogs()
     fetchSSL()
     fetchWebSSHOrigins()
     fetchTaskQueue()
+    fetchAccessPolicy()
     const logTimer = setInterval(fetchLogs, 15000)
     const taskTimer = setInterval(fetchTaskQueue, 5000)
     return () => {
       clearInterval(logTimer)
       clearInterval(taskTimer)
     }
-  }, [fetchLogs, fetchSSL, fetchTaskQueue, fetchWebSSHOrigins])
+  }, [fetchAccessPolicy, fetchLogs, fetchSSL, fetchTaskQueue, fetchWebSSHOrigins])
 
   const handleSaveTaskQueue = async () => {
     const concurrency = Math.max(1, Math.min(16, Math.round(taskConcurrency || 1)))
@@ -194,6 +218,38 @@ export default function Settings() {
     }
   }
 
+  const handleAccessEnabledChange = (enabled: boolean) => {
+    setAccessEnabled(enabled)
+    if (enabled && !allowedSourcesText.trim() && accessPolicy?.current_source) {
+      setAllowedSourcesText(accessPolicy.current_source)
+    }
+  }
+
+  const handleSaveAccessPolicy = async () => {
+    const splitEntries = (value: string) => value.split(/[\s,;]+/).map(item => item.trim()).filter(Boolean)
+    setSavingAccessPolicy(true)
+    try {
+      const res = await updatePanelAccessPolicy({
+        enabled: accessEnabled,
+        allowed_sources: splitEntries(allowedSourcesText),
+        trusted_proxies: splitEntries(trustedProxiesText),
+      })
+      const data = res.data.data
+      if (data) {
+        setAccessPolicy(data)
+        setAccessEnabled(data.enabled)
+        setAllowedSourcesText((data.allowed_sources || []).join('\n'))
+        setTrustedProxiesText((data.trusted_proxies || []).join('\n'))
+      }
+      dialog.alert('完成', accessEnabled ? '面板访问来源策略已保存并立即生效' : '面板访问来源限制已关闭')
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } }
+      dialog.alert('失败', e.response?.data?.message || '面板访问来源策略保存失败')
+    } finally {
+      setSavingAccessPolicy(false)
+    }
+  }
+
   const handleSaveAccount = async () => {
     if (!oldPwd) {
       dialog.alert('提示', '请输入当前密码以确认修改')
@@ -248,7 +304,7 @@ export default function Settings() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-black dark:text-white">面板设置</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">任务队列、账号、安全证书与访问记录</p>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">任务队列、账号、访问控制、安全证书与访问记录</p>
       </div>
 
       <div className="grid items-start gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
@@ -324,6 +380,21 @@ export default function Settings() {
             />
           )}
 
+          {activeSection === 'access' && (
+            <PanelAccessPolicyCard
+              policy={accessPolicy}
+              enabled={accessEnabled}
+              allowedSourcesText={allowedSourcesText}
+              trustedProxiesText={trustedProxiesText}
+              saving={savingAccessPolicy}
+              onEnabledChange={handleAccessEnabledChange}
+              onAllowedSourcesTextChange={setAllowedSourcesText}
+              onTrustedProxiesTextChange={setTrustedProxiesText}
+              onRefresh={fetchAccessPolicy}
+              onSave={handleSaveAccessPolicy}
+            />
+          )}
+
           {activeSection === 'ssl' && (
             <SSLCard
               ssl={ssl}
@@ -363,6 +434,109 @@ interface TaskQueueCardProps {
   onConcurrencyChange: (value: number) => void
   onRefresh: () => void
   onSave: () => void
+}
+
+interface PanelAccessPolicyCardProps {
+  policy: PanelAccessPolicy | null
+  enabled: boolean
+  allowedSourcesText: string
+  trustedProxiesText: string
+  saving: boolean
+  onEnabledChange: (enabled: boolean) => void
+  onAllowedSourcesTextChange: (value: string) => void
+  onTrustedProxiesTextChange: (value: string) => void
+  onRefresh: () => void
+  onSave: () => void
+}
+
+function PanelAccessPolicyCard(props: PanelAccessPolicyCardProps) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-900">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-black dark:text-white">
+            <Shield className="h-4 w-4" />访问来源策略
+          </h2>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">限制可访问面板、登录和 API 的来源地址</p>
+        </div>
+        <button type="button" onClick={props.onRefresh} className="rounded-md border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800" title="刷新">
+          <RefreshCw className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between gap-4 border-y border-gray-100 py-3 dark:border-gray-800">
+        <div>
+          <div className="text-sm font-medium text-gray-800 dark:text-gray-200">启用访问白名单</div>
+          <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">关闭后不限制访问来源</div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={props.enabled}
+          onClick={() => props.onEnabledChange(!props.enabled)}
+          className={`access-policy-switch relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-2 dark:focus:ring-white dark:focus:ring-offset-gray-900 ${
+            props.enabled
+              ? 'border-black bg-black dark:border-white dark:bg-white'
+              : 'border-gray-300 bg-gray-300 dark:border-gray-600 dark:bg-gray-700'
+          }`}
+          title={props.enabled ? '关闭访问白名单' : '启用访问白名单'}
+        >
+          <span
+            aria-hidden="true"
+            className={`access-policy-switch-thumb pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full shadow-sm ring-1 ring-black/5 transition-[transform,background-color] duration-200 ${
+              props.enabled
+                ? 'translate-x-5 bg-white dark:bg-gray-900'
+                : 'translate-x-0 bg-white dark:bg-gray-200'
+            }`}
+          />
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-300">允许的 IP / CIDR</label>
+          <textarea
+            value={props.allowedSourcesText}
+            onChange={(event) => props.onAllowedSourcesTextChange(event.target.value)}
+            rows={6}
+            disabled={!props.enabled}
+            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-xs text-black outline-none focus:border-black focus:ring-1 focus:ring-black disabled:bg-gray-50 disabled:text-gray-400 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:focus:border-white dark:focus:ring-white dark:disabled:bg-gray-800 dark:disabled:text-gray-500"
+            placeholder={'203.0.113.10\n192.168.1.0/24\n2001:db8::/32'}
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-300">可信代理 IP / CIDR</label>
+          <textarea
+            value={props.trustedProxiesText}
+            onChange={(event) => props.onTrustedProxiesTextChange(event.target.value)}
+            rows={6}
+            disabled={!props.enabled}
+            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-xs text-black outline-none focus:border-black focus:ring-1 focus:ring-black disabled:bg-gray-50 disabled:text-gray-400 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:focus:border-white dark:focus:ring-white dark:disabled:bg-gray-800 dark:disabled:text-gray-500"
+            placeholder={'127.0.0.1\n10.0.0.0/8'}
+          />
+          <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">仅可信代理可提供真实客户端地址；未使用反向代理时留空</p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 rounded-md border border-gray-100 bg-gray-50 p-3 text-xs dark:border-gray-800 dark:bg-gray-950 sm:grid-cols-2">
+        <div>
+          <span className="text-gray-500 dark:text-gray-400">当前识别来源</span>
+          <div className="mt-0.5 break-all font-mono text-gray-800 dark:text-gray-200">{props.policy?.current_source || '-'}</div>
+        </div>
+        <div>
+          <span className="text-gray-500 dark:text-gray-400">直接连接来源</span>
+          <div className="mt-0.5 break-all font-mono text-gray-800 dark:text-gray-200">{props.policy?.direct_source || '-'}</div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex justify-end">
+        <button type="button" onClick={props.onSave} disabled={props.saving} className="inline-flex items-center justify-center gap-2 rounded-md bg-black px-4 py-2 text-sm text-white hover:bg-gray-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-gray-200">
+          <Save className="h-4 w-4" />
+          {props.saving ? '保存中...' : '保存访问策略'}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function TaskQueueCard(props: TaskQueueCardProps) {

@@ -122,6 +122,78 @@ func TestNormalizeCreateNATMappingsRejectsManagementPortConflict(t *testing.T) {
 	}
 }
 
+func TestTaggedRuleLineNumbersReturnsMatchingRulesDescending(t *testing.T) {
+	output := []byte(`Chain PREROUTING (policy ACCEPT)
+num  target prot opt source destination
+2 DNAT tcp -- 0.0.0.0/0 0.0.0.0/0 tcp dpt:30080 /* clicd-c12-any-30080 */
+7 DNAT tcp -- 0.0.0.0/0 0.0.0.0/0 tcp dpt:30081 /* clicd-c13-any-30081 */
+11 DNAT tcp -- 0.0.0.0/0 0.0.0.0/0 tcp dpt:30082 /* clicd-c12-any-30082 */
+`)
+	got := taggedRuleLineNumbers(output, "clicd-c12-")
+	want := []int{11, 2}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("taggedRuleLineNumbers() = %v, want %v", got, want)
+	}
+}
+
+func TestPortMappingConntrackDeleteArgs(t *testing.T) {
+	got := portMappingConntrackDeleteArgs(config.PortMapping{
+		HostIP:   "203.0.113.10",
+		HostPort: 32022,
+		Protocol: "TCP",
+	})
+	want := []string{"-D", "-p", "tcp", "--dport", "32022", "--dst", "203.0.113.10"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("portMappingConntrackDeleteArgs() = %v, want %v", got, want)
+	}
+
+	if got := portMappingConntrackDeleteArgs(config.PortMapping{HostPort: 32022, Protocol: "icmp"}); got != nil {
+		t.Fatalf("unsupported protocol returned args: %v", got)
+	}
+}
+
+func TestUpdateSSHPortMappingKeepsIdentityAndSynchronizesSSHPort(t *testing.T) {
+	previous := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = previous })
+	config.AppConfig = &config.ClicdConfig{
+		NATPortStart: 30000,
+		NATPortEnd:   65535,
+		Containers: []config.Container{{
+			ID:      12,
+			Name:    "ct-test",
+			Status:  "stopped",
+			SSHPort: 30022,
+			PortMappings: []config.PortMapping{{
+				HostPort:      30022,
+				ContainerPort: 22,
+				Protocol:      "tcp",
+				Description:   "SSH",
+			}},
+		}},
+	}
+
+	manager := NewManager()
+	mappings, err := manager.UpdatePortMapping(12, 0, config.PortMapping{
+		HostPort:      31022,
+		ContainerPort: 22,
+		Protocol:      "tcp",
+		Description:   "renamed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != 1 || mappings[0].Description != "SSH" {
+		t.Fatalf("updated mappings = %+v", mappings)
+	}
+	container := config.FindContainer(12)
+	if container == nil || container.SSHPort != 31022 {
+		t.Fatalf("container after SSH update = %+v", container)
+	}
+	if _, err := manager.DeletePortMapping(12, 0); err == nil {
+		t.Fatal("updated SSH mapping became deletable")
+	}
+}
+
 func TestReserveCreateNATPortsProtectsConcurrentTasks(t *testing.T) {
 	previous := config.AppConfig
 	t.Cleanup(func() { config.AppConfig = previous })
@@ -133,10 +205,12 @@ func TestReserveCreateNATPortsProtectsConcurrentTasks(t *testing.T) {
 
 	createNATReservationMu.Lock()
 	createNATReservations = map[uint64][]config.PortMapping{}
+	queuedCreateNATReservations = map[string][]config.PortMapping{}
 	createNATReservationMu.Unlock()
 	t.Cleanup(func() {
 		createNATReservationMu.Lock()
 		createNATReservations = map[uint64][]config.PortMapping{}
+		queuedCreateNATReservations = map[string][]config.PortMapping{}
 		createNATReservationMu.Unlock()
 	})
 
@@ -178,6 +252,109 @@ func TestReserveCreateNATPortsProtectsConcurrentTasks(t *testing.T) {
 		if port != explicit.ManagementPort {
 			t.Fatalf("reserved management port = %d, want %d", port, explicit.ManagementPort)
 		}
+	}
+}
+
+func TestReserveBatchCreateNATPortsPlansAllAutomaticPorts(t *testing.T) {
+	previous := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = previous })
+	config.AppConfig = &config.ClicdConfig{
+		NATPortStart: 30000,
+		NATPortEnd:   30010,
+		NextSSHPort:  30001,
+	}
+
+	createNATReservationMu.Lock()
+	createNATReservations = map[uint64][]config.PortMapping{}
+	queuedCreateNATReservations = map[string][]config.PortMapping{}
+	createNATReservationMu.Unlock()
+	t.Cleanup(func() {
+		createNATReservationMu.Lock()
+		createNATReservations = map[uint64][]config.PortMapping{}
+		queuedCreateNATReservations = map[string][]config.PortMapping{}
+		createNATReservationMu.Unlock()
+	})
+
+	configs := []ContainerConfig{
+		{Name: "batch-1", PortMappingCount: 2},
+		{Name: "batch-2", PortMappingCount: 2},
+	}
+	for i := range configs {
+		if err := configs[i].NormalizeCreateNATMappings(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	planned, err := ReserveBatchCreateNATPorts(configs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	used := map[int]string{}
+	for _, cfg := range planned {
+		if cfg.ManagementPort == 0 {
+			t.Fatalf("%s has no planned management port", cfg.Name)
+		}
+		if len(cfg.NATPortMappings) != 1 {
+			t.Fatalf("%s automatic mappings = %d, want 1", cfg.Name, len(cfg.NATPortMappings))
+		}
+		for _, port := range []int{cfg.ManagementPort, cfg.NATPortMappings[0].HostPort} {
+			if owner := used[port]; owner != "" {
+				t.Fatalf("planned port %d is shared by %s and %s", port, owner, cfg.Name)
+			}
+			used[port] = cfg.Name
+		}
+	}
+
+	for _, cfg := range planned {
+		port, release, err := ReserveCreateNATPorts(cfg)
+		if err != nil {
+			t.Fatalf("%s could not claim its queued reservation: %v", cfg.Name, err)
+		}
+		if port != cfg.ManagementPort {
+			t.Fatalf("%s claimed management port %d, want %d", cfg.Name, port, cfg.ManagementPort)
+		}
+		release()
+	}
+	if len(queuedCreateNATReservations) != 0 {
+		t.Fatalf("queued reservations remain after claim: %v", queuedCreateNATReservations)
+	}
+}
+
+func TestReserveBatchCreateNATPortsRejectsWholeConflictingBatch(t *testing.T) {
+	previous := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = previous })
+	config.AppConfig = &config.ClicdConfig{
+		NATPortStart: 30000,
+		NATPortEnd:   30010,
+		NextSSHPort:  30001,
+	}
+
+	createNATReservationMu.Lock()
+	createNATReservations = map[uint64][]config.PortMapping{}
+	queuedCreateNATReservations = map[string][]config.PortMapping{}
+	createNATReservationMu.Unlock()
+	t.Cleanup(func() {
+		createNATReservationMu.Lock()
+		createNATReservations = map[uint64][]config.PortMapping{}
+		queuedCreateNATReservations = map[string][]config.PortMapping{}
+		createNATReservationMu.Unlock()
+	})
+
+	configs := []ContainerConfig{
+		{Name: "batch-1", NATPortMappings: []config.PortMapping{{HostPort: 30005, ContainerPort: 80, Protocol: "tcp"}}},
+		{Name: "batch-2", NATPortMappings: []config.PortMapping{{HostPort: 30005, ContainerPort: 8080, Protocol: "tcp"}}},
+	}
+	for i := range configs {
+		if err := configs[i].NormalizeCreateNATMappings(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := ReserveBatchCreateNATPorts(configs); err == nil {
+		t.Fatal("conflicting batch was accepted")
+	}
+	if len(queuedCreateNATReservations) != 0 {
+		t.Fatalf("conflicting batch left partial reservations: %v", queuedCreateNATReservations)
 	}
 }
 

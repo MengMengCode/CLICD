@@ -21,6 +21,23 @@ systemctl restart clicd
 journalctl -u clicd -n 100 --no-pager
 ```
 
+## Panel Access Allowlist CLI
+
+```bash
+# Show the current policy
+clicd access-policy show
+
+# Allow selected addresses and networks; add reverse proxies when needed
+clicd access-policy set \
+  --allow "203.0.113.10,192.168.1.0/24,2001:db8::/32" \
+  --trusted-proxy "127.0.0.1"
+
+# Disable source restrictions
+clicd access-policy disable
+```
+
+The same controls are available from the "Panel access allowlist" item in `clicd cli`. Both paths persist the setting and restart the running panel service automatically.
+
 ## Security Recommendations
 
 - Do not expose the web panel directly to untrusted networks.

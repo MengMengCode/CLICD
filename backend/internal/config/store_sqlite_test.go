@@ -66,6 +66,34 @@ func TestSQLiteConfigMigratesLegacyJSONAndPersists(t *testing.T) {
 			Config:        `{"name":"ct2","template_id":"debian-12","vcpu":1,"ram_mb":512,"disk_gb":5,"extra_ports":[80,443],"nat_port_mappings":[{"host_port":30080,"container_port":80,"protocol":"tcp","description":"HTTP"}],"management_port":30022,"assign_ipv6":true}`,
 		}},
 		EnabledImages: []string{"debian-12"},
+		CustomKVMImages: []CustomKVMImage{{
+			ID:          "custom-kvm-test",
+			Name:        "Test Cloud Image",
+			Description: "third-party image",
+			Distro:      "ubuntu",
+			Release:     "noble",
+			Arch:        "amd64",
+			URL:         "https://images.example.test/ubuntu.qcow2",
+			Provisioner: KVMProvisionerLinuxCloudInit,
+			SHA256:      strings.Repeat("a", 64),
+			CreatedAt:   "2026-07-26 10:00:00",
+		}},
+		CustomLXCImages: []CustomLXCImage{{
+			ID:          "custom-lxc-test",
+			Name:        "Test Rootfs",
+			Description: "third-party LXC image",
+			Distro:      "alpine",
+			Release:     "3.21",
+			Arch:        "amd64",
+			URL:         "https://images.example.test/alpine-rootfs.tar.xz",
+			SHA256:      strings.Repeat("b", 64),
+			CreatedAt:   "2026-07-26 10:00:00",
+		}},
+		PanelAccessPolicy: PanelAccessPolicy{
+			Enabled:        true,
+			AllowedSources: []string{"192.0.2.0/24"},
+			TrustedProxies: []string{"127.0.0.1"},
+		},
 		Snapshots: []Snapshot{{
 			ID:            "snap-1",
 			ContainerID:   1,
@@ -102,6 +130,15 @@ func TestSQLiteConfigMigratesLegacyJSONAndPersists(t *testing.T) {
 	if cfg.TaskConcurrency != DefaultTaskConcurrency {
 		t.Fatalf("legacy task concurrency = %d, want default %d", cfg.TaskConcurrency, DefaultTaskConcurrency)
 	}
+	if !cfg.PanelAccessPolicy.Enabled || len(cfg.PanelAccessPolicy.AllowedSources) != 1 {
+		t.Fatalf("legacy panel access policy was not migrated: %+v", cfg.PanelAccessPolicy)
+	}
+	if len(cfg.CustomKVMImages) != 1 || cfg.CustomKVMImages[0].ID != "custom-kvm-test" {
+		t.Fatalf("legacy custom KVM images were not migrated: %+v", cfg.CustomKVMImages)
+	}
+	if len(cfg.CustomLXCImages) != 1 || cfg.CustomLXCImages[0].ID != "custom-lxc-test" {
+		t.Fatalf("legacy custom LXC images were not migrated: %+v", cfg.CustomLXCImages)
+	}
 	if _, err := os.Stat(filepath.Join(dir, "config.db")); err != nil {
 		t.Fatalf("sqlite database was not created: %v", err)
 	}
@@ -123,6 +160,15 @@ func TestSQLiteConfigMigratesLegacyJSONAndPersists(t *testing.T) {
 	}
 	if got := cfg.TaskConcurrency; got != 6 {
 		t.Fatalf("persisted task concurrency = %d, want 6", got)
+	}
+	if !cfg.PanelAccessPolicy.Enabled || cfg.PanelAccessPolicy.AllowedSources[0] != "192.0.2.0/24" {
+		t.Fatalf("persisted panel access policy = %+v", cfg.PanelAccessPolicy)
+	}
+	if len(cfg.CustomKVMImages) != 1 || cfg.CustomKVMImages[0].SHA256 != strings.Repeat("a", 64) {
+		t.Fatalf("persisted custom KVM images = %+v", cfg.CustomKVMImages)
+	}
+	if len(cfg.CustomLXCImages) != 1 || cfg.CustomLXCImages[0].SHA256 != strings.Repeat("b", 64) {
+		t.Fatalf("persisted custom LXC images = %+v", cfg.CustomLXCImages)
 	}
 }
 

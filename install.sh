@@ -9,6 +9,7 @@ ISSUE_URL="https://github.com/${REPO}/issues"
 LOG_FILE="${CLICD_LOG_FILE:-/var/log/clicd-install.log}"
 INSTALL_DOWNLOAD_MARKER="${CLICD_INSTALL_DOWNLOAD_MARKER:-/tmp/clicd-install-dir.$$}"
 LIBVIRT_DEFAULT_MARKER="/var/lib/clicd/kvm/default-network.created"
+CLICD_NETWORK_ENV="/etc/clicd/network.env"
 
 normalize_clicd_arch() {
     arch="$1"
@@ -207,6 +208,7 @@ tr_msg() {
         -e 's/存储环境检查/Storage environment check/g' \
         -e 's/安装系统依赖/Install system dependencies/g' \
         -e 's/配置内核网络参数/Configure kernel networking/g' \
+        -e 's/配置 LXC NAT 网络/Configure LXC NAT network/g' \
         -e 's/配置运行时服务/Configure runtime services/g' \
         -e 's/配置 libvirt default NAT 网络/Configure libvirt default NAT network/g' \
         -e 's/配置 UID\/GID 映射/Configure UID\/GID mapping/g' \
@@ -417,6 +419,8 @@ Environment variables:
   CLICD_REPO=owner/repo          Default: ${REPO}
   CLICD_VERSION=latest|v1.0.0    Default: latest
   CLICD_LANG=en|zh               Default: auto
+  CLICD_LXC_SUBNET=10.0.3.0/24   Default: auto-detect an available private subnet
+  CLICD_KVM_SUBNET=192.168.122.0/24
   CLICD_LOG_FILE=/path/file.log  Default: ${LOG_FILE}
 
 Examples:
@@ -438,6 +442,8 @@ EOF
   CLICD_REPO=owner/repo          默认：${REPO}
   CLICD_VERSION=latest|v1.0.0    默认：latest
   CLICD_LANG=en|zh               默认：自动检测
+  CLICD_LXC_SUBNET=10.0.3.0/24   默认：自动检测可用私网网段
+  CLICD_KVM_SUBNET=192.168.122.0/24
   CLICD_LOG_FILE=/path/file.log  默认：${LOG_FILE}
 
 示例：
@@ -844,8 +850,15 @@ delete_ip6tables_bridge_rules() {
 cleanup_clicd_networking() {
     log "正在清理 CLICD 防火墙和网桥规则..."
     delete_iptables_lines nat PREROUTING 'clicd-'
-    delete_iptables_rule nat POSTROUTING -s 10.0.3.0/24 -o eth+ -j MASQUERADE
-    delete_iptables_rule nat POSTROUTING -s 192.168.122.0/24 -o eth+ -j MASQUERADE
+    delete_iptables_lines nat POSTROUTING 'clicd-'
+    configured_lxc_subnet="$(sed -n 's/^CLICD_LXC_SUBNET=//p' "$CLICD_NETWORK_ENV" 2>/dev/null | tail -n 1)"
+    configured_kvm_subnet="$(sed -n 's/^CLICD_KVM_SUBNET=//p' "$CLICD_NETWORK_ENV" 2>/dev/null | tail -n 1)"
+    [ -n "$configured_lxc_subnet" ] || configured_lxc_subnet="$(ip -4 route show dev lxcbr0 proto kernel scope link 2>/dev/null | awk '$1 ~ /\// {print $1; exit}' || true)"
+    [ -n "$configured_kvm_subnet" ] || configured_kvm_subnet="$(ip -4 route show dev virbr0 proto kernel scope link 2>/dev/null | awk '$1 ~ /\// {print $1; exit}' || true)"
+    for subnet in 10.0.3.0/24 192.168.122.0/24 "$configured_lxc_subnet" "$configured_kvm_subnet"; do
+        [ -n "$subnet" ] || continue
+        delete_iptables_rule nat POSTROUTING -s "$subnet" -o eth+ -j MASQUERADE
+    done
     cleanup_clicd_ipv6_from_config
     cleanup_clicd_ipv6_bridge_routes
 
@@ -855,6 +868,21 @@ cleanup_clicd_networking() {
         delete_filter_rule FORWARD -i "$bridge" -o "$bridge" -j ACCEPT
     done
     delete_ip6tables_bridge_rules
+}
+
+restore_lxc_network_configs() {
+    for path in /etc/default/lxc-net /etc/sysconfig/lxc-net /etc/conf.d/lxc-net /etc/conf.d/lxc-bridge; do
+        backup="${path}.clicd-backup"
+        if [ -f "$backup" ]; then
+            mv -f "$backup" "$path"
+            log "已恢复 $path"
+        elif [ -f "${path}.clicd-created" ]; then
+            remove_path "$path"
+        fi
+        rm -f "${path}.clicd-created"
+    done
+    remove_path "$CLICD_NETWORK_ENV"
+    rmdir /etc/clicd >/dev/null 2>&1 || true
 }
 
 remove_clicd_host_hooks() {
@@ -954,6 +982,7 @@ uninstall_clicd() {
     destroy_clicd_kvm_domains
     remove_clicd_libvirt_default_network
     cleanup_clicd_networking
+    restore_lxc_network_configs
     remove_clicd_host_hooks
     remove_clicd_quota_records
 
@@ -1019,6 +1048,7 @@ install_apk() {
         tar \
         gzip \
         xz \
+        python3 \
         lxc \
         lxc-download \
         lxc-openrc \
@@ -1058,6 +1088,7 @@ install_apt() {
         tar \
         gzip \
         xz-utils \
+        python3 \
         lxc \
         lxc-templates \
         lxcfs \
@@ -1127,6 +1158,7 @@ install_dnf() {
         tar \
         gzip \
         xz \
+        python3 \
         lxc \
         lxc-templates \
         bridge-utils \
@@ -1169,6 +1201,7 @@ install_yum() {
         tar \
         gzip \
         xz \
+        python3 \
         lxc \
         lxc-templates \
         bridge-utils \
@@ -1252,6 +1285,328 @@ install_dependencies() {
     fi
 }
 
+network_prompt_available() {
+    [ -r /dev/tty ] && [ -w /dev/tty ] && { printf '' > /dev/tty; } 2>/dev/null
+}
+
+current_bridge_subnet() {
+    bridge="$1"
+    subnet="$(ip -4 route show dev "$bridge" proto kernel scope link 2>/dev/null | awk '$1 ~ /\// {print $1; exit}' || true)"
+    if [ -z "$subnet" ]; then
+        subnet="$(ip -4 route show dev "$bridge" 2>/dev/null | awk '$1 ~ /\// {print $1; exit}' || true)"
+    fi
+    printf '%s' "$subnet"
+}
+
+saved_nat_subnet() {
+    key="$1"
+    bridge="$2"
+    saved=""
+    if [ -f "$CLICD_NETWORK_ENV" ]; then
+        saved="$(sed -n "s/^${key}=//p" "$CLICD_NETWORK_ENV" 2>/dev/null | tail -n 1)"
+    fi
+    if [ -z "$saved" ]; then
+        saved="$(current_bridge_subnet "$bridge")"
+    fi
+    if [ -z "$saved" ] && [ "$key" = "CLICD_LXC_SUBNET" ]; then
+        for path in /etc/default/lxc-net /etc/sysconfig/lxc-net /etc/conf.d/lxc-net /etc/conf.d/lxc-bridge; do
+            [ -f "$path" ] || continue
+            saved="$(sed -n 's/^[[:space:]]*LXC_NETWORK=["'\'']*\([^"'\'']*\)["'\'']*[[:space:]]*$/\1/p' "$path" | tail -n 1)"
+            [ -n "$saved" ] && break
+        done
+    fi
+    printf '%s' "$saved"
+}
+
+resolve_nat_network() {
+    role="$1"
+    requested="$2"
+    hint="$3"
+    exclude_bridge="$4"
+    extra_blocked="$5"
+    CLICD_NET_ROLE="$role" \
+    CLICD_NET_REQUESTED="$requested" \
+    CLICD_NET_HINT="$hint" \
+    CLICD_NET_EXCLUDE_BRIDGE="$exclude_bridge" \
+    CLICD_NET_EXTRA_BLOCKED="$extra_blocked" \
+        python3 - <<'PY'
+import ipaddress
+import os
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+
+def clean_excepthook(exc_type, value, traceback):
+    if issubclass(exc_type, ValueError):
+        print(value, file=sys.stderr)
+        return
+    sys.__excepthook__(exc_type, value, traceback)
+
+sys.excepthook = clean_excepthook
+
+role = os.environ.get("CLICD_NET_ROLE", "lxc")
+requested = os.environ.get("CLICD_NET_REQUESTED", "").strip()
+hint = os.environ.get("CLICD_NET_HINT", "").strip()
+exclude_bridge = os.environ.get("CLICD_NET_EXCLUDE_BRIDGE", "").strip()
+extra_blocked = os.environ.get("CLICD_NET_EXTRA_BLOCKED", "").strip()
+private_ranges = tuple(
+    ipaddress.ip_network(item)
+    for item in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
+
+def parse_private(value):
+    try:
+        network = ipaddress.ip_network(value, strict=False)
+    except ValueError as exc:
+        raise ValueError("请输入有效的 IPv4 CIDR，例如 172.28.40.0/24") from exc
+    if network.version != 4:
+        raise ValueError("NAT 网段必须是 IPv4 CIDR")
+    if network.prefixlen < 16 or network.prefixlen > 28:
+        raise ValueError("NAT 网段前缀长度必须在 /16 到 /28 之间")
+    if not any(network.subnet_of(private) for private in private_ranges):
+        raise ValueError("NAT 网段必须使用 RFC1918 私网地址")
+    return network
+
+def run(*args):
+    try:
+        return subprocess.run(args, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
+    except OSError:
+        return ""
+
+blocked = []
+route_types = {"broadcast", "local", "unreachable", "blackhole", "throw", "prohibit"}
+for line in run("ip", "-4", "route", "show", "table", "all").splitlines():
+    fields = line.split()
+    if not fields:
+        continue
+    index = 1 if fields[0] in route_types else 0
+    if index >= len(fields) or fields[index] == "default":
+        continue
+    if "dev" in fields:
+        dev_index = fields.index("dev")
+        if dev_index + 1 < len(fields) and fields[dev_index + 1] == exclude_bridge:
+            continue
+    try:
+        blocked.append(ipaddress.ip_network(fields[index], strict=False))
+    except ValueError:
+        continue
+
+for name in run("virsh", "net-list", "--all", "--name").splitlines():
+    name = name.strip()
+    if not name or (role == "kvm" and name == "default"):
+        continue
+    xml = run("virsh", "net-dumpxml", name)
+    if not xml:
+        continue
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        continue
+    for item in root.findall("ip"):
+        address = item.get("address", "")
+        netmask = item.get("netmask", "")
+        prefix = item.get("prefix", "")
+        if not address:
+            continue
+        try:
+            blocked.append(ipaddress.ip_network(f"{address}/{prefix or netmask}", strict=False))
+        except ValueError:
+            continue
+
+if extra_blocked:
+    try:
+        blocked.append(ipaddress.ip_network(extra_blocked, strict=False))
+    except ValueError:
+        pass
+
+def conflicts(network):
+    return [item for item in blocked if network.overlaps(item)]
+
+selected = None
+if requested and requested.lower() != "auto":
+    selected = parse_private(requested)
+    overlaps = conflicts(selected)
+    if overlaps:
+        joined = ", ".join(str(item) for item in overlaps[:5])
+        raise ValueError(f"网段 {selected} 与宿主机现有网络冲突：{joined}")
+else:
+    if hint:
+        try:
+            candidate = parse_private(hint)
+            if not conflicts(candidate):
+                selected = candidate
+        except ValueError:
+            pass
+
+    defaults = ["10.0.3.0/24"] if role == "lxc" else ["192.168.122.0/24"]
+    base_octet = 240 if role == "lxc" else 241
+    ten_candidates = [
+        f"10.{base_octet + offset // 256}.{offset % 256}.0/24"
+        for offset in range(0, 1024)
+        if base_octet + offset // 256 <= 250
+    ]
+    seventeen_candidates = [
+        f"172.{second}.{third}.0/24"
+        for second in range(31, 15, -1)
+        for third in range(0, 256)
+    ]
+    one_ninety_two_candidates = [
+        f"192.168.{third}.0/24"
+        for third in range(240, -1, -1)
+    ]
+    candidates = defaults + ten_candidates + seventeen_candidates + one_ninety_two_candidates
+    if selected is None:
+        for raw in candidates:
+            candidate = ipaddress.ip_network(raw)
+            if not conflicts(candidate):
+                selected = candidate
+                break
+
+if selected is None:
+    raise ValueError("没有找到可用的私网网段，请通过 CLICD_LXC_SUBNET/CLICD_KVM_SUBNET 手动指定")
+
+hosts = selected.num_addresses
+gateway = selected.network_address + 1
+dhcp_start = selected.network_address + 2
+dhcp_end = selected.broadcast_address - 1
+dhcp_max = hosts - 3
+print("|".join((
+    str(selected),
+    str(gateway),
+    str(selected.netmask),
+    str(dhcp_start),
+    str(dhcp_end),
+    str(dhcp_max),
+)))
+PY
+}
+
+prompt_nat_network() {
+    role="$1"
+    label_zh="$2"
+    label_en="$3"
+    env_value="$4"
+    hint="$5"
+    bridge="$6"
+    extra_blocked="$7"
+    requested="$env_value"
+
+    while :; do
+        if [ -z "$requested" ] && network_prompt_available; then
+            if [ "$CLICD_LANG_DETECTED" = "en" ]; then
+                printf "  %s (IPv4 CIDR, press Enter to auto-detect): " "$label_en" > /dev/tty
+            else
+                printf "  %s（IPv4 CIDR，回车自动检测可用网段）: " "$label_zh" > /dev/tty
+            fi
+            IFS= read -r requested < /dev/tty || requested=""
+        fi
+        [ -n "$requested" ] || requested="auto"
+
+        error_file="/tmp/clicd-network-error.$$"
+        if values="$(resolve_nat_network "$role" "$requested" "$hint" "$bridge" "$extra_blocked" 2>"$error_file")"; then
+            rm -f "$error_file"
+            printf '%s' "$values"
+            return
+        fi
+        error_message="$(cat "$error_file" 2>/dev/null || true)"
+        rm -f "$error_file"
+        if ! network_prompt_available || [ -n "$env_value" ]; then
+            die "${error_message:-NAT 网段配置无效。}"
+        fi
+        warn "${error_message:-NAT 网段配置无效，请重新输入。}"
+        requested=""
+    done
+}
+
+choose_nat_networks() {
+    lxc_hint="$(saved_nat_subnet CLICD_LXC_SUBNET lxcbr0)"
+    kvm_hint="$(saved_nat_subnet CLICD_KVM_SUBNET virbr0)"
+
+    lxc_values="$(prompt_nat_network lxc "LXC NAT 网段" "LXC NAT subnet" "${CLICD_LXC_SUBNET:-}" "$lxc_hint" lxcbr0 "")"
+    old_ifs="$IFS"
+    IFS='|'
+    set -- $lxc_values
+    IFS="$old_ifs"
+    LXC_NAT_SUBNET="$1"
+    LXC_NAT_GATEWAY="$2"
+    LXC_NAT_NETMASK="$3"
+    LXC_NAT_DHCP_START="$4"
+    LXC_NAT_DHCP_END="$5"
+    LXC_NAT_DHCP_MAX="$6"
+
+    kvm_values="$(prompt_nat_network kvm "KVM NAT 网段" "KVM NAT subnet" "${CLICD_KVM_SUBNET:-}" "$kvm_hint" virbr0 "$LXC_NAT_SUBNET")"
+    IFS='|'
+    set -- $kvm_values
+    IFS="$old_ifs"
+    KVM_NAT_SUBNET="$1"
+    KVM_NAT_GATEWAY="$2"
+    KVM_NAT_NETMASK="$3"
+    KVM_NAT_DHCP_START="$4"
+    KVM_NAT_DHCP_END="$5"
+    KVM_NAT_DHCP_MAX="$6"
+
+    export CLICD_LXC_SUBNET="$LXC_NAT_SUBNET"
+    export CLICD_KVM_SUBNET="$KVM_NAT_SUBNET"
+    log "NAT 网络：LXC=${LXC_NAT_SUBNET} gateway=${LXC_NAT_GATEWAY}，KVM=${KVM_NAT_SUBNET} gateway=${KVM_NAT_GATEWAY}"
+}
+
+write_lxc_network_config() {
+    path="$1"
+    mkdir -p "$(dirname "$path")"
+    if [ -f "${path}.clicd-created" ]; then
+        :
+    elif [ -f "$path" ] && [ ! -f "${path}.clicd-backup" ]; then
+        cp -p "$path" "${path}.clicd-backup"
+    elif [ ! -f "$path" ]; then
+        touch "${path}.clicd-created"
+    fi
+    cat > "$path" << EOF
+USE_LXC_BRIDGE="true"
+LXC_BRIDGE="lxcbr0"
+LXC_ADDR="${LXC_NAT_GATEWAY}"
+LXC_NETMASK="${LXC_NAT_NETMASK}"
+LXC_NETWORK="${LXC_NAT_SUBNET}"
+LXC_DHCP_RANGE="${LXC_NAT_DHCP_START},${LXC_NAT_DHCP_END}"
+LXC_DHCP_MAX="${LXC_NAT_DHCP_MAX}"
+LXC_DHCP_CONFILE=""
+LXC_DOMAIN=""
+EOF
+}
+
+configure_lxc_nat_network() {
+    previous="$(current_bridge_subnet lxcbr0)"
+    if [ -n "$previous" ] && [ "$previous" != "$LXC_NAT_SUBNET" ]; then
+        active="$(lxc-ls --active 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//' || true)"
+        if [ -n "$active" ] && [ "${CLICD_FORCE_NAT_RECONFIGURE:-0}" != "1" ]; then
+            die "LXC NAT 网段将从 ${previous} 修改为 ${LXC_NAT_SUBNET}，但仍有运行中的 LXC：${active}。请先关机，或设置 CLICD_FORCE_NAT_RECONFIGURE=1。"
+        fi
+        if is_systemd; then
+            systemctl stop lxc-net.service >/dev/null 2>&1 || true
+        elif is_openrc; then
+            rc-service lxc-net stop >/dev/null 2>&1 || rc-service lxc-bridge stop >/dev/null 2>&1 || true
+        fi
+        ip link delete lxcbr0 >/dev/null 2>&1 || true
+    fi
+
+    write_lxc_network_config /etc/default/lxc-net
+    case "$OS_ID" in
+        alpine)
+            write_lxc_network_config /etc/conf.d/lxc-net
+            write_lxc_network_config /etc/conf.d/lxc-bridge
+            ;;
+        centos|rhel|rocky|almalinux|fedora)
+            write_lxc_network_config /etc/sysconfig/lxc-net
+            ;;
+    esac
+
+    mkdir -p "$(dirname "$CLICD_NETWORK_ENV")"
+    cat > "$CLICD_NETWORK_ENV" << EOF
+CLICD_LXC_SUBNET=${LXC_NAT_SUBNET}
+CLICD_KVM_SUBNET=${KVM_NAT_SUBNET}
+EOF
+    chmod 0644 "$CLICD_NETWORK_ENV"
+}
+
 configure_kernel_networking() {
     log "正在启用内核转发配置..."
     cat > /etc/sysctl.d/99-clicd.conf << 'EOF'
@@ -1308,6 +1663,13 @@ setup_runtime_services() {
     if is_openrc; then
         rc-update add cgroups default >/dev/null 2>&1 || true
         rc-service cgroups start >/dev/null 2>&1 || true
+        if rc-service -e lxc-net >/dev/null 2>&1; then
+            rc-update add lxc-net default >/dev/null 2>&1 || true
+            rc-service lxc-net restart >/dev/null 2>&1 || true
+        elif rc-service -e lxc-bridge >/dev/null 2>&1; then
+            rc-update add lxc-bridge default >/dev/null 2>&1 || true
+            rc-service lxc-bridge restart >/dev/null 2>&1 || true
+        fi
         rc-update add lxc default >/dev/null 2>&1 || true
         rc-service lxc start >/dev/null 2>&1 || true
         rc-update add lxcfs default >/dev/null 2>&1 || true
@@ -1331,22 +1693,60 @@ libvirt_network_active() {
         | grep -qx yes
 }
 
+libvirt_default_subnet() {
+    LC_ALL=C LANG=C virsh net-dumpxml default 2>/dev/null |
+        python3 -c '
+import ipaddress
+import sys
+import xml.etree.ElementTree as ET
+try:
+    root = ET.parse(sys.stdin).getroot()
+    item = root.find("ip")
+    address = item.get("address", "")
+    mask = item.get("prefix", "") or item.get("netmask", "")
+    print(ipaddress.ip_network(f"{address}/{mask}", strict=False))
+except Exception:
+    pass
+' 2>/dev/null || true
+}
+
+libvirt_default_in_use() {
+    LC_ALL=C LANG=C virsh list --all --name 2>/dev/null | while IFS= read -r domain; do
+        [ -n "$domain" ] || continue
+        if LC_ALL=C LANG=C virsh domiflist "$domain" 2>/dev/null |
+            awk '($2 == "network" && $3 == "default") || ($2 == "bridge" && $3 == "virbr0") {found=1} END {exit !found}'; then
+            printf '%s\n' "$domain"
+        fi
+    done
+}
+
 setup_default_libvirt_network() {
     if ! has_cmd virsh; then
         warn "未找到 virsh，跳过 libvirt default NAT 网络检查。"
         return
     fi
     log "正在检查 libvirt default NAT 网络..."
+    current_subnet="$(libvirt_default_subnet)"
+    if [ -n "$current_subnet" ] && [ "$current_subnet" != "$KVM_NAT_SUBNET" ]; then
+        domains="$(libvirt_default_in_use | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+        if [ -n "$domains" ] && [ "${CLICD_FORCE_NAT_RECONFIGURE:-0}" != "1" ]; then
+            die "KVM NAT 网段将从 ${current_subnet} 修改为 ${KVM_NAT_SUBNET}，但 libvirt default 网络仍被虚拟机使用：${domains}。请先关机，或设置 CLICD_FORCE_NAT_RECONFIGURE=1。"
+        fi
+        if libvirt_network_active; then
+            LC_ALL=C LANG=C virsh net-destroy default >/dev/null
+        fi
+        LC_ALL=C LANG=C virsh net-undefine default >/dev/null
+    fi
     if ! virsh net-info default >/dev/null 2>&1; then
         net_xml="$(mktemp /tmp/clicd-default-net.XXXXXX.xml)"
-        cat > "$net_xml" << 'EOF'
+        cat > "$net_xml" << EOF
 <network>
   <name>default</name>
   <bridge name='virbr0'/>
   <forward mode='nat'/>
-  <ip address='192.168.122.1' netmask='255.255.255.0'>
+  <ip address='${KVM_NAT_GATEWAY}' netmask='${KVM_NAT_NETMASK}'>
     <dhcp>
-      <range start='192.168.122.2' end='192.168.122.254'/>
+      <range start='${KVM_NAT_DHCP_START}' end='${KVM_NAT_DHCP_END}'/>
     </dhcp>
   </ip>
 </network>
@@ -1605,6 +2005,7 @@ Restart=always
 RestartSec=5
 LimitNOFILE=1048576
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=-${CLICD_NETWORK_ENV}
 
 [Install]
 WantedBy=multi-user.target
@@ -1627,6 +2028,12 @@ command_background=true
 pidfile="/run/clicd.pid"
 output_log="/var/log/clicd.log"
 error_log="/var/log/clicd.err"
+
+if [ -r /etc/clicd/network.env ]; then
+    set -a
+    . /etc/clicd/network.env
+    set +a
+fi
 
 depend() {
     need net
@@ -1708,6 +2115,8 @@ print_summary() {
     echo "====================================="
     echo "  $(tr_msg "Web 面板：")http://YOUR_SERVER_IP:8999"
     echo "  $(tr_msg "二进制：")/usr/local/bin/clicd"
+    echo "  LXC NAT: ${LXC_NAT_SUBNET} (gateway ${LXC_NAT_GATEWAY})"
+    echo "  KVM NAT: ${KVM_NAT_SUBNET} (gateway ${KVM_NAT_GATEWAY})"
     echo "  $(tr_msg "安装日志：")$LOG_FILE"
     echo "  $(tr_msg "问题反馈：")$ISSUE_URL"
     if is_systemd; then
@@ -1733,7 +2142,9 @@ print_summary() {
 run_step "兼容性检查" check_os_compatibility
 run_step "存储环境检查" check_storage_compatibility
 run_step "安装系统依赖" install_dependencies
+choose_nat_networks
 run_step "配置内核网络参数" configure_kernel_networking
+run_step "配置 LXC NAT 网络" configure_lxc_nat_network
 run_step "配置运行时服务" setup_runtime_services
 run_step "配置 libvirt default NAT 网络" setup_default_libvirt_network
 run_step "配置 UID/GID 映射" setup_subids

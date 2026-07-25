@@ -991,6 +991,7 @@ function getTemplateName(id: string) {
     'kvm-debian-bookworm': 'Debian 12',
     'kvm-debian-bullseye': 'Debian 11',
     'kvm-rockylinux-9': 'Rocky 9',
+    'kvm-windows-11': 'Windows 11',
     'kvm-windows-10': 'Windows 10',
   }
   return map[id] || id

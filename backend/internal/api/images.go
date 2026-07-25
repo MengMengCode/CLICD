@@ -2,12 +2,16 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -38,7 +42,13 @@ type ImageInfo struct {
 	SizeBytes       int64  `json:"size_bytes"`
 	ManualPath      string `json:"manual_path,omitempty"`
 	Desktop         string `json:"desktop,omitempty"`
+	Provisioner     string `json:"provisioner,omitempty"`
+	Custom          bool   `json:"custom,omitempty"`
+	SHA256          string `json:"sha256,omitempty"`
 }
+
+var customImageFieldPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+var sha256Pattern = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
 
 var imageDownloadsMu sync.Mutex
 var imageDownloads = map[string]*imageDownloadStatus{}
@@ -217,6 +227,13 @@ func imageDownloadedInfo(distro, release, arch string) (bool, int64) {
 	return false, 0
 }
 
+func lxcTemplateDownloadedInfo(template lxc.Template) (bool, int64) {
+	if template.Custom {
+		return lxc.CustomImageDownloadedInfo(template.ID)
+	}
+	return imageDownloadedInfo(template.Distro, template.Release, template.Arch)
+}
+
 // getEnabledImageSet returns the set of enabled image IDs.
 // If none have been explicitly set, all templates are enabled by default.
 func getEnabledImageSet() map[string]bool {
@@ -258,7 +275,7 @@ func HandleImages(w http.ResponseWriter, r *http.Request) {
 	images := make([]ImageInfo, 0, len(templates)+len(kvmImages))
 	for _, t := range templates {
 		dl := imageDownloadInfo(t.ID)
-		downloaded, size := imageDownloadedInfo(t.Distro, t.Release, t.Arch)
+		downloaded, size := lxcTemplateDownloadedInfo(t)
 		images = append(images, ImageInfo{
 			ID:              t.ID,
 			Name:            t.Name,
@@ -276,13 +293,15 @@ func HandleImages(w http.ResponseWriter, r *http.Request) {
 			Stage:           dl.Stage,
 			Error:           dl.Error,
 			SizeBytes:       size,
+			Custom:          t.Custom,
+			SHA256:          t.SHA256,
 		})
 	}
 	for _, t := range kvmImages {
 		dl := imageDownloadInfo(t.ID)
 		downloaded, size := kvm.ImageDownloadedInfo(t.ID)
 		manualPath := ""
-		if t.Distro == "windows" {
+		if t.IsWindows() {
 			manualPath = kvm.ImagePath(t.ID)
 		}
 		images = append(images, ImageInfo{
@@ -304,10 +323,259 @@ func HandleImages(w http.ResponseWriter, r *http.Request) {
 			SizeBytes:       size,
 			ManualPath:      manualPath,
 			Desktop:         t.Desktop,
+			Provisioner:     t.Provisioner,
+			Custom:          t.Custom,
+			SHA256:          t.SHA256,
 		})
 	}
 
 	jsonResponse(w, http.StatusOK, APIResponse{Success: true, Data: images})
+}
+
+// HandleCustomKVMImages creates or removes administrator-defined LXC/KVM image sources.
+func HandleCustomKVMImages(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		if !requireScope(w, r, "image:download") {
+			return
+		}
+		handleCustomKVMImageCreate(w, r)
+	case http.MethodDelete:
+		if !requireScope(w, r, "image:delete") {
+			return
+		}
+		handleCustomKVMImageDelete(w, r)
+	default:
+		jsonResponse(w, http.StatusMethodNotAllowed, APIResponse{Success: false, Message: "Method not allowed"})
+	}
+}
+
+func handleCustomKVMImageCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Type        string `json:"type"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Distro      string `json:"distro"`
+		Release     string `json:"release"`
+		Arch        string `json:"arch"`
+		URL         string `json:"url"`
+		Provisioner string `json:"provisioner"`
+		SHA256      string `json:"sha256"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Invalid request body"})
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.Type = strings.ToLower(strings.TrimSpace(req.Type))
+	if req.Type == "" {
+		req.Type = config.VirtualizationKVM
+	}
+	req.Description = strings.TrimSpace(req.Description)
+	req.Distro = strings.ToLower(strings.TrimSpace(req.Distro))
+	req.Release = strings.ToLower(strings.TrimSpace(req.Release))
+	req.Arch = strings.ToLower(strings.TrimSpace(req.Arch))
+	req.URL = strings.TrimSpace(req.URL)
+	req.Provisioner = strings.ToLower(strings.TrimSpace(req.Provisioner))
+	req.SHA256 = strings.ToLower(strings.TrimSpace(req.SHA256))
+
+	if req.Name == "" || len(req.Name) > 100 {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "name must be between 1 and 100 characters"})
+		return
+	}
+	if len(req.Description) > 500 {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "description must not exceed 500 characters"})
+		return
+	}
+	if req.Arch != runtime.GOARCH || (req.Arch != "amd64" && req.Arch != "arm64") {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "image architecture must match the host architecture"})
+		return
+	}
+	if req.Type == config.VirtualizationLXC {
+		if !customImageFieldPattern.MatchString(req.Distro) {
+			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "distro contains unsupported characters"})
+			return
+		}
+		if !customImageFieldPattern.MatchString(req.Release) {
+			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "release contains unsupported characters"})
+			return
+		}
+	} else if req.Type == config.VirtualizationKVM {
+		switch req.Provisioner {
+		case config.KVMProvisionerLinuxCloudInit:
+			if !customImageFieldPattern.MatchString(req.Distro) {
+				jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "distro contains unsupported characters"})
+				return
+			}
+			if !customImageFieldPattern.MatchString(req.Release) {
+				jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "release contains unsupported characters"})
+				return
+			}
+		case config.KVMProvisionerWindows10:
+			if req.Arch != "amd64" {
+				jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Windows unattended installation currently requires an amd64 host"})
+				return
+			}
+			req.Distro = "windows"
+			req.Release = "10"
+		case config.KVMProvisionerWindows11:
+			if req.Arch != "amd64" {
+				jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Windows unattended installation currently requires an amd64 host"})
+				return
+			}
+			req.Distro = "windows"
+			req.Release = "11"
+		default:
+			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "unsupported unattended installation template"})
+			return
+		}
+	} else {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "type must be lxc or kvm"})
+		return
+	}
+	if len(req.URL) > 4096 {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "url must not exceed 4096 characters"})
+		return
+	}
+	parsedURL, err := url.ParseRequestURI(req.URL)
+	if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "https" && parsedURL.Scheme != "http") || parsedURL.User != nil {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "url must be a valid HTTP or HTTPS download URL without credentials"})
+		return
+	}
+	if req.SHA256 != "" && !sha256Pattern.MatchString(req.SHA256) {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "sha256 must contain exactly 64 hexadecimal characters"})
+		return
+	}
+	if req.Type == config.VirtualizationLXC {
+		for _, existing := range lxc.GetTemplates() {
+			if strings.EqualFold(existing.Name, req.Name) {
+				jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "an image with this name already exists"})
+				return
+			}
+			if existing.Custom && existing.URL == req.URL {
+				jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "this image URL is already registered"})
+				return
+			}
+		}
+	} else {
+		for _, existing := range kvm.GetImages() {
+			if strings.EqualFold(existing.Name, req.Name) {
+				jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "an image with this name already exists"})
+				return
+			}
+			if existing.Custom && existing.URL == req.URL {
+				jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "this image URL is already registered"})
+				return
+			}
+		}
+	}
+
+	random := make([]byte, 5)
+	if _, err := rand.Read(random); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, APIResponse{Success: false, Message: "failed to generate image ID"})
+		return
+	}
+	createdAt := time.Now().Format("2006-01-02 15:04:05")
+	if req.Type == config.VirtualizationLXC {
+		image := config.CustomLXCImage{
+			ID:          "custom-lxc-" + hex.EncodeToString(random),
+			Name:        req.Name,
+			Description: req.Description,
+			Distro:      req.Distro,
+			Release:     req.Release,
+			Arch:        req.Arch,
+			URL:         req.URL,
+			SHA256:      req.SHA256,
+			CreatedAt:   createdAt,
+		}
+		if err := config.AddCustomLXCImage(image); err != nil {
+			jsonResponse(w, http.StatusInternalServerError, APIResponse{Success: false, Message: "failed to save custom image: " + err.Error()})
+			return
+		}
+		jsonResponse(w, http.StatusCreated, APIResponse{Success: true, Message: "Custom image added", Data: image})
+		return
+	}
+	image := config.CustomKVMImage{
+		ID: "custom-kvm-" + hex.EncodeToString(random), Name: req.Name, Description: req.Description,
+		Distro: req.Distro, Release: req.Release, Arch: req.Arch, URL: req.URL,
+		Provisioner: req.Provisioner, SHA256: req.SHA256, CreatedAt: createdAt,
+	}
+	if err := config.AddCustomKVMImage(image); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, APIResponse{Success: false, Message: "failed to save custom image: " + err.Error()})
+		return
+	}
+	jsonResponse(w, http.StatusCreated, APIResponse{Success: true, Message: "Custom image added", Data: image})
+}
+
+func handleCustomKVMImageDelete(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.ID) == "" {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "id required"})
+		return
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	kvmImage := kvm.FindImage(req.ID)
+	lxcImage := lxc.FindTemplate(req.ID)
+	isCustomKVM := kvmImage != nil && kvmImage.Custom
+	isCustomLXC := lxcImage != nil && lxcImage.Custom
+	if !isCustomKVM && !isCustomLXC {
+		jsonResponse(w, http.StatusNotFound, APIResponse{Success: false, Message: "Custom image not found"})
+		return
+	}
+	if isImageDownloadActive(req.ID) {
+		jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "Image is downloading; cancel it before removing the source"})
+		return
+	}
+	for i := range config.AppConfig.Containers {
+		if config.AppConfig.Containers[i].Template == req.ID {
+			jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "This image is still used by a container"})
+			return
+		}
+	}
+	for i := range config.AppConfig.Tasks {
+		task := &config.AppConfig.Tasks[i]
+		if task.Status != "pending" && task.Status != "running" {
+			continue
+		}
+		var taskConfig struct {
+			TemplateID string `json:"template_id"`
+		}
+		_ = json.Unmarshal([]byte(task.Config), &taskConfig)
+		if task.TemplateID == req.ID || taskConfig.TemplateID == req.ID {
+			jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "This image is still referenced by an active task"})
+			return
+		}
+	}
+	var deleteErr error
+	if isCustomLXC {
+		deleteErr = lxc.DeleteCustomImage(req.ID)
+	} else {
+		deleteErr = kvm.DeleteImage(req.ID)
+	}
+	if deleteErr != nil {
+		jsonResponse(w, http.StatusInternalServerError, APIResponse{Success: false, Message: "Failed to delete image cache: " + deleteErr.Error()})
+		return
+	}
+	removeImageEnabled(req.ID)
+	var removed bool
+	var err error
+	if isCustomLXC {
+		removed, err = config.RemoveCustomLXCImage(req.ID)
+	} else {
+		removed, err = config.RemoveCustomKVMImage(req.ID)
+	}
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, APIResponse{Success: false, Message: "Failed to remove custom image: " + err.Error()})
+		return
+	}
+	if !removed {
+		jsonResponse(w, http.StatusNotFound, APIResponse{Success: false, Message: "Custom image not found"})
+		return
+	}
+	clearImageDownload(req.ID)
+	jsonResponse(w, http.StatusOK, APIResponse{Success: true, Message: "Custom image removed"})
 }
 
 // HandleImageDownload starts a template image download in the background.
@@ -407,16 +675,49 @@ func HandleImageDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Already downloaded? Just enable if needed.
-	if isImageDownloaded(tmpl.Distro, tmpl.Release, tmpl.Arch) {
+	if downloaded, _ := lxcTemplateDownloadedInfo(*tmpl); downloaded {
 		ensureImageEnabled(tmpl.ID)
 		clearImageDownload(tmpl.ID)
 		jsonResponse(w, http.StatusOK, APIResponse{Success: true, Message: "Already downloaded"})
 		return
 	}
 
-	ctx, ok := startImageDownload(tmpl.ID, "lxc-create")
+	startStage := "lxc-create"
+	if tmpl.Custom {
+		startStage = "downloading"
+	}
+	ctx, ok := startImageDownload(tmpl.ID, startStage)
 	if !ok {
 		jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "Already downloading"})
+		return
+	}
+
+	if tmpl.Custom {
+		go func(tmpl lxc.Template) {
+			defer endLXCImageDownload()
+			err := lxc.DownloadCustomImageWithProgress(ctx, tmpl, func(progress lxc.CustomImageDownloadProgress) {
+				updateImageDownload(tmpl.ID, func(status *imageDownloadStatus) {
+					status.Stage = progress.Stage
+					status.DownloadedBytes = progress.DownloadedBytes
+					status.TotalBytes = progress.TotalBytes
+					status.Progress = progress.Percent
+				})
+			})
+			if err != nil {
+				if ctx.Err() != nil {
+					_ = os.Remove(lxc.CustomImagePath(tmpl.ID) + ".tmp")
+					_ = os.Remove(lxc.CustomImagePath(tmpl.ID))
+					finishImageDownload(tmpl.ID, nil)
+					return
+				}
+				finishImageDownload(tmpl.ID, err)
+				return
+			}
+			ensureImageEnabled(tmpl.ID)
+			finishImageDownload(tmpl.ID, nil)
+		}(*tmpl)
+		lxcDownloadHandedOff = true
+		jsonResponse(w, http.StatusAccepted, APIResponse{Success: true, Message: "Download started"})
 		return
 	}
 
@@ -633,7 +934,12 @@ func HandleImageCancel(w http.ResponseWriter, r *http.Request) {
 		os.Remove(kvm.ImagePath(image.ID))
 	}
 	if tmpl := lxc.FindTemplate(req.TemplateID); tmpl != nil {
-		go cleanupLXCImageDownloadTemp(tmpl.ID)
+		if tmpl.Custom {
+			_ = os.Remove(lxc.CustomImagePath(tmpl.ID) + ".tmp")
+			_ = os.Remove(lxc.CustomImagePath(tmpl.ID))
+		} else {
+			go cleanupLXCImageDownloadTemp(tmpl.ID)
+		}
 	}
 	jsonResponse(w, http.StatusOK, APIResponse{Success: true, Message: "Cancel requested"})
 }
@@ -672,6 +978,15 @@ func HandleImageDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		jsonResponse(w, http.StatusNotFound, APIResponse{Success: false, Message: "Template not found"})
+		return
+	}
+	if tmpl.Custom {
+		if err := lxc.DeleteCustomImage(tmpl.ID); err != nil {
+			jsonResponse(w, http.StatusInternalServerError, APIResponse{Success: false, Message: "Failed to delete image cache: " + err.Error()})
+			return
+		}
+		removeImageEnabled(tmpl.ID)
+		jsonResponse(w, http.StatusOK, APIResponse{Success: true, Message: "Deleted"})
 		return
 	}
 
@@ -773,7 +1088,7 @@ func HandleEnabledImages(w http.ResponseWriter, r *http.Request) {
 			if subUser != nil && !isImageAllowedForSubUser(subUser, targetContainer, t.ID) {
 				continue
 			}
-			if downloaded := isImageDownloaded(t.Distro, t.Release, t.Arch); downloaded && (enabledSet[t.ID] || currentImageIDs[t.ID]) {
+			if downloaded, _ := lxcTemplateDownloadedInfo(t); downloaded && (enabledSet[t.ID] || currentImageIDs[t.ID]) {
 				result = append(result, map[string]string{
 					"id": t.ID, "name": t.Name, "distro": t.Distro, "release": t.Release, "arch": t.Arch,
 					"variant": t.Variant, "description": t.Description, "type": config.VirtualizationLXC,
@@ -810,7 +1125,8 @@ func isImageDownloadedForRuntime(templateID string, runtime string) bool {
 	if tmpl == nil {
 		return false
 	}
-	return isImageDownloaded(tmpl.Distro, tmpl.Release, tmpl.Arch)
+	downloaded, _ := lxcTemplateDownloadedInfo(*tmpl)
+	return downloaded
 }
 
 func isTemplateAvailableForRequest(r *http.Request, c *config.Container, templateID string, runtime string) bool {
@@ -844,7 +1160,8 @@ func isImageEnabledAndDownloaded(templateID string, runtime string) bool {
 		return false
 	}
 	enabledSet := getEnabledImageSet()
-	return enabledSet[tmpl.ID] && isImageDownloaded(tmpl.Distro, tmpl.Release, tmpl.Arch)
+	downloaded, _ := lxcTemplateDownloadedInfo(*tmpl)
+	return enabledSet[tmpl.ID] && downloaded
 }
 
 func hostKVMAvailable() bool {

@@ -40,8 +40,12 @@ export default function Login() {
         await login(username, password)
       }
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { message?: string } } }
-      setError(error.response?.data?.message || t('登录失败，请检查用户名和密码'))
+      const error = err as { response?: { status?: number; data?: { message?: string } } }
+      if (error.response?.status === 401) {
+        setError(t(isAccessCodeLogin ? '访问码或密码错误' : '用户名或密码错误'))
+      } else {
+        setError(error.response?.data?.message || t('登录失败，请检查用户名和密码'))
+      }
     } finally {
       setLoading(false)
     }
@@ -79,7 +83,7 @@ export default function Login() {
               {!isAccessCodeLogin && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    用户名
+                    {t('用户名')}
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -90,7 +94,7 @@ export default function Login() {
                       value={username}
                       onChange={(event) => setUsername(event.target.value)}
                       className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-md text-black bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-black text-sm"
-                      placeholder="输入用户名"
+                      placeholder={t('输入用户名')}
                       required
                       autoComplete="username"
                     />
@@ -100,7 +104,7 @@ export default function Login() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                密码
+                {t('密码')}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -111,7 +115,7 @@ export default function Login() {
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-md text-black bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-black text-sm"
-                  placeholder="输入密码"
+                  placeholder={t('输入密码')}
                   required
                   autoComplete="current-password"
                 />
@@ -123,7 +127,7 @@ export default function Login() {
               disabled={loading}
               className="w-full bg-black text-white py-2.5 rounded-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
             >
-              {loading ? '登录中...' : '登录'}
+              {loading ? t('登录中...') : t('登录')}
             </button>
           </form>
         </div>

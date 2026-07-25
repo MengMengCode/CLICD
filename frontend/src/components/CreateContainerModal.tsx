@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowRight, CalendarClock, Plus, RefreshCw, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CalendarClock, Check, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { batchCreate, getIPv6Status, getEnabledImages, getHostInfo, getHostReport, getStorageInfo, CreateContainerRequest, HostInfo, HostProbeReport, IPv6Status, PortMapping, StorageInfo, Template } from '../services/api'
+import { batchCreate, getIPv6Status, getEnabledImages, getHostInfo, getHostReport, getRoutingInfo, getStorageInfo, CreateContainerRequest, HostInfo, HostProbeReport, IPv6Status, PortMapping, RoutingInfo, StorageInfo, Template } from '../services/api'
 import { useDialog } from './Dialog'
 import { useLanguage, type Language } from '../contexts/LanguageContext'
 import { generateSSHPassword, sshPasswordError, sshPublicKeyError, type SSHAuthMode } from '../utils/sshAuth'
@@ -60,8 +60,10 @@ const defaultForm: CreateContainerRequest = {
 export default function CreateContainerModal({ isOpen, onClose, onSuccess, existingNames = [] }: CreateContainerModalProps) {
   const navigate = useNavigate()
   const dialog = useDialog()
-  const { language } = useLanguage()
+  const { language, t } = useLanguage()
   const networkText = createNetworkText[language]
+  const wizardSteps = [t('基础信息'), t('镜像选择'), t('网络配置'), t('预览清单')]
+  const [currentStep, setCurrentStep] = useState(0)
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(false)
   const [batchCount, setBatchCount] = useState(1)
@@ -70,8 +72,13 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
   const [hostReport, setHostReport] = useState<HostProbeReport | null>(null)
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
   const [storageLoading, setStorageLoading] = useState(true)
+  const [routingInfo, setRoutingInfo] = useState<RoutingInfo | null>(null)
   const [ipv6Status, setIPv6Status] = useState<IPv6Status | null>(null)
   const [nameError, setNameError] = useState('')
+
+  useEffect(() => {
+    if (isOpen) setCurrentStep(0)
+  }, [isOpen])
 
   useEffect(() => {
     if (!isOpen) return
@@ -134,6 +141,19 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
     return () => { active = false }
   }, [isOpen])
 
+  useEffect(() => {
+    if (!isOpen) return
+    let active = true
+    getRoutingInfo()
+      .then((res) => {
+        if (active) setRoutingInfo(res.data.data || null)
+      })
+      .catch(() => {
+        if (active) setRoutingInfo(null)
+      })
+    return () => { active = false }
+  }, [isOpen])
+
   const ipv6Available = !!ipv6Status?.available
   const ipv6Prefixes = ipv6Status?.prefixes || []
   const ipv6Prefix = ipv6Prefixes.length > 1 ? `${ipv6Prefixes.length} prefixes configured` : (ipv6Prefixes[0]?.prefix || '')
@@ -167,22 +187,34 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
     : 0
   const linuxTemplate = !isWindowsTemplate(form.template_id)
   const sshAuthMode = (form.ssh_auth_mode || 'auto_password') as SSHAuthMode
-
-  const autoPortMappings = useMemo(() => {
-    if (!natEnabled) return []
-    const count = natPortCount
-    return Array.from({ length: count - 1 }, (_, index) => ({
-      host_port: 22002 + index,
-      container_port: 22002 + index,
-      protocol: 'tcp',
-      description: `Port-${22002 + index}`,
-    }))
-  }, [natEnabled, natPortCount])
-  const natPreviewMappings = customNATMappings.length > 0 ? customNATMappings : autoPortMappings
-
   const managementPort = Math.round(Number(form.management_port) || 0)
-  // Automatic allocation starts around 22000; an explicit value is exact.
-  const sshPortPreview = managementPort || 22000
+  const natAllocationPreview = useMemo(
+    () => previewNATAllocation(
+      routingInfo,
+      customNATMappings,
+      managementPort,
+      natEnabled ? natPortCount - 1 : 0,
+      isWindowsTemplate(form.template_id) ? 3389 : 22
+    ),
+    [routingInfo, customNATMappings, managementPort, natEnabled, natPortCount, form.template_id]
+  )
+  const autoPortMappings = natAllocationPreview.autoMappings
+  const natPreviewMappings = customNATMappings.length > 0 ? customNATMappings : autoPortMappings
+  const sshPortPreview = managementPort || natAllocationPreview.managementPort
+  const selectedTemplate = templates.find((template) => template.id === form.template_id)
+  const selectedStoragePool = storagePools.find((pool) => pool.id === form.storage_pool_id)
+  const selectedAllowedImages = templates.filter((template) => (form.allowed_image_ids || []).includes(template.id))
+  const networkSummary = form.assign_ipv4
+    ? (manualIPv4s.length > 0
+      ? `${networkText.publicIPv4}: ${manualIPv4s.join(', ')}`
+      : `${networkText.publicIPv4}: ${t('自动分配')} × ${form.ipv4_count || 1}`)
+    : lanIPv4Enabled
+      ? `${t('局域网')}: ${lanStaticEnabled ? `${form.lan_ipv4_address}/${form.lan_ipv4_prefix_len}` : 'DHCP'}`
+      : natEnabled
+        ? `${networkText.publicNAT}: ${natPortCount} ${t('个端口')}`
+        : form.assign_ipv6
+          ? `${networkText.publicIPv6}: ${form.ipv6_count || 1}`
+          : t('未配置网络')
 
   // Find next available batch index to avoid name conflicts
   const batchStartIndex = useMemo(() => {
@@ -210,6 +242,57 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
     } else {
       setNameError('')
     }
+  }
+
+  const validateStep = (step: number) => {
+    if (step === 0) {
+      if (!form.name.trim() || nameError) {
+        dialog.alert(t('基础信息有误'), t('请填写有效且未被占用的容器名称'))
+        return false
+      }
+      if (Object.keys(resourceErrors).length > 0) {
+        dialog.alert(t('资源配置有误'), t('请按红色提示修改 vCPU、内存或磁盘配置'))
+        return false
+      }
+      if (!storageReady) {
+        dialog.alert(t('未配置存储'), `${t('请先在存储管理中为')} ${form.virtualization === 'kvm' ? t('KVM 磁盘') : t('LXC 容器')} ${t('开启至少一块存储磁盘')}`)
+        return false
+      }
+      const authError = validateSSHAuthInputs(form)
+      if (authError) {
+        dialog.alert(t('登录方式有误'), authError)
+        return false
+      }
+    }
+
+    if (step === 1 && !form.template_id) {
+      dialog.alert(t('请选择镜像'), t('请选择用于创建容器的系统镜像'))
+      return false
+    }
+
+    if (step === 2) {
+      if (!form.assign_ipv4 && !form.assign_ipv6 && form.assign_nat === false && form.lan_ipv4_mode !== 'dhcp' && form.lan_ipv4_mode !== 'static') {
+        dialog.alert(t('网络配置有误'), t('请至少启用一种网络连接方式'))
+        return false
+      }
+      if (form.lan_ipv4_mode === 'static' && (!isIPv4Address(form.lan_ipv4_address || '') || !isIPv4Address(form.lan_ipv4_gateway || '') || !form.lan_ipv4_prefix_len)) {
+        dialog.alert(t('局域网 IPv4 配置有误'), t('请填写有效的 IPv4 地址、子网掩码和网关'))
+        return false
+      }
+      const natMappingError = natEnabled
+        ? validateBatchNATPortMappings(customNATMappings, managementPort, batchCount)
+        : ''
+      if (natMappingError) {
+        dialog.alert(t('NAT 端口配置有误'), natMappingError)
+        return false
+      }
+    }
+    return true
+  }
+
+  const handleNextStep = () => {
+    if (!validateStep(currentStep)) return
+    setCurrentStep((step) => Math.min(wizardSteps.length - 1, step + 1))
   }
 
   const handleSubmit = async () => {
@@ -263,7 +346,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
     for (let i = 0; i < batchCount; i++) {
       const name = batchCount > 1 ? `${boundedForm.name}-${startIndex + i}` : boundedForm.name
       const expandedNAT = wantsNAT
-        ? expandBatchNATConfig(boundedForm.nat_port_mappings || [], boundedForm.management_port || 0, i, batchCount)
+        ? expandBatchNATConfig(boundedForm.nat_port_mappings || [], boundedForm.management_port || 0, i)
         : { mappings: [], managementPort: 0 }
       const natPortMappings = expandedNAT.mappings
       containers.push({
@@ -301,7 +384,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg border border-gray-200 shadow-xl w-full max-w-3xl max-h-[92vh] overflow-y-auto">
+      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-black">创建新容器</h2>
           <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded text-gray-500" title="关闭">
@@ -309,7 +392,39 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
           </button>
         </div>
 
-        <div className="px-5 py-4 space-y-3">
+        <nav aria-label={t('创建步骤')} className="border-b border-gray-200 px-5 py-3">
+          <ol className="grid grid-cols-4 gap-2">
+            {wizardSteps.map((label, index) => {
+              const completed = index < currentStep
+              const active = index === currentStep
+              return (
+                <li key={label} className="min-w-0">
+                  <button
+                    type="button"
+                    disabled={index > currentStep}
+                    onClick={() => setCurrentStep(index)}
+                    aria-current={active ? 'step' : undefined}
+                    className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors disabled:cursor-default ${
+                      active ? 'bg-gray-100 text-black' : completed ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-400'
+                    }`}
+                  >
+                    <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold ${
+                      active || completed ? 'border-black bg-black text-white' : 'border-gray-300 bg-white'
+                    }`}>
+                      {completed ? <Check className="h-3.5 w-3.5" /> : index + 1}
+                    </span>
+                    <span className="min-w-0 truncate text-xs font-medium sm:text-sm">{label}</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ol>
+        </nav>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <div className="space-y-3">
+          {currentStep === 0 && (
+            <>
           <div className="grid grid-cols-2 gap-3">
             <Field label="容器名称">
               <input
@@ -352,7 +467,11 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
               </button>
             </div>
           </Field>
+            </>
+          )}
 
+          {currentStep === 1 && (
+            <>
           <Field label="系统模板">
             {templates.length === 0 ? (
               <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
@@ -378,7 +497,10 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
             )}
 
           </Field>
+            </>
+          )}
 
+          {currentStep === 0 && (
           <Field label="存储磁盘">
             {storageLoading ? (
               <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
@@ -411,8 +533,9 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
               </div>
             )}
           </Field>
+          )}
 
-          {templates.length > 0 && (
+          {currentStep === 1 && templates.length > 0 && (
             <Field label="子用户可用镜像">
               <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
                 <div className="mb-2 text-xs text-gray-500">默认勾选当前系统；取消后，子用户也不能重装该系统。</div>
@@ -444,7 +567,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
             </Field>
           )}
 
-          {linuxTemplate && (
+          {currentStep === 0 && linuxTemplate && (
             <div className="rounded-md border border-gray-200 bg-white px-3 py-3 text-sm">
               <div className="mb-2 font-medium text-gray-800">登录方式</div>
               <div className="grid grid-cols-3 gap-2">
@@ -493,6 +616,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
             </div>
           )}
 
+          {currentStep === 2 && (
           <div className="grid gap-3 lg:grid-cols-2">
           <div className={`rounded-md border px-3 py-2 text-sm ${ipv4Available ? 'border-gray-200 bg-white' : 'border-gray-200 bg-gray-50 text-gray-400'}`}>
             <label className="flex items-start gap-3">
@@ -751,6 +875,16 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                   <span className="block font-medium text-gray-800">{networkText.publicNAT}</span>
                   <span className="block text-xs text-gray-500">
                     {natEnabled ? formatNATPortCount(natPortCount, language) : networkText.noNATPorts}
+                    {natEnabled && routingInfo && (
+                      <span className="mt-0.5 block font-mono">
+                        {language === 'en' ? 'Range' : '范围'} {routingInfo.nat4_port_range.start}-{routingInfo.nat4_port_range.end}
+                        {' · '}
+                        {managementPort > 0
+                          ? (language === 'en' ? 'management' : '管理端口')
+                          : (language === 'en' ? 'next' : '下一个')}
+                        {' '}{sshPortPreview || '-'}
+                      </span>
+                    )}
                   </span>
                 </span>
               </label>
@@ -817,10 +951,13 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                     <input
                       type="radio"
                       checked={customNATMappings.length > 0}
+                      disabled={!routingInfo}
                       onChange={() => {
+                        const suggestedPort = autoPortMappings[0]?.host_port || natAllocationPreview.managementPort
+                        if (!suggestedPort) return
                         const next = customNATMappings.length > 0
                           ? customNATMappings
-                          : [{ host_port: 22002, container_port: 22002, protocol: 'tcp', description: 'Port-22002' }]
+                          : [{ host_port: suggestedPort, container_port: suggestedPort, protocol: 'tcp', description: `Port-${suggestedPort}` }]
                         setForm({ ...form, extra_ports: [], nat_port_mappings: next, port_mapping_count: next.length + 1, assign_nat: true })
                       }}
                     />
@@ -918,15 +1055,15 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                     {batchCount > 1 && (
                       <p className="text-[11px] text-gray-500">
                         {language === 'en'
-                          ? 'Batch mode shifts the public source-port group for each container; target ports stay unchanged.'
-                          : '批量创建时，每台容器使用不重叠的公网源端口组，容器目标端口保持不变。'}
+                          ? 'Each later container starts after the previous highest public port; target ports stay unchanged.'
+                          : '后续容器从上一台的最高公网端口之后开始，容器内部端口保持不变。'}
                       </p>
                     )}
                   </div>
                 )}
                 <div className="flex flex-wrap gap-1.5">
                   <span className="inline-flex px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-xs font-mono">
-                    {isWindowsTemplate(form.template_id) ? 'RDP' : 'SSH'}: {sshPortPreview} -&gt; {isWindowsTemplate(form.template_id) ? 3389 : 22}
+                    {isWindowsTemplate(form.template_id) ? 'RDP' : 'SSH'}: {sshPortPreview || '--'} -&gt; {isWindowsTemplate(form.template_id) ? 3389 : 22}
                     {managementPort === 0 ? (language === 'en' ? ' (auto)' : '（自动）') : ''}
                   </span>
                   {natPreviewMappings.map((mapping, index) => (
@@ -939,7 +1076,9 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
             )}
           </div>
           </div>
+          )}
 
+          {currentStep === 0 && (
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Field label="vCPU">
               <NumberInput
@@ -1035,21 +1174,127 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
               <p className="mt-1 text-[11px] leading-4 text-gray-400">不选则长期有效</p>
             </Field>
           </div>
+          )}
+
+          {currentStep === 3 && (
+            <div className="space-y-5">
+              <section>
+                <h3 className="mb-2 text-sm font-semibold text-gray-900">{t('基础信息')}</h3>
+                <dl className="grid grid-cols-1 border-y border-gray-200 sm:grid-cols-2 lg:grid-cols-4">
+                  <ReviewItem label={t('容器名称')} value={batchCount > 1 ? `${form.name}-${batchStartIndex} … ${form.name}-${batchStartIndex + batchCount - 1}` : form.name} />
+                  <ReviewItem label={t('创建数量')} value={String(batchCount)} />
+                  <ReviewItem label={t('虚拟化架构')} value={form.virtualization === 'kvm' ? 'KVM' : 'LXC'} />
+                  <ReviewItem label={t('存储磁盘')} value={selectedStoragePool ? `${selectedStoragePool.name} · ${selectedStoragePool.mount_point || selectedStoragePool.path}` : t('自动选择')} />
+                  <ReviewItem label="vCPU" value={String(form.vcpu)} />
+                  <ReviewItem label={t('内存')} value={`${form.ram_mb} MB`} />
+                  <ReviewItem label={t('磁盘')} value={`${form.disk_gb} GB`} />
+                  <ReviewItem label={t('到期时间')} value={form.expires_at || t('长期有效')} />
+                </dl>
+              </section>
+
+              <section>
+                <h3 className="mb-2 text-sm font-semibold text-gray-900">{t('镜像与登录')}</h3>
+                <dl className="grid grid-cols-1 border-y border-gray-200 sm:grid-cols-3">
+                  <ReviewItem label={t('系统镜像')} value={selectedTemplate?.name || '-'} />
+                  <ReviewItem label={t('登录方式')} value={
+                    !linuxTemplate
+                      ? t('镜像默认')
+                      : sshAuthMode === 'key'
+                        ? 'SSH Key'
+                        : sshAuthMode === 'password'
+                          ? t('自定义密码')
+                          : t('自动生成密码')
+                  } />
+                  <ReviewItem label={t('子用户可用镜像')} value={`${selectedAllowedImages.length} ${t('个')}`} />
+                </dl>
+                {selectedAllowedImages.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {selectedAllowedImages.map((template) => (
+                      <span key={template.id} className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700">
+                        {template.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <h3 className="mb-2 text-sm font-semibold text-gray-900">{t('网络配置')}</h3>
+                <dl className="grid grid-cols-1 border-y border-gray-200 sm:grid-cols-2">
+                  <ReviewItem label={t('主要网络')} value={networkSummary} />
+                  <ReviewItem
+                    label={networkText.publicIPv6}
+                    value={form.assign_ipv6 ? `${form.ipv6_count || 1} ${t('个地址')}` : t('未启用')}
+                  />
+                </dl>
+                {natEnabled && (
+                  <div className="mt-3">
+                    <div className="mb-1.5 text-xs font-medium text-gray-500">{t('端口映射')}</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className="rounded bg-emerald-50 px-2 py-1 font-mono text-xs text-emerald-700">
+                        {isWindowsTemplate(form.template_id) ? 'RDP' : 'SSH'}: {sshPortPreview || t('自动')} -&gt; {isWindowsTemplate(form.template_id) ? 3389 : 22}/TCP
+                      </span>
+                      {natPreviewMappings.map((mapping, index) => (
+                        <span key={`${mapping.host_port}-${mapping.container_port}-${mapping.protocol}-${index}`} className="rounded bg-gray-100 px-2 py-1 font-mono text-xs text-gray-700">
+                          {mapping.host_port || t('自动')} -&gt; {mapping.container_port}/{mapping.protocol.toUpperCase()}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+          </div>
         </div>
 
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200">
+        <div className="flex items-center justify-between gap-3 border-t border-gray-200 px-6 py-4">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md transition-colors">
-            取消
+            {t('取消')}
           </button>
-          <button
-            onClick={handleSubmit}
-            disabled={loading || storageLoading || !storageReady}
-            className="px-4 py-2 text-sm bg-black text-white rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? '创建中...' : '创建容器'}
-          </button>
+          <div className="flex items-center gap-2">
+            {currentStep > 0 && (
+              <button
+                type="button"
+                onClick={() => setCurrentStep((step) => Math.max(0, step - 1))}
+                className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-50"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                {t('上一步')}
+              </button>
+            )}
+            {currentStep < wizardSteps.length - 1 ? (
+              <button
+                type="button"
+                onClick={handleNextStep}
+                disabled={currentStep === 0 && storageLoading}
+                className="inline-flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t('下一步')}
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={loading}
+                className="inline-flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? t('创建中...') : t('确认创建')}
+              </button>
+            )}
+          </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function ReviewItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 border-b border-gray-100 px-3 py-2.5 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
+      <dt className="text-xs text-gray-500">{label}</dt>
+      <dd className="mt-1 break-words text-sm font-medium text-gray-800">{value || '-'}</dd>
     </div>
   )
 }
@@ -1115,9 +1360,10 @@ function NumberInput({
 function validateResourceInputs(form: CreateContainerRequest, maxVCPU: number, maxRAMMB?: number, maxDiskGB?: number) {
   const errors: Partial<Record<'vcpu' | 'ram_mb' | 'disk_gb', string>> = {}
   const windows = isWindowsTemplate(form.template_id)
+  const windows11 = form.template_id.toLowerCase().includes('windows-11')
   const minVCPU = windows ? 2 : (form.virtualization === 'kvm' ? 1 : 0.25)
-  const minRAMMB = windows ? 2048 : 128
-  const minDiskGB = windows ? 30 : 1
+  const minRAMMB = windows11 ? 4096 : windows ? 2048 : 128
+  const minDiskGB = windows11 ? 64 : windows ? 30 : 1
 
   if (!Number.isFinite(form.vcpu)) {
     errors.vcpu = '请输入 vCPU'
@@ -1272,8 +1518,68 @@ function normalizeNATPortMappings(mappings: PortMapping[]) {
   })
 }
 
-function expandBatchNATConfig(mappings: PortMapping[], managementPort: number, batchIndex: number, batchCount: number) {
-  const stride = batchNATPortStride(batchNATSourceMappings(mappings, managementPort), batchCount)
+function previewNATAllocation(
+  routing: RoutingInfo | null,
+  customMappings: PortMapping[],
+  explicitManagementPort: number,
+  autoMappingCount: number,
+  managementTargetPort: number
+) {
+  if (!routing) {
+    return { managementPort: explicitManagementPort, autoMappings: [] as PortMapping[] }
+  }
+
+  const { start, end } = routing.nat4_port_range
+  const used = new Set(
+    (routing.nat4_mappings || [])
+      .map((mapping) => Math.round(Number(mapping.host_port) || 0))
+      .filter((port) => port >= start && port <= end)
+  )
+  const excluded = new Set(
+    customMappings
+      .map((mapping) => Math.round(Number(mapping.host_port) || 0))
+      .filter((port) => port >= start && port <= end)
+  )
+
+  let managementPort = explicitManagementPort
+  if (managementPort === 0) {
+    const cursor = routing.nat4_next_port >= start && routing.nat4_next_port <= end
+      ? routing.nat4_next_port
+      : start
+    managementPort = findAvailableNATPort(start, end, cursor, new Set([...used, ...excluded]))
+  }
+
+  const autoMappings: PortMapping[] = []
+  if (customMappings.length === 0 && autoMappingCount > 0) {
+    const unavailable = new Set(used)
+    if (managementPort > 0) unavailable.add(managementPort)
+    if (managementTargetPort >= start && managementTargetPort <= end) unavailable.add(managementTargetPort)
+    for (let port = start; port <= end && autoMappings.length < autoMappingCount; port++) {
+      if (unavailable.has(port)) continue
+      unavailable.add(port)
+      autoMappings.push({
+        host_port: port,
+        container_port: port,
+        protocol: 'tcp',
+        description: `Port-${port}`,
+      })
+    }
+  }
+
+  return { managementPort, autoMappings }
+}
+
+function findAvailableNATPort(start: number, end: number, cursor: number, unavailable: Set<number>) {
+  const capacity = end - start + 1
+  for (let offset = 0; offset < capacity; offset++) {
+    const candidate = start + ((cursor - start + offset) % capacity)
+    if (!unavailable.has(candidate)) return candidate
+  }
+  return 0
+}
+
+function expandBatchNATConfig(mappings: PortMapping[], managementPort: number, batchIndex: number) {
+  const stride = batchNATPortStride(batchNATSourceMappings(mappings, managementPort))
   const offset = batchIndex * stride
   return {
     mappings: mappings.map((mapping) => ({
@@ -1297,26 +1603,12 @@ function batchNATSourceMappings(mappings: PortMapping[], managementPort: number)
   ]
 }
 
-function batchNATPortStride(mappings: PortMapping[], batchCount: number) {
-  if (mappings.length === 0 || batchCount <= 1) return 1
-  const invalid = new Set<number>()
-  for (let left = 0; left < mappings.length; left++) {
-    for (let right = left + 1; right < mappings.length; right++) {
-      const leftProtocol = (mappings[left].protocol || 'tcp').toLowerCase()
-      const rightProtocol = (mappings[right].protocol || 'tcp').toLowerCase()
-      if (leftProtocol !== rightProtocol) continue
-      const difference = Math.abs(
-        Math.round(Number(mappings[left].host_port) || 0)
-        - Math.round(Number(mappings[right].host_port) || 0)
-      )
-      for (let distance = 1; difference > 0 && distance < batchCount; distance++) {
-        if (difference % distance === 0) invalid.add(difference / distance)
-      }
-    }
-  }
-  let stride = 1
-  while (invalid.has(stride)) stride++
-  return stride
+function batchNATPortStride(mappings: PortMapping[]) {
+  const sourcePorts = mappings
+    .map((mapping) => Math.round(Number(mapping.host_port) || 0))
+    .filter((port) => port > 0)
+  if (sourcePorts.length === 0) return 1
+  return Math.max(...sourcePorts) - Math.min(...sourcePorts) + 1
 }
 
 function validateBatchNATPortMappings(mappings: PortMapping[], managementPort: number, batchCount: number) {
@@ -1327,7 +1619,7 @@ function validateBatchNATPortMappings(mappings: PortMapping[], managementPort: n
   if (mappings.length > 63) return '每个容器最多可配置 63 条自定义 NAT 映射'
 
   const used = new Map<string, string>()
-  const stride = batchNATPortStride(batchNATSourceMappings(mappings, managementPort), batchCount)
+  const stride = batchNATPortStride(batchNATSourceMappings(mappings, managementPort))
   for (let batchIndex = 0; batchIndex < batchCount; batchIndex++) {
     if (managementPort > 0) {
       const expandedManagementPort = managementPort + batchIndex * stride

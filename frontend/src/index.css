@@ -17,6 +17,7 @@ body {
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: #f1f1f1;
@@ -199,4 +200,6 @@ body {
 .dark .peer-checked\:bg-black:checked ~ * { background-color: #f9fafb !important; }
 .dark .peer-checked\:bg-black:checked + *,
 .dark input.peer:checked + .peer-checked\:bg-black { background-color: #f9fafb !important; }
+.dark .access-policy-switch .access-policy-switch-thumb { background-color: #e5e7eb !important; }
+.dark .access-policy-switch[aria-checked="true"] .access-policy-switch-thumb { background-color: #111827 !important; }
 

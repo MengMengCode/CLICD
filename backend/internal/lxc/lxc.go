@@ -503,15 +503,30 @@ func (m *Manager) CreateContainer(cfg ContainerConfig) error {
 		lxcName, id, tmpl.Distro, tmpl.Release, tmpl.Arch)
 
 	cfg.ReportProgress("rootfs", "下载模板并创建基础文件系统")
-	args := []string{"-n", lxcName, "-t", "download", "--",
-		"-d", tmpl.Distro, "-r", tmpl.Release, "-a", tmpl.Arch}
-	if tmpl.Variant != "" {
-		args = append(args, "--variant", tmpl.Variant)
-	}
-	cmd := exec.Command("lxc-create", args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("lxc-create failed: %v, output: %s", err, string(output))
+	if tmpl.Custom {
+		output, err := exec.Command("lxc-create", "-n", lxcName, "-t", "none").CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("lxc-create failed for custom rootfs: %v, output: %s", err, string(output))
+		}
+		if err := m.configureCustomLXCBase(lxcName, tmpl); err != nil {
+			_ = m.cleanupContainerStorage(lxcName)
+			return err
+		}
+		if err := ExtractCustomRootfs(tmpl.ID, filepath.Join(containerDir, "rootfs")); err != nil {
+			_ = m.cleanupContainerStorage(lxcName)
+			return err
+		}
+	} else {
+		args := []string{"-n", lxcName, "-t", "download", "--",
+			"-d", tmpl.Distro, "-r", tmpl.Release, "-a", tmpl.Arch}
+		if tmpl.Variant != "" {
+			args = append(args, "--variant", tmpl.Variant)
+		}
+		cmd := exec.Command("lxc-create", args...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("lxc-create failed: %v, output: %s", err, string(output))
+		}
 	}
 
 	cfg.ReportProgress("storage", "复制容器数据到存储磁盘")
@@ -673,6 +688,41 @@ func (m *Manager) CreateContainer(cfg ContainerConfig) error {
 	}
 
 	fmt.Printf("Container %d (%s) created successfully\n", id, cfg.Name)
+	return nil
+}
+
+func (m *Manager) configureCustomLXCBase(lxcName string, tmpl *Template) error {
+	rootfsPath, err := m.safeRootfsPath(filepath.Join(m.LxcPath, lxcName, "rootfs"))
+	if err != nil {
+		return fmt.Errorf("invalid custom LXC rootfs path: %v", err)
+	}
+	configFile := filepath.Join(filepath.Dir(rootfsPath), "config")
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to read custom LXC base config: %v", err)
+	}
+	if _, err := os.Stat("/usr/share/lxc/config/common.conf"); err != nil {
+		return fmt.Errorf("LXC common configuration is unavailable: %v", err)
+	}
+
+	arch := "linux64"
+	switch strings.ToLower(strings.TrimSpace(tmpl.Arch)) {
+	case "amd64", "x86_64", "arm64", "aarch64":
+	default:
+		return fmt.Errorf("unsupported custom LXC architecture: %s", tmpl.Arch)
+	}
+
+	base := []string{
+		"# CLICD custom rootfs base configuration",
+		"lxc.include = /usr/share/lxc/config/common.conf",
+		"lxc.arch = " + arch,
+		"lxc.rootfs.path = dir:" + rootfsPath,
+		"lxc.uts.name = " + lxcName,
+		"",
+	}
+	if err := os.WriteFile(configFile, []byte(strings.Join(base, "\n")+string(data)), 0644); err != nil {
+		return fmt.Errorf("failed to write custom LXC base config: %v", err)
+	}
 	return nil
 }
 
@@ -1667,6 +1717,9 @@ func appArmorProfileForTemplate(templateID string) (string, error) {
 
 func systemdTemplateNeedsUnconfinedAppArmor(templateID string) bool {
 	id := strings.ToLower(strings.TrimSpace(templateID))
+	if template := FindTemplate(templateID); template != nil {
+		id += " " + strings.ToLower(template.Distro+" "+template.Release)
+	}
 	if id == "" || strings.Contains(id, "alpine") {
 		return false
 	}
@@ -2564,7 +2617,7 @@ if [ -L /etc/resolv.conf ] 2>/dev/null; then
 fi
 # Also try resolvectl for systemd-resolved setups
 if command -v resolvectl >/dev/null 2>&1; then
-	resolvectl dns eth0 10.0.3.1 2>/dev/null || true
+	resolvectl dns eth0 __CLICD_LXC_GATEWAY__ 2>/dev/null || true
 	resolvectl dns eth0 8.8.8.8 2>/dev/null || true
 	resolvectl domain eth0 '~.' 2>/dev/null || true
 fi
@@ -2572,7 +2625,7 @@ fi
 # Avoid the trap where systemd stub resolver puts "nameserver 127.0.0.53"
 # but doesn't actually resolve anything.
 if ! grep -q '^nameserver [1-9]' /etc/resolv.conf 2>/dev/null; then
-	echo "nameserver 10.0.3.1" > /etc/resolv.conf
+	echo "nameserver __CLICD_LXC_GATEWAY__" > /etc/resolv.conf
 	echo "nameserver 8.8.8.8" >> /etc/resolv.conf
 fi
 export DEBIAN_FRONTEND=noninteractive
@@ -2709,6 +2762,7 @@ ensure_sshd_runtime_dir
 }
 `
 	script = strings.ReplaceAll(script, "__CLICD_PUBKEY_AUTH__", pubkeyValue)
+	script = strings.ReplaceAll(script, "__CLICD_LXC_GATEWAY__", config.LXCNATNetwork().Gateway)
 	if !startService {
 		return script
 	}
@@ -3308,23 +3362,32 @@ func (m *Manager) replaceRootfsFromTemplate(lxcName string, tmpl *Template) erro
 	}
 	defer m.cleanupTemporaryContainer(tmpName)
 
-	args := []string{
-		"-n", tmpName,
-		"-t", "download",
-		"--",
-		"-d", tmpl.Distro,
-		"-r", tmpl.Release,
-		"-a", tmpl.Arch,
-	}
-	if tmpl.Variant != "" {
-		args = append(args, "--variant", tmpl.Variant)
-	}
-	output, err := exec.Command("lxc-create", args...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to download replacement rootfs: %v, output: %s", err, string(output))
+	tmpRootfs := filepath.Join(tmpDir, "rootfs")
+	if tmpl.Custom {
+		if err := os.MkdirAll(tmpRootfs, 0755); err != nil {
+			return err
+		}
+		if err := ExtractCustomRootfs(tmpl.ID, tmpRootfs); err != nil {
+			return err
+		}
+	} else {
+		args := []string{
+			"-n", tmpName,
+			"-t", "download",
+			"--",
+			"-d", tmpl.Distro,
+			"-r", tmpl.Release,
+			"-a", tmpl.Arch,
+		}
+		if tmpl.Variant != "" {
+			args = append(args, "--variant", tmpl.Variant)
+		}
+		output, err := exec.Command("lxc-create", args...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to download replacement rootfs: %v, output: %s", err, string(output))
+		}
 	}
 
-	tmpRootfs := filepath.Join(tmpDir, "rootfs")
 	if !rootfsHasInit(tmpRootfs) {
 		return fmt.Errorf("downloaded replacement rootfs is invalid: init not found")
 	}

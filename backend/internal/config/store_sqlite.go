@@ -606,6 +606,8 @@ func loadConfigFromDB() (*ClicdConfig, bool, error) {
 		NextSSHPort:          atoi(meta["next_ssh_port"]),
 		NATPortStart:         atoi(meta["nat_port_start"]),
 		NATPortEnd:           atoi(meta["nat_port_end"]),
+		LXCNATSubnet:         meta["lxc_nat_subnet"],
+		KVMNATSubnet:         meta["kvm_nat_subnet"],
 		SetupComplete:        atob(meta["setup_complete"]),
 		SecurityAutoShutdown: atob(meta["security_auto_shutdown"]),
 		TaskConcurrency:      atoi(meta["task_concurrency"]),
@@ -626,8 +628,17 @@ func loadConfigFromDB() (*ClicdConfig, bool, error) {
 	if raw := strings.TrimSpace(meta["webssh_allowed_origins"]); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &cfg.WebSSHAllowedOrigins)
 	}
+	if raw := strings.TrimSpace(meta["panel_access_policy"]); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg.PanelAccessPolicy)
+	}
 	if raw := strings.TrimSpace(meta["storage_pools"]); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &cfg.StoragePools)
+	}
+	if raw := strings.TrimSpace(meta["custom_kvm_images"]); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg.CustomKVMImages)
+	}
+	if raw := strings.TrimSpace(meta["custom_lxc_images"]); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg.CustomLXCImages)
 	}
 
 	if cfg.Containers, err = loadContainers(); err != nil {
@@ -729,7 +740,10 @@ func saveMeta(tx *sql.Tx) error {
 	publicIPv4PoolJSON, _ := json.Marshal(AppConfig.PublicIPv4Pool)
 	publicIPv6PrefixesJSON, _ := json.Marshal(AppConfig.PublicIPv6Prefixes)
 	webSSHAllowedOriginsJSON, _ := json.Marshal(AppConfig.WebSSHAllowedOrigins)
+	panelAccessPolicyJSON, _ := json.Marshal(AppConfig.PanelAccessPolicy)
 	storagePoolsJSON, _ := json.Marshal(AppConfig.StoragePools)
+	customKVMImagesJSON, _ := json.Marshal(AppConfig.CustomKVMImages)
+	customLXCImagesJSON, _ := json.Marshal(AppConfig.CustomLXCImages)
 	values := map[string]string{
 		"admin_user":             AppConfig.AdminUser,
 		"admin_pass_hash":        AppConfig.AdminPassHash,
@@ -741,6 +755,8 @@ func saveMeta(tx *sql.Tx) error {
 		"next_ssh_port":          strconv.Itoa(AppConfig.NextSSHPort),
 		"nat_port_start":         strconv.Itoa(AppConfig.NATPortStart),
 		"nat_port_end":           strconv.Itoa(AppConfig.NATPortEnd),
+		"lxc_nat_subnet":         AppConfig.LXCNATSubnet,
+		"kvm_nat_subnet":         AppConfig.KVMNATSubnet,
 		"setup_complete":         btoa(AppConfig.SetupComplete),
 		"security_auto_shutdown": btoa(AppConfig.SecurityAutoShutdown),
 		"task_concurrency":       strconv.Itoa(AppConfig.TaskConcurrency),
@@ -750,7 +766,10 @@ func saveMeta(tx *sql.Tx) error {
 		"public_ipv4_pool":       string(publicIPv4PoolJSON),
 		"public_ipv6_prefixes":   string(publicIPv6PrefixesJSON),
 		"webssh_allowed_origins": string(webSSHAllowedOriginsJSON),
+		"panel_access_policy":    string(panelAccessPolicyJSON),
 		"storage_pools":          string(storagePoolsJSON),
+		"custom_kvm_images":      string(customKVMImagesJSON),
+		"custom_lxc_images":      string(customLXCImagesJSON),
 		"schema_version":         "1",
 		"updated_at":             time.Now().Format("2006-01-02 15:04:05"),
 	}

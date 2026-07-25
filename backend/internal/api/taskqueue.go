@@ -462,6 +462,8 @@ func (q *TaskQueue) runCreateTask(task *Task) {
 			q.finishTask(task, "failed", err)
 			return
 		}
+	} else {
+		lxc.ReleaseQueuedCreateNATPorts(cfg.Name)
 	}
 
 	q.mu.Lock()
@@ -866,7 +868,12 @@ func HandleBatchCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		requestNames[name] = true
 	}
-	ids := globalQueue.EnqueueBatchCreateWithAudit(req.Containers, requestActor(r), clientIP(r), r.UserAgent())
+	planned, err := lxc.ReserveBatchCreateNATPorts(req.Containers)
+	if err != nil {
+		jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: err.Error()})
+		return
+	}
+	ids := globalQueue.EnqueueBatchCreateWithAudit(planned, requestActor(r), clientIP(r), r.UserAgent())
 	jsonResponse(w, http.StatusAccepted, APIResponse{Success: true, Data: ids})
 }
 
@@ -988,7 +995,8 @@ func HandleTaskDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	globalQueue.mu.Lock()
-	if task := globalQueue.tasks[taskID]; task != nil && !isTaskAllowedForRequest(r, task) {
+	task := globalQueue.tasks[taskID]
+	if task != nil && !isTaskAllowedForRequest(r, task) {
 		globalQueue.mu.Unlock()
 		jsonResponse(w, http.StatusForbidden, APIResponse{Success: false, Message: "Access denied to this task"})
 		return
@@ -1011,6 +1019,9 @@ func HandleTaskDelete(w http.ResponseWriter, r *http.Request) {
 	globalQueue.opQueue = newOp
 	globalQueue.persistTasks()
 	globalQueue.mu.Unlock()
+	if task != nil && task.Type == TaskCreate {
+		lxc.ReleaseQueuedCreateNATPorts(task.Config.Name)
+	}
 	jsonResponse(w, http.StatusOK, APIResponse{Success: true, Message: "Task deleted"})
 }
 

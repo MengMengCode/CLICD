@@ -1,9 +1,12 @@
 package lxc
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"os/exec"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,9 +15,10 @@ import (
 )
 
 var (
-	createNATReservationMu     sync.Mutex
-	createNATReservationNextID uint64
-	createNATReservations      = map[uint64][]config.PortMapping{}
+	createNATReservationMu      sync.Mutex
+	createNATReservationNextID  uint64
+	createNATReservations       = map[uint64][]config.PortMapping{}
+	queuedCreateNATReservations = map[string][]config.PortMapping{}
 )
 
 // ApplyPortMappings applies iptables DNAT rules for a container's port mappings
@@ -29,14 +33,16 @@ func (m *Manager) ApplyPortMappings(id int) error {
 	EnsureAssignedPublicIPv4s(c.PublicIPv4s)
 	tag := clicdTag(id)
 	bridge := "lxcbr0"
-	subnet := "10.0.3.0/24"
+	subnet := config.LXCNATNetwork().Subnet
 	if c.IsKVM() {
 		bridge = "virbr0"
-		subnet = "192.168.122.0/24"
+		subnet = config.KVMNATNetwork().Subnet
 	}
 
 	EnsureForwardRules(bridge)
-	m.CleanPortMappings(id)
+	if err := m.CleanPortMappings(id); err != nil {
+		return fmt.Errorf("clean existing port mappings for container %d: %w", id, err)
+	}
 	deleteBridgeMasquerade(subnet)
 
 	for _, pm := range c.PortMappings {
@@ -243,13 +249,44 @@ func clicdTag(id int) string { return "c" + strconv.Itoa(id) }
 
 func EnsureAllRunningPortMappings() {
 	m := NewManager()
+	m.cleanOrphanedPortMappings()
 	for i := range config.AppConfig.Containers {
 		c := &config.AppConfig.Containers[i]
 		if c.Status != "running" || strings.TrimSpace(c.IP) == "" {
+			if err := m.CleanPortMappings(c.ID); err != nil {
+				fmt.Printf("Warning: failed to clean inactive port mappings for %s: %v\n", c.Name, err)
+			}
 			continue
 		}
 		if err := m.ApplyPortMappings(c.ID); err != nil {
 			fmt.Printf("Warning: failed to restore port mappings for %s: %v\n", c.Name, err)
+		}
+	}
+}
+
+var taggedContainerIDPattern = regexp.MustCompile(`clicd-c([0-9]+)-`)
+
+func (m *Manager) cleanOrphanedPortMappings() {
+	output, err := exec.Command("iptables-save").Output()
+	if err != nil {
+		return
+	}
+	configured := make(map[int]bool, len(config.AppConfig.Containers))
+	for i := range config.AppConfig.Containers {
+		configured[config.AppConfig.Containers[i].ID] = true
+	}
+	seen := map[int]bool{}
+	for _, match := range taggedContainerIDPattern.FindAllSubmatch(output, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		id, err := strconv.Atoi(string(match[1]))
+		if err != nil || configured[id] || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if err := m.CleanPortMappings(id); err != nil {
+			fmt.Printf("Warning: failed to clean orphaned port mappings for container %d: %v\n", id, err)
 		}
 	}
 }
@@ -306,16 +343,108 @@ func ensureLibvirtForwardRules(bridge string) {
 
 // CleanPortMappings removes all iptables rules for a container
 func (m *Manager) CleanPortMappings(id int) error {
-	tag := clicdTag(id)
-	for _, chain := range []string{"PREROUTING", "POSTROUTING"} {
-		cmd := exec.Command("sh", "-c",
-			fmt.Sprintf("iptables -t nat -L %s -n --line-numbers 2>/dev/null | grep 'clicd-%s-' | awk '{print $1}' | sort -rn | while read num; do iptables -t nat -D %s $num; done", chain, tag, chain))
-		cmd.Run()
+	marker := "clicd-" + clicdTag(id) + "-"
+	var cleanupErrors []error
+	for _, target := range []struct {
+		table string
+		chain string
+	}{
+		{table: "nat", chain: "PREROUTING"},
+		{table: "nat", chain: "POSTROUTING"},
+		{chain: "FORWARD"},
+	} {
+		if err := deleteTaggedIPTablesRules(target.table, target.chain, marker); err != nil {
+			cleanupErrors = append(cleanupErrors, err)
+		}
 	}
-	cmd := exec.Command("sh", "-c",
-		fmt.Sprintf("iptables -S FORWARD 2>/dev/null | grep 'clicd-%s-' | sed 's/^-A /-D /' | while read rule; do iptables $rule; done", tag))
-	cmd.Run()
-	return nil
+	if c := config.FindContainer(id); c != nil {
+		for _, mapping := range c.PortMappings {
+			clearPortMappingConntrack(mapping)
+		}
+	}
+	return errors.Join(cleanupErrors...)
+}
+
+func deleteTaggedIPTablesRules(table, chain, marker string) error {
+	listArgs := []string{"-w", "5"}
+	if table != "" {
+		listArgs = append(listArgs, "-t", table)
+	}
+	listArgs = append(listArgs, "-L", chain, "-n", "--line-numbers")
+	output, err := exec.Command("iptables", listArgs...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("list iptables %s/%s: %w: %s", tableName(table), chain, err, strings.TrimSpace(string(output)))
+	}
+
+	var deleteErrors []error
+	for _, lineNumber := range taggedRuleLineNumbers(output, marker) {
+		deleteArgs := []string{"-w", "5"}
+		if table != "" {
+			deleteArgs = append(deleteArgs, "-t", table)
+		}
+		deleteArgs = append(deleteArgs, "-D", chain, strconv.Itoa(lineNumber))
+		if output, err := exec.Command("iptables", deleteArgs...).CombinedOutput(); err != nil {
+			deleteErrors = append(deleteErrors, fmt.Errorf(
+				"delete iptables %s/%s rule %d: %w: %s",
+				tableName(table), chain, lineNumber, err, strings.TrimSpace(string(output)),
+			))
+		}
+	}
+	return errors.Join(deleteErrors...)
+}
+
+func taggedRuleLineNumbers(output []byte, marker string) []int {
+	lineNumbers := make([]int, 0)
+	for _, line := range strings.Split(string(output), "\n") {
+		if !strings.Contains(line, marker) {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		lineNumber, err := strconv.Atoi(fields[0])
+		if err == nil && lineNumber > 0 {
+			lineNumbers = append(lineNumbers, lineNumber)
+		}
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(lineNumbers)))
+	return lineNumbers
+}
+
+func tableName(table string) string {
+	if table == "" {
+		return "filter"
+	}
+	return table
+}
+
+func clearPortMappingConntrack(mapping config.PortMapping) {
+	args := portMappingConntrackDeleteArgs(mapping)
+	if len(args) == 0 {
+		return
+	}
+	// conntrack exits non-zero when no matching flow exists; that is already clean.
+	_ = exec.Command("conntrack", args...).Run()
+}
+
+func portMappingConntrackDeleteArgs(mapping config.PortMapping) []string {
+	protocol := strings.ToLower(strings.TrimSpace(mapping.Protocol))
+	if protocol != "tcp" && protocol != "udp" {
+		return nil
+	}
+	if mapping.HostPort < 1 || mapping.HostPort > 65535 {
+		return nil
+	}
+	args := []string{
+		"-D",
+		"-p", protocol,
+		"--dport", strconv.Itoa(mapping.HostPort),
+	}
+	if hostIP := strings.TrimSpace(mapping.HostIP); hostIP != "" {
+		args = append(args, "--dst", hostIP)
+	}
+	return args
 }
 
 // SetupDefaultPortMappings creates default port mappings
@@ -368,14 +497,19 @@ func (m *Manager) UpdatePortMapping(id int, index int, pm config.PortMapping) ([
 	if index < 0 || index >= len(c.PortMappings) {
 		return nil, fmt.Errorf("invalid port mapping index: %d", index)
 	}
+	existing := c.PortMappings[index]
 	normalized, err := normalizePortMapping(c, index, pm)
 	if err != nil {
 		return nil, err
+	}
+	if strings.EqualFold(existing.Description, "SSH") {
+		normalized.Description = "SSH"
 	}
 	c.PortMappings[index] = normalized
 	if err := persistAndReloadMappings(m, c); err != nil {
 		return nil, err
 	}
+	clearPortMappingConntrack(existing)
 	return c.PortMappings, nil
 }
 
@@ -388,22 +522,37 @@ func (m *Manager) DeletePortMapping(id int, index int) ([]config.PortMapping, er
 	if index < 0 || index >= len(c.PortMappings) {
 		return nil, fmt.Errorf("invalid port mapping index: %d", index)
 	}
-	if c.PortMappings[index].Description == "SSH" {
+	removed := c.PortMappings[index]
+	if strings.EqualFold(removed.Description, "SSH") {
 		return nil, fmt.Errorf("SSH default mapping cannot be deleted")
 	}
 	c.PortMappings = append(c.PortMappings[:index], c.PortMappings[index+1:]...)
 	if err := persistAndReloadMappings(m, c); err != nil {
 		return nil, err
 	}
+	clearPortMappingConntrack(removed)
 	return c.PortMappings, nil
 }
 
 func persistAndReloadMappings(m *Manager, c *config.Container) error {
+	syncContainerSSHPort(c)
 	config.SaveConfig()
 	if c.Status == "running" && c.IP != "" {
 		return m.ApplyPortMappings(c.ID)
 	}
 	return nil
+}
+
+func syncContainerSSHPort(c *config.Container) {
+	if c == nil {
+		return
+	}
+	for _, mapping := range c.PortMappings {
+		if strings.EqualFold(mapping.Description, "SSH") {
+			c.SSHPort = mapping.HostPort
+			return
+		}
+	}
 }
 
 func (m *Manager) UpdatePublicIPv4Assignments(id int, requested []string, count int, auto bool) (*config.Container, error) {
@@ -553,32 +702,25 @@ func ReserveCreateNATPorts(cfg ContainerConfig) (int, func(), error) {
 	createNATReservationMu.Lock()
 	defer createNATReservationMu.Unlock()
 
+	owner := createNATReservationOwner(cfg.Name)
+	requestedReservations := createNATReservationMappings(cfg, cfg.ManagementPort)
+	if queued, ok := queuedCreateNATReservations[owner]; ok {
+		if !sameCreateNATReservations(queued, requestedReservations) {
+			return 0, nil, fmt.Errorf("queued NAT port plan for %s no longer matches the create task", cfg.Name)
+		}
+		delete(queuedCreateNATReservations, owner)
+		return activateCreateNATReservationLocked(cfg.ManagementPort, queued)
+	}
+
 	if err := ValidateCreateNATPortAvailability(cfg); err != nil {
 		return 0, nil, err
 	}
-	requestedReservations := append([]config.PortMapping(nil), cfg.NATPortMappings...)
-	if cfg.ManagementPort > 0 {
-		requestedReservations = append(requestedReservations, config.PortMapping{
-			HostPort: cfg.ManagementPort,
-			Protocol: "tcp",
-		})
-	}
-	for _, requested := range requestedReservations {
-		for _, reservations := range createNATReservations {
-			for _, reserved := range reservations {
-				if requested.HostPort == reserved.HostPort && protocolsOverlap(requested.Protocol, reserved.Protocol) {
-					return 0, nil, fmt.Errorf("NAT host port %d/%s is reserved by another create task", requested.HostPort, requested.Protocol)
-				}
-			}
-		}
+	if err := validateCreateNATReservationsAvailableLocked(requestedReservations, owner); err != nil {
+		return 0, nil, err
 	}
 
 	excluded := cfg.RequestedNATHostPorts()
-	for _, reservations := range createNATReservations {
-		for _, reserved := range reservations {
-			excluded = append(excluded, reserved.HostPort)
-		}
-	}
+	excluded = append(excluded, allReservedCreateNATHostPortsLocked(owner)...)
 	managementPort := cfg.ManagementPort
 	if managementPort == 0 {
 		var err error
@@ -588,12 +730,96 @@ func ReserveCreateNATPorts(cfg ContainerConfig) (int, func(), error) {
 		}
 	}
 
+	reservations := createNATReservationMappings(cfg, managementPort)
+	return activateCreateNATReservationLocked(managementPort, reservations)
+}
+
+// ReserveBatchCreateNATPorts resolves every automatic NAT port and reserves
+// the complete batch before any create task is enqueued.
+func ReserveBatchCreateNATPorts(configs []ContainerConfig) ([]ContainerConfig, error) {
+	createNATReservationMu.Lock()
+	defer createNATReservationMu.Unlock()
+
+	planned := append([]ContainerConfig(nil), configs...)
+	addedOwners := make([]string, 0, len(planned))
+	rollback := func() {
+		for _, owner := range addedOwners {
+			delete(queuedCreateNATReservations, owner)
+		}
+	}
+
+	for i := range planned {
+		cfg := &planned[i]
+		cfg.NATPortMappings = append([]config.PortMapping(nil), cfg.NATPortMappings...)
+		if !cfg.WantsNAT() {
+			continue
+		}
+		owner := createNATReservationOwner(cfg.Name)
+		if owner == "" {
+			rollback()
+			return nil, fmt.Errorf("container name is required for NAT port reservation")
+		}
+		if _, exists := queuedCreateNATReservations[owner]; exists {
+			rollback()
+			return nil, fmt.Errorf("container creation already has reserved NAT ports: %s", cfg.Name)
+		}
+		if err := ValidateCreateNATPortAvailability(*cfg); err != nil {
+			rollback()
+			return nil, fmt.Errorf("%s: %w", cfg.Name, err)
+		}
+
+		explicit := createNATReservationMappings(*cfg, cfg.ManagementPort)
+		if err := validateCreateNATReservationsAvailableLocked(explicit, owner); err != nil {
+			rollback()
+			return nil, fmt.Errorf("%s: %w", cfg.Name, err)
+		}
+
+		excluded := cfg.RequestedNATHostPorts()
+		excluded = append(excluded, allReservedCreateNATHostPortsLocked(owner)...)
+		if cfg.ManagementPort == 0 {
+			port, err := config.AllocateSSHPortExcluding(excluded)
+			if err != nil {
+				rollback()
+				return nil, fmt.Errorf("%s: %w", cfg.Name, err)
+			}
+			cfg.ManagementPort = port
+		}
+
+		if len(cfg.NATPortMappings) == 0 && cfg.PortMappingCount > 1 {
+			generated, err := planDefaultCreateNATMappingsLocked(*cfg, cfg.PortMappingCount-1, owner)
+			if err != nil {
+				rollback()
+				return nil, fmt.Errorf("%s: %w", cfg.Name, err)
+			}
+			cfg.NATPortMappings = generated
+			cfg.PortMappingCount = len(generated) + 1
+		}
+
+		reservations := createNATReservationMappings(*cfg, cfg.ManagementPort)
+		if err := validateCreateNATReservationsAvailableLocked(reservations, owner); err != nil {
+			rollback()
+			return nil, fmt.Errorf("%s: %w", cfg.Name, err)
+		}
+		queuedCreateNATReservations[owner] = reservations
+		addedOwners = append(addedOwners, owner)
+	}
+	return planned, nil
+}
+
+func ReleaseQueuedCreateNATPorts(name string) {
+	owner := createNATReservationOwner(name)
+	if owner == "" {
+		return
+	}
+	createNATReservationMu.Lock()
+	delete(queuedCreateNATReservations, owner)
+	createNATReservationMu.Unlock()
+}
+
+func activateCreateNATReservationLocked(managementPort int, reservations []config.PortMapping) (int, func(), error) {
 	createNATReservationNextID++
 	reservationID := createNATReservationNextID
-	reservations := make([]config.PortMapping, 0, len(cfg.NATPortMappings)+1)
-	reservations = append(reservations, config.PortMapping{HostPort: managementPort, Protocol: "tcp"})
-	reservations = append(reservations, cfg.NATPortMappings...)
-	createNATReservations[reservationID] = reservations
+	createNATReservations[reservationID] = append([]config.PortMapping(nil), reservations...)
 
 	var once sync.Once
 	release := func() {
@@ -604,6 +830,116 @@ func ReserveCreateNATPorts(cfg ContainerConfig) (int, func(), error) {
 		})
 	}
 	return managementPort, release, nil
+}
+
+func createNATReservationOwner(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func createNATReservationMappings(cfg ContainerConfig, managementPort int) []config.PortMapping {
+	reservations := make([]config.PortMapping, 0, len(cfg.NATPortMappings)+1)
+	if managementPort > 0 {
+		reservations = append(reservations, config.PortMapping{HostPort: managementPort, Protocol: "tcp"})
+	}
+	reservations = append(reservations, cfg.NATPortMappings...)
+	return reservations
+}
+
+func validateCreateNATReservationsAvailableLocked(requested []config.PortMapping, exceptOwner string) error {
+	for _, candidate := range requested {
+		for _, reservations := range createNATReservations {
+			if conflictingCreateNATReservation(candidate, reservations) {
+				return fmt.Errorf("NAT host port %d/%s is reserved by another create task", candidate.HostPort, candidate.Protocol)
+			}
+		}
+		for owner, reservations := range queuedCreateNATReservations {
+			if owner == exceptOwner {
+				continue
+			}
+			if conflictingCreateNATReservation(candidate, reservations) {
+				return fmt.Errorf("NAT host port %d/%s is reserved by queued create task %s", candidate.HostPort, candidate.Protocol, owner)
+			}
+		}
+	}
+	return nil
+}
+
+func conflictingCreateNATReservation(candidate config.PortMapping, reservations []config.PortMapping) bool {
+	for _, reserved := range reservations {
+		if candidate.HostPort == reserved.HostPort && protocolsOverlap(candidate.Protocol, reserved.Protocol) {
+			return true
+		}
+	}
+	return false
+}
+
+func allReservedCreateNATHostPortsLocked(exceptOwner string) []int {
+	ports := make([]int, 0)
+	for _, reservations := range createNATReservations {
+		for _, reserved := range reservations {
+			ports = append(ports, reserved.HostPort)
+		}
+	}
+	for owner, reservations := range queuedCreateNATReservations {
+		if owner == exceptOwner {
+			continue
+		}
+		for _, reserved := range reservations {
+			ports = append(ports, reserved.HostPort)
+		}
+	}
+	return ports
+}
+
+func planDefaultCreateNATMappingsLocked(cfg ContainerConfig, count int, owner string) ([]config.PortMapping, error) {
+	if count <= 0 {
+		return nil, nil
+	}
+	unavailable := map[int]bool{cfg.ManagementPort: true}
+	for _, port := range allReservedCreateNATHostPortsLocked(owner) {
+		unavailable[port] = true
+	}
+	for _, mapping := range cfg.NATPortMappings {
+		unavailable[mapping.HostPort] = true
+	}
+
+	candidate := &config.Container{ID: -1}
+	start, end := config.NATPortRange()
+	mappings := make([]config.PortMapping, 0, count)
+	for port := start; port <= end && len(mappings) < count; port++ {
+		if unavailable[port] || !HostPortAvailable(candidate, "", port, "tcp") {
+			continue
+		}
+		unavailable[port] = true
+		mappings = append(mappings, config.PortMapping{
+			HostPort:      port,
+			ContainerPort: port,
+			Protocol:      "tcp",
+			Description:   fmt.Sprintf("Port-%d", port),
+		})
+	}
+	if len(mappings) != count {
+		return nil, fmt.Errorf("not enough free NAT4 host ports for %d automatic mappings", count)
+	}
+	return mappings, nil
+}
+
+func sameCreateNATReservations(left, right []config.PortMapping) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	counts := make(map[string]int, len(left))
+	for _, mapping := range left {
+		counts[fmt.Sprintf("%d/%s", mapping.HostPort, strings.ToLower(mapping.Protocol))]++
+	}
+	for _, mapping := range right {
+		key := fmt.Sprintf("%d/%s", mapping.HostPort, strings.ToLower(mapping.Protocol))
+		if counts[key] == 0 {
+			return false
+		}
+		counts[key]--
+	}
+	return true
 }
 
 func allocateDefaultEqualPorts(c *config.Container, count int) []int {

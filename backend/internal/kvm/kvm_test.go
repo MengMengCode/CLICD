@@ -3,8 +3,14 @@ package kvm
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/xml"
+	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 
 	"clicd/internal/config"
@@ -21,6 +27,51 @@ func TestImagePathUsesAllowlistedImageID(t *testing.T) {
 	validID := GetImages()[0].ID
 	if got := filepath.Base(ImagePath(validID)); got != validID+".qcow2" {
 		t.Fatalf("ImagePath(%q) basename = %q", validID, got)
+	}
+}
+
+func TestWindows11ImageDefinition(t *testing.T) {
+	image := FindImage("kvm-windows-11")
+	if image == nil {
+		t.Fatal("Windows 11 image is missing from the amd64 image list")
+	}
+	if image.Distro != "windows" || image.Release != "11" || image.Arch != "amd64" {
+		t.Fatalf("Windows 11 image metadata = %+v", image)
+	}
+	if !strings.Contains(image.URL, "microsoft.com/fwlink/") {
+		t.Fatalf("Windows 11 image does not use an official Microsoft URL: %s", image.URL)
+	}
+	if got := filepath.Base(ImagePath(image.ID)); got != "kvm-windows-11.iso" {
+		t.Fatalf("Windows 11 image basename = %q", got)
+	}
+}
+
+func TestWindows11UnattendAddsCompatibilityChecksOnlyForWindows11(t *testing.T) {
+	windows11 := windowsAutounattendXML("win11-test", "Password123!", true)
+	windows10 := windowsAutounattendXML("win10-test", "Password123!", false)
+
+	for _, key := range []string{"BypassTPMCheck", "BypassSecureBootCheck", "BypassCPUCheck"} {
+		if !strings.Contains(windows11, key) {
+			t.Fatalf("Windows 11 unattend is missing %s", key)
+		}
+		if strings.Contains(windows10, key) {
+			t.Fatalf("Windows 10 unattend unexpectedly contains %s", key)
+		}
+	}
+	var document struct {
+		XMLName xml.Name
+	}
+	if err := xml.Unmarshal([]byte(windows11), &document); err != nil {
+		t.Fatalf("Windows 11 unattend XML is invalid: %v", err)
+	}
+}
+
+func TestWindowsMinimumResources(t *testing.T) {
+	if cpu, ram, disk := windowsMinimumResources("kvm-windows-11"); cpu != 2 || ram != 4096 || disk != 64 {
+		t.Fatalf("Windows 11 minimums = %v vCPU, %d MB, %d GB", cpu, ram, disk)
+	}
+	if cpu, ram, disk := windowsMinimumResources("kvm-windows-10"); cpu != 1 || ram != 2048 || disk != 30 {
+		t.Fatalf("Windows 10 minimums = %v vCPU, %d MB, %d GB", cpu, ram, disk)
 	}
 }
 
@@ -112,6 +163,77 @@ func TestVerifyKVMHostKeyCapturesAndRejectsMismatch(t *testing.T) {
 
 	if err := verifyKVMHostKey(c, key2, save); err == nil {
 		t.Fatal("mismatched host key verification returned nil error")
+	}
+}
+
+func TestGetImagesIncludesHostArchitectureCustomImage(t *testing.T) {
+	previous := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = previous })
+	config.AppConfig = &config.ClicdConfig{
+		CustomKVMImages: []config.CustomKVMImage{
+			{
+				ID:          "custom-kvm-linux",
+				Name:        "Custom Linux",
+				Distro:      "ubuntu",
+				Release:     "noble",
+				Arch:        runtime.GOARCH,
+				URL:         "https://example.test/linux.qcow2",
+				Provisioner: config.KVMProvisionerLinuxCloudInit,
+			},
+			{
+				ID:          "custom-kvm-other-arch",
+				Name:        "Other Architecture",
+				Distro:      "ubuntu",
+				Release:     "noble",
+				Arch:        "not-" + runtime.GOARCH,
+				URL:         "https://example.test/other.qcow2",
+				Provisioner: config.KVMProvisionerLinuxCloudInit,
+			},
+		},
+	}
+
+	image := FindImage("custom-kvm-linux")
+	if image == nil || !image.Custom || image.Provisioner != config.KVMProvisionerLinuxCloudInit {
+		t.Fatalf("custom image was not exposed correctly: %+v", image)
+	}
+	if FindImage("custom-kvm-other-arch") != nil {
+		t.Fatal("custom image for another architecture was exposed")
+	}
+}
+
+func TestCustomWindowsProvisionerControlsImageType(t *testing.T) {
+	previous := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = previous })
+	config.AppConfig = &config.ClicdConfig{CustomKVMImages: []config.CustomKVMImage{{
+		ID:          "custom-kvm-windows",
+		Name:        "Custom Windows",
+		Distro:      "windows",
+		Release:     "11",
+		Arch:        runtime.GOARCH,
+		URL:         "https://example.test/windows.iso",
+		Provisioner: config.KVMProvisionerWindows11,
+	}}}
+
+	if !IsWindowsImage("custom-kvm-windows") || !IsWindows11Image("custom-kvm-windows") {
+		t.Fatal("custom Windows 11 provisioner was not recognized")
+	}
+	if ext := filepath.Ext(ImagePath("custom-kvm-windows")); ext != ".iso" {
+		t.Fatalf("custom Windows image extension = %q, want .iso", ext)
+	}
+}
+
+func TestVerifyFileSHA256(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "image")
+	content := []byte("clicd custom image")
+	if err := os.WriteFile(path, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	if err := verifyFileSHA256(path, hex.EncodeToString(sum[:])); err != nil {
+		t.Fatalf("valid checksum failed: %v", err)
+	}
+	if err := verifyFileSHA256(path, strings.Repeat("0", 64)); err == nil {
+		t.Fatal("invalid checksum unexpectedly passed")
 	}
 }
 

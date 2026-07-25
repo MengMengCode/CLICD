@@ -21,6 +21,23 @@ systemctl restart clicd
 journalctl -u clicd -n 100 --no-pager
 ```
 
+## 面板访问白名单 CLI
+
+```bash
+# 查看当前策略
+clicd access-policy show
+
+# 仅允许指定 IP/网段；反向代理地址按需填写
+clicd access-policy set \
+  --allow "203.0.113.10,192.168.1.0/24,2001:db8::/32" \
+  --trusted-proxy "127.0.0.1"
+
+# 关闭白名单限制
+clicd access-policy disable
+```
+
+也可以运行 `clicd cli`，在交互菜单中选择“面板访问白名单”。直接命令和交互菜单都会保存配置，并在服务运行时自动重启面板。
+
 ## 安全建议
 
 - 不要把 Web 面板直接暴露给不可信来源。

@@ -21,10 +21,15 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const requestURL = String(error.config?.url || '')
+    const isLoginRequest = ['/login', '/sub-user/login', '/sub-user/access']
+      .some((path) => requestURL === path || requestURL.endsWith(path))
+    if (error.response?.status === 401 && !isLoginRequest) {
       localStorage.removeItem('clicd_token')
       localStorage.removeItem('clicd_username')
-      window.location.href = '/login'
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(error)
   }
@@ -548,6 +553,21 @@ export const getWebSSHOriginSettings = () =>
 export const updateWebSSHOriginSettings = (origins: string[]) =>
   api.put<APIResponse<WebSSHOriginSettings>>('/webssh-origins', { origins })
 
+export interface PanelAccessPolicy {
+  enabled: boolean
+  allowed_sources: string[]
+  trusted_proxies: string[]
+  current_source: string
+  direct_source: string
+  using_forwarded: boolean
+}
+
+export const getPanelAccessPolicy = () =>
+  api.get<APIResponse<PanelAccessPolicy>>('/access-policy')
+
+export const updatePanelAccessPolicy = (data: Pick<PanelAccessPolicy, 'enabled' | 'allowed_sources' | 'trusted_proxies'>) =>
+  api.put<APIResponse<PanelAccessPolicy>>('/access-policy', data)
+
 // Containers
 export const getContainers = () =>
   api.get<APIResponse<Container[]>>('/containers')
@@ -717,6 +737,11 @@ export interface IPv6Route {
 export interface RoutingInfo {
   nat4: RouteCapacity
   nat4_port_range: NAT4PortRange
+  nat4_next_port: number
+  nat4_networks: {
+    lxc: NATNetworkInfo
+    kvm: NATNetworkInfo
+  }
   ipv4: RouteCapacity
   lan_dhcp: RouteCapacity
   ipv6: RouteCapacity
@@ -774,10 +799,36 @@ export interface ImageInfo {
   size_bytes: number
   manual_path?: string
   desktop?: string
+  provisioner?: string
+  custom?: boolean
+  sha256?: string
+}
+
+export interface CustomKVMImageInput {
+  type: 'lxc' | 'kvm'
+  name: string
+  description: string
+  distro: string
+  release: string
+  arch: string
+  url: string
+  provisioner?: 'linux-cloud-init' | 'windows-10' | 'windows-11' | 'lxc-rootfs'
+  sha256?: string
+}
+
+export interface CustomKVMImage extends CustomKVMImageInput {
+  id: string
+  created_at: string
 }
 
 export const getImages = () =>
   api.get<APIResponse<ImageInfo[]>>('/images')
+
+export const createCustomKVMImage = (payload: CustomKVMImageInput) =>
+  api.post<APIResponse<CustomKVMImage>>('/images/custom', payload)
+
+export const removeCustomKVMImage = (id: string) =>
+  api.delete<APIResponse>('/images/custom', { data: { id } })
 
 export const downloadImage = (templateId: string) =>
   api.post<APIResponse>('/images/download', { template_id: templateId })
@@ -921,6 +972,16 @@ export interface SubUser {
   current_image_ids?: string[]
   access_code: string
   created_at: string
+}
+
+export interface NATNetworkInfo {
+  subnet: string
+  gateway: string
+  netmask: string
+  dhcp_start: string
+  dhcp_end: string
+  dhcp_max: number
+  prefix_bits: number
 }
 
 export const createSubUser = (containerId: ContainerIdentifier) =>

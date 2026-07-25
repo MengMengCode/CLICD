@@ -62,3 +62,27 @@ func TestAllocateSSHPortExcludingRequestedMappings(t *testing.T) {
 		t.Fatalf("allocated port = %d, want 32002", port)
 	}
 }
+
+func TestPreviewSSHPortUsesRangeWithoutAdvancingCursor(t *testing.T) {
+	previous := AppConfig
+	t.Cleanup(func() { AppConfig = previous })
+	AppConfig = &ClicdConfig{
+		NATPortStart: 30000,
+		NATPortEnd:   35000,
+		NextSSHPort:  30000,
+		Containers: []Container{{
+			PortMappings: []PortMapping{{HostPort: 30000}},
+		}},
+	}
+
+	port, err := PreviewSSHPortExcluding([]int{30001})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if port != 30002 {
+		t.Fatalf("preview port = %d, want 30002", port)
+	}
+	if AppConfig.NextSSHPort != 30000 {
+		t.Fatalf("preview advanced cursor to %d", AppConfig.NextSSHPort)
+	}
+}

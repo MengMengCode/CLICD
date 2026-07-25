@@ -191,6 +191,26 @@ Update example:
 | `disabled` | Whether this key is disabled. |
 | `container_uuids` | Optional container allowlist that limits the key to specific containers. |
 
+## Panel Access Source Policy
+
+Use `GET /api/v1/access-policy` to read the panel source allowlist and `PUT /api/v1/access-policy` to update it. Both endpoints require `admin:access`. The policy covers panel pages, login endpoints, and every API.
+
+```json
+{
+  "enabled": true,
+  "allowed_sources": [
+    "203.0.113.10",
+    "192.168.1.0/24",
+    "2001:db8::/32"
+  ],
+  "trusted_proxies": [
+    "127.0.0.1"
+  ]
+}
+```
+
+Both lists accept IPv4, IPv6, and CIDR values. The backend only uses `X-Forwarded-For`, `X-Real-IP`, or `CF-Connecting-IP` when the direct peer matches `trusted_proxies`, so untrusted clients cannot bypass the policy by spoofing those headers. An enabled policy requires at least one allowed source, and the API rejects changes that exclude the current administrator source. Direct loopback access remains available as a CLI/SSH recovery path.
+
 ## Python Example
 
 Fetch containers:
@@ -302,6 +322,8 @@ print(resp.json())
 | GET | `/api/v1/templates` | Template list |
 | GET | `/api/v1/images` | Image management list |
 | GET | `/api/v1/images/enabled` | Enabled and downloaded images; supports `type=lxc\|kvm` |
+| POST | `/api/v1/images/custom` | Add a third-party LXC/KVM image source |
+| DELETE | `/api/v1/images/custom` | Remove a third-party LXC/KVM image source and cache |
 | POST | `/api/v1/images/download` | Download image |
 | POST | `/api/v1/images/cancel` | Cancel image download |
 | DELETE | `/api/v1/images/delete` | Delete image cache |
