@@ -583,7 +583,7 @@ func (c *Container) NormalizeNetworkAssignments() bool {
 	c.PublicIPv4s = filteredIPv4
 
 	seenIPv6 := map[string]bool{}
-	filteredIPv6 := make([]IPv6Assignment, 0, len(c.IPv6Addresses)+1)
+	filteredIPv6 := make([]IPv6Assignment, 0, len(c.IPv6Addresses))
 	for _, item := range c.IPv6Addresses {
 		item.Address = strings.TrimSpace(item.Address)
 		item.Interface = strings.TrimSpace(item.Interface)

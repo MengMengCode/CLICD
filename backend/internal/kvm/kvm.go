@@ -29,6 +29,7 @@ import (
 
 	"clicd/internal/config"
 	"clicd/internal/lxc"
+	"clicd/internal/safehttp"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -255,26 +256,8 @@ func downloadFile(ctx context.Context, url, target string, progress DownloadProg
 }
 
 func downloadFileWithValidator(ctx context.Context, url, target string, validate downloadResponseValidator, progress DownloadProgressFunc) error {
-	client := http.Client{
-		Timeout: 30 * time.Minute,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("too many redirects")
-			}
-			// Copy User-Agent on redirect
-			if ua := via[0].Header.Get("User-Agent"); ua != "" {
-				req.Header.Set("User-Agent", ua)
-			}
-			return nil
-		},
-	}
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return err
-	}
-	// Windows UA needed for Microsoft download servers
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	resp, err := client.Do(req)
+	const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	resp, err := safehttp.Get(ctx, url, userAgent, 30*time.Minute)
 	if err != nil {
 		return err
 	}
@@ -2223,7 +2206,7 @@ runcmd:
 	// Build static address block (IPv4 + IPv6)
 	ipv4s = normalizeKVMIPv4List(ipv4s)
 	addressBlock := ""
-	addressLines := make([]string, 0, len(ipv4s)+len(ipv6s))
+	addressLines := make([]string, 0, len(ipv4s))
 	for _, ipv4 := range ipv4s {
 		addressLines = append(addressLines, fmt.Sprintf("        - %s/32", ipv4))
 	}

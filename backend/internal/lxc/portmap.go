@@ -837,7 +837,7 @@ func createNATReservationOwner(name string) string {
 }
 
 func createNATReservationMappings(cfg ContainerConfig, managementPort int) []config.PortMapping {
-	reservations := make([]config.PortMapping, 0, len(cfg.NATPortMappings)+1)
+	reservations := make([]config.PortMapping, 0, len(cfg.NATPortMappings))
 	if managementPort > 0 {
 		reservations = append(reservations, config.PortMapping{HostPort: managementPort, Protocol: "tcp"})
 	}

@@ -410,7 +410,7 @@ func (cfg *ContainerConfig) NormalizeCreateNATMappings() error {
 }
 
 func (cfg ContainerConfig) RequestedNATHostPorts() []int {
-	ports := make([]int, 0, len(cfg.NATPortMappings)+1)
+	ports := make([]int, 0, len(cfg.NATPortMappings))
 	if cfg.ManagementPort > 0 {
 		ports = append(ports, cfg.ManagementPort)
 	}

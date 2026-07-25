@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +19,7 @@ import (
 	"clicd/internal/config"
 	"clicd/internal/kvm"
 	"clicd/internal/lxc"
+	"clicd/internal/safehttp"
 )
 
 // ImageInfo represents a template image with its download/enable status.
@@ -187,51 +187,66 @@ func cleanupOldImageDownloadErrors() {
 	}
 }
 
-// isImageDownloaded checks if the LXC download cache exists for a template.
-func isImageDownloaded(distro, release, arch string) bool {
-	downloaded, _ := imageDownloadedInfo(distro, release, arch)
-	return downloaded
-}
-
 // imageDownloadedInfo returns whether the image is downloaded and its total size in bytes.
-func imageDownloadedInfo(distro, release, arch string) (bool, int64) {
-	cachePath := filepath.Join("/var/cache/lxc/download", distro, release, arch)
+func imageDownloadedInfo(templateID string) (bool, int64) {
+	cachePath, ok := officialLXCImageCachePath(templateID)
+	if !ok {
+		return false, 0
+	}
 	info, err := os.Stat(cachePath)
 	if err != nil || !info.IsDir() {
 		return false, 0
 	}
-	// Check directly for rootfs.tar.xz (some LXC versions store it here)
-	if fi, err := os.Stat(filepath.Join(cachePath, "rootfs.tar.xz")); err == nil {
-		return true, fi.Size()
-	}
-	if fi, err := os.Stat(filepath.Join(cachePath, "meta.tar.xz")); err == nil {
-		return true, fi.Size()
-	}
-	// Check one level deeper (LXC uses variant subdirectories like "default")
-	entries, err := os.ReadDir(cachePath)
-	if err != nil {
-		return false, 0
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		subPath := filepath.Join(cachePath, entry.Name())
-		if fi, err := os.Stat(filepath.Join(subPath, "rootfs.tar.xz")); err == nil {
-			return true, fi.Size()
-		}
-		if fi, err := os.Stat(filepath.Join(subPath, "meta.tar.xz")); err == nil {
-			return true, fi.Size()
+	for _, candidate := range []string{
+		filepath.Join(cachePath, "rootfs.tar.xz"),
+		filepath.Join(cachePath, "meta.tar.xz"),
+		filepath.Join(cachePath, "default", "rootfs.tar.xz"),
+		filepath.Join(cachePath, "default", "meta.tar.xz"),
+	} {
+		if fileInfo, err := os.Stat(candidate); err == nil && !fileInfo.IsDir() {
+			return true, fileInfo.Size()
 		}
 	}
 	return false, 0
+}
+
+func officialLXCImageCachePath(templateID string) (string, bool) {
+	arch := "amd64"
+	if runtime.GOARCH == "arm64" {
+		arch = "arm64"
+	}
+	base := "/var/cache/lxc/download"
+	switch templateID {
+	case "ubuntu-noble":
+		return filepath.Join(base, "ubuntu", "noble", arch), true
+	case "ubuntu-jammy":
+		return filepath.Join(base, "ubuntu", "jammy", arch), true
+	case "debian-trixie":
+		return filepath.Join(base, "debian", "trixie", arch), true
+	case "debian-bookworm":
+		return filepath.Join(base, "debian", "bookworm", arch), true
+	case "debian-bullseye":
+		return filepath.Join(base, "debian", "bullseye", arch), true
+	case "alpine-3.21":
+		return filepath.Join(base, "alpine", "3.21", arch), true
+	case "centos-9-stream":
+		return filepath.Join(base, "centos", "9-Stream", arch), true
+	case "archlinux-current":
+		return filepath.Join(base, "archlinux", "current", arch), true
+	case "fedora-44":
+		return filepath.Join(base, "fedora", "44", arch), true
+	case "rockylinux-10":
+		return filepath.Join(base, "rockylinux", "10", arch), true
+	default:
+		return "", false
+	}
 }
 
 func lxcTemplateDownloadedInfo(template lxc.Template) (bool, int64) {
 	if template.Custom {
 		return lxc.CustomImageDownloadedInfo(template.ID)
 	}
-	return imageDownloadedInfo(template.Distro, template.Release, template.Arch)
+	return imageDownloadedInfo(template.ID)
 }
 
 // getEnabledImageSet returns the set of enabled image IDs.
@@ -272,7 +287,7 @@ func HandleImages(w http.ResponseWriter, r *http.Request) {
 	if kvmAvailable {
 		kvmImages = kvm.GetImages()
 	}
-	images := make([]ImageInfo, 0, len(templates)+len(kvmImages))
+	images := make([]ImageInfo, 0, len(templates))
 	for _, t := range templates {
 		dl := imageDownloadInfo(t.ID)
 		downloaded, size := lxcTemplateDownloadedInfo(t)
@@ -437,9 +452,8 @@ func handleCustomKVMImageCreate(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "url must not exceed 4096 characters"})
 		return
 	}
-	parsedURL, err := url.ParseRequestURI(req.URL)
-	if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "https" && parsedURL.Scheme != "http") || parsedURL.User != nil {
-		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "url must be a valid HTTP or HTTPS download URL without credentials"})
+	if _, err := safehttp.ValidateURL(req.URL); err != nil {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: err.Error()})
 		return
 	}
 	if req.SHA256 != "" && !sha256Pattern.MatchString(req.SHA256) {
@@ -991,7 +1005,11 @@ func HandleImageDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Remove cache directory
-	cachePath := filepath.Join("/var/cache/lxc/download", tmpl.Distro, tmpl.Release, tmpl.Arch)
+	cachePath, ok := officialLXCImageCachePath(tmpl.ID)
+	if !ok {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Template cache path is not managed by CLICD"})
+		return
+	}
 	if err := os.RemoveAll(cachePath); err != nil {
 		jsonResponse(w, http.StatusInternalServerError, APIResponse{
 			Success: false,

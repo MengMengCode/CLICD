@@ -1591,7 +1591,7 @@ func (m *Manager) applyIPv6Config(lxcName string, ipv6s ...string) error {
 		return fmt.Errorf("failed to read container config: %v", err)
 	}
 	lines := strings.Split(string(data), "\n")
-	next := make([]string, 0, len(lines)+4)
+	next := make([]string, 0, len(lines))
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.Contains(trimmed, "# clicd managed: public IPv6") ||

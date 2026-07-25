@@ -7,13 +7,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"clicd/internal/safehttp"
 )
 
 type CustomImageDownloadProgress struct {
@@ -91,21 +92,7 @@ func DownloadCustomImageWithProgress(ctx context.Context, template Template, pro
 }
 
 func downloadCustomRootfs(ctx context.Context, sourceURL, target string, progress CustomImageDownloadProgressFunc) error {
-	client := http.Client{
-		Timeout: 30 * time.Minute,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("too many redirects")
-			}
-			return nil
-		},
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
-	if err != nil {
-		return err
-	}
-	request.Header.Set("User-Agent", "CLICD/1.0 LXC image downloader")
-	response, err := client.Do(request)
+	response, err := safehttp.Get(ctx, sourceURL, "CLICD/1.0 LXC image downloader", 30*time.Minute)
 	if err != nil {
 		return err
 	}

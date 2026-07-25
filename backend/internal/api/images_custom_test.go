@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -79,5 +81,53 @@ func TestCustomLXCImageCreateRejectsInvalidSource(t *testing.T) {
 
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d; body=%s", response.Code, http.StatusBadRequest, response.Body.String())
+	}
+}
+
+func TestCustomImageCreateRejectsPrivateNetworkSource(t *testing.T) {
+	for _, imageType := range []string{"lxc", "kvm"} {
+		t.Run(imageType, func(t *testing.T) {
+			payload := map[string]string{
+				"type":        imageType,
+				"name":        "Private Network Source",
+				"distro":      "ubuntu",
+				"release":     "noble",
+				"arch":        runtime.GOARCH,
+				"url":         "http://169.254.169.254/latest/meta-data",
+				"provisioner": "linux-cloud-init",
+			}
+			body, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest(http.MethodPost, "/api/images/custom", bytes.NewReader(body))
+			response := httptest.NewRecorder()
+
+			HandleCustomKVMImages(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", response.Code, http.StatusBadRequest, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestOfficialLXCImageCachePathUsesAllowlist(t *testing.T) {
+	cachePath, ok := officialLXCImageCachePath("debian-trixie")
+	if !ok {
+		t.Fatal("known template cache path was rejected")
+	}
+	normalized := filepath.ToSlash(cachePath)
+	if !strings.Contains(normalized, "/debian/trixie/") {
+		t.Fatalf("cache path = %q, want Debian trixie path", cachePath)
+	}
+	for _, templateID := range []string{
+		"../../../etc",
+		"custom-lxc-attacker",
+		"debian-trixie/../../etc",
+	} {
+		if cachePath, ok := officialLXCImageCachePath(templateID); ok || cachePath != "" {
+			t.Fatalf("officialLXCImageCachePath(%q) = %q, %v; want rejection", templateID, cachePath, ok)
+		}
 	}
 }
