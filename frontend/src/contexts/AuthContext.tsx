@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import api, { login as apiLogin, checkAuth, LoginResponse } from '../services/api'
 
 interface AuthContextType {

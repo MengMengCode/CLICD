@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import {
   Download,
   Trash2,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Globe2, Network, Pencil, Plus, RefreshCw, Router, Save, Search, Server, Trash2, X } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useLanguage, type Language } from '../contexts/LanguageContext'
 import {
   getRoutingInfo,

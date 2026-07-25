@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Camera, RefreshCw, Server, Trash2 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { deleteContainerSnapshot, getSnapshots, Snapshot } from '../services/api'
 import { useDialog } from '../components/Dialog'
 

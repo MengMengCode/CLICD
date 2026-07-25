@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router'
 import { useLanguage } from '../contexts/LanguageContext'
 import { shouldTranslateText, translateText } from '../utils/i18n'
 

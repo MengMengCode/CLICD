@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, CalendarClock, Check, Plus, RefreshCw, Trash2, X } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { batchCreate, getIPv6Status, getEnabledImages, getHostInfo, getHostReport, getRoutingInfo, getStorageInfo, CreateContainerRequest, HostInfo, HostProbeReport, IPv6Status, PortMapping, RoutingInfo, StorageInfo, Template } from '../services/api'
 import { useDialog } from './Dialog'
 import { useLanguage, type Language } from '../contexts/LanguageContext'

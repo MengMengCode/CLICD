@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Cpu, HardDrive, MemoryStick, Network, Server } from 'lucide-react'
 import RingStats from '../components/RingStats'
 import ResourceStatsPanel, {
@@ -171,7 +171,7 @@ function SummaryCard({
   value,
   muted = false,
 }: {
-  icon?: JSX.Element
+  icon?: ReactNode
   dot?: string
   title: string
   value: number
