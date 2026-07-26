@@ -1906,7 +1906,7 @@ func windowsAutounattendXML(hostname, adminPassword string, windows11 bool) stri
 		hostname = "clicd-win"
 	}
 	hostname = sanitizeWindowsComputerName(hostname)
-	setupCommand := `cmd.exe /c if exist C:\CLICD\FirstLogon.ps1 (powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\CLICD\FirstLogon.ps1) else (for %%d in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do @if exist %%d:\FirstLogon.ps1 powershell.exe -NoProfile -ExecutionPolicy Bypass -File %%d:\FirstLogon.ps1)`
+	setupCommand := `cmd.exe /c if exist C:\CLICD\FirstLogon.ps1 (powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\CLICD\FirstLogon.ps1) else (for %d in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do @if exist %d:\FirstLogon.ps1 powershell.exe -NoProfile -ExecutionPolicy Bypass -File %d:\FirstLogon.ps1)`
 	compatibilityCommands := ""
 	if windows11 {
 		compatibilityCommands = `
