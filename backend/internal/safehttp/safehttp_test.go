@@ -18,6 +18,8 @@ func TestValidateURLRejectsUnsafeDestinations(t *testing.T) {
 		"http://127.0.0.1/image",
 		"http://[::1]/image",
 		"http://169.254.169.254/latest/meta-data",
+		"http://100.100.100.200/latest/meta-data",
+		"http://[fd00:ec2::254]/latest/meta-data",
 		"http://example.com:99999/image",
 	} {
 		if _, err := ValidateURL(rawURL); err == nil {
@@ -64,12 +66,14 @@ func TestIsAllowedDownloadAddress(t *testing.T) {
 		"172.16.0.1":           true,
 		"192.168.1.1":          true,
 		"169.254.169.254":      false,
+		"100.100.100.200":      false,
 		"192.0.2.1":            false,
 		"198.18.0.1":           false,
 		"::1":                  false,
 		"64:ff9b::127.0.0.1":   false,
 		"2002:7f00:1::1":       false,
 		"fc00::1":              true,
+		"fd00:ec2::254":        false,
 		"fec0::1":              false,
 		"fe80::1":              false,
 		"2001:db8::1":          false,

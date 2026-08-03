@@ -16,6 +16,7 @@ const maxRedirects = 10
 
 var blockedDownloadPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.100.100.200/32"),
 	netip.MustParsePrefix("127.0.0.0/8"),
 	netip.MustParsePrefix("169.254.0.0/16"),
 	netip.MustParsePrefix("192.0.0.0/24"),
@@ -36,6 +37,7 @@ var blockedDownloadPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("2001:db8::/32"),
 	netip.MustParsePrefix("2001:20::/28"),
 	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("fd00:ec2::254/128"),
 	netip.MustParsePrefix("fec0::/10"),
 	netip.MustParsePrefix("fe80::/10"),
 	netip.MustParsePrefix("ff00::/8"),
@@ -114,9 +116,10 @@ func Get(ctx context.Context, rawURL, userAgent string, timeout time.Duration) (
 		},
 	}
 
-	// All URL components, redirects, DNS answers and dial destinations are
-	// constrained above and in restrictedTransport.
-	// lgtm[go/request-forgery]
+	// The URL, redirects, DNS answers and dial destinations are constrained
+	// above and in restrictedTransport. CodeQL cannot infer those checks across
+	// the custom transport boundary.
+	// codeql[go/request-forgery]
 	return client.Do(request)
 }
 
