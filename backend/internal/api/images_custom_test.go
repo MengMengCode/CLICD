@@ -84,12 +84,12 @@ func TestCustomLXCImageCreateRejectsInvalidSource(t *testing.T) {
 	}
 }
 
-func TestCustomImageCreateRejectsPrivateNetworkSource(t *testing.T) {
+func TestCustomImageCreateRejectsMetadataSource(t *testing.T) {
 	for _, imageType := range []string{"lxc", "kvm"} {
 		t.Run(imageType, func(t *testing.T) {
 			payload := map[string]string{
 				"type":        imageType,
-				"name":        "Private Network Source",
+				"name":        "Metadata Source",
 				"distro":      "ubuntu",
 				"release":     "noble",
 				"arch":        runtime.GOARCH,

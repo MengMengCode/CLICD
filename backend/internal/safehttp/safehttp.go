@@ -14,17 +14,13 @@ import (
 
 const maxRedirects = 10
 
-var blockedPrefixes = []netip.Prefix{
+var blockedDownloadPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),
-	netip.MustParsePrefix("10.0.0.0/8"),
-	netip.MustParsePrefix("100.64.0.0/10"),
 	netip.MustParsePrefix("127.0.0.0/8"),
 	netip.MustParsePrefix("169.254.0.0/16"),
-	netip.MustParsePrefix("172.16.0.0/12"),
 	netip.MustParsePrefix("192.0.0.0/24"),
 	netip.MustParsePrefix("192.0.2.0/24"),
 	netip.MustParsePrefix("192.88.99.0/24"),
-	netip.MustParsePrefix("192.168.0.0/16"),
 	netip.MustParsePrefix("198.18.0.0/15"),
 	netip.MustParsePrefix("198.51.100.0/24"),
 	netip.MustParsePrefix("203.0.113.0/24"),
@@ -40,7 +36,6 @@ var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("2001:db8::/32"),
 	netip.MustParsePrefix("2001:20::/28"),
 	netip.MustParsePrefix("2002::/16"),
-	netip.MustParsePrefix("fc00::/7"),
 	netip.MustParsePrefix("fec0::/10"),
 	netip.MustParsePrefix("fe80::/10"),
 	netip.MustParsePrefix("ff00::/8"),
@@ -74,13 +69,15 @@ func ValidateURL(rawURL string) (*url.URL, error) {
 			return nil, fmt.Errorf("download URL contains an invalid port")
 		}
 	}
-	if addr, err := netip.ParseAddr(parsed.Hostname()); err == nil && !isPublicAddress(addr) {
-		return nil, fmt.Errorf("download URL resolves to a non-public address")
+	if addr, err := netip.ParseAddr(parsed.Hostname()); err == nil && !isAllowedDownloadAddress(addr) {
+		return nil, fmt.Errorf("download URL resolves to a blocked address")
 	}
 	return parsed, nil
 }
 
-// Get retrieves a resource only when every resolved destination is public.
+// Get retrieves a resource only when every resolved destination is safe for
+// image downloads. Private network image mirrors are allowed; loopback,
+// link-local, metadata, multicast and reserved destinations remain blocked.
 func Get(ctx context.Context, rawURL, userAgent string, timeout time.Duration) (*http.Response, error) {
 	parsed, err := ValidateURL(rawURL)
 	if err != nil {
@@ -98,7 +95,7 @@ func Get(ctx context.Context, rawURL, userAgent string, timeout time.Duration) (
 
 	client := &http.Client{
 		Timeout:   timeout,
-		Transport: publicTransport(net.DefaultResolver),
+		Transport: restrictedTransport(net.DefaultResolver),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= maxRedirects {
 				return fmt.Errorf("too many redirects")
@@ -118,12 +115,12 @@ func Get(ctx context.Context, rawURL, userAgent string, timeout time.Duration) (
 	}
 
 	// All URL components, redirects, DNS answers and dial destinations are
-	// constrained above and in publicTransport.
+	// constrained above and in restrictedTransport.
 	// lgtm[go/request-forgery]
 	return client.Do(request)
 }
 
-func publicTransport(resolver *net.Resolver) *http.Transport {
+func restrictedTransport(resolver *net.Resolver) *http.Transport {
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
@@ -135,7 +132,7 @@ func publicTransport(resolver *net.Resolver) *http.Transport {
 			if err != nil {
 				return nil, fmt.Errorf("invalid download destination: %v", err)
 			}
-			addresses, err := resolvePublicHost(ctx, resolver, host)
+			addresses, err := resolveAllowedHost(ctx, resolver, host)
 			if err != nil {
 				return nil, err
 			}
@@ -159,11 +156,11 @@ func publicTransport(resolver *net.Resolver) *http.Transport {
 }
 
 func validateHost(ctx context.Context, resolver *net.Resolver, host string) error {
-	_, err := resolvePublicHost(ctx, resolver, host)
+	_, err := resolveAllowedHost(ctx, resolver, host)
 	return err
 }
 
-func resolvePublicHost(ctx context.Context, resolver *net.Resolver, host string) ([]netip.Addr, error) {
+func resolveAllowedHost(ctx context.Context, resolver *net.Resolver, host string) ([]netip.Addr, error) {
 	host = strings.TrimSpace(strings.TrimSuffix(host, "."))
 	if host == "" {
 		return nil, fmt.Errorf("download URL host is empty")
@@ -174,8 +171,8 @@ func resolvePublicHost(ctx context.Context, resolver *net.Resolver, host string)
 
 	if addr, err := netip.ParseAddr(host); err == nil {
 		addr = addr.Unmap()
-		if !isPublicAddress(addr) {
-			return nil, fmt.Errorf("download URL resolves to a non-public address")
+		if !isAllowedDownloadAddress(addr) {
+			return nil, fmt.Errorf("download URL resolves to a blocked address")
 		}
 		return []netip.Addr{addr}, nil
 	}
@@ -190,22 +187,22 @@ func resolvePublicHost(ctx context.Context, resolver *net.Resolver, host string)
 	result := make([]netip.Addr, 0, len(addresses))
 	for _, address := range addresses {
 		address = address.Unmap()
-		if !isPublicAddress(address) {
-			return nil, fmt.Errorf("download host resolves to a non-public address")
+		if !isAllowedDownloadAddress(address) {
+			return nil, fmt.Errorf("download host resolves to a blocked address")
 		}
 		result = append(result, address)
 	}
 	return result, nil
 }
 
-func isPublicAddress(address netip.Addr) bool {
-	if !address.IsValid() || address.Zone() != "" || !address.IsGlobalUnicast() || address.IsPrivate() ||
+func isAllowedDownloadAddress(address netip.Addr) bool {
+	if !address.IsValid() || address.Zone() != "" || !address.IsGlobalUnicast() ||
 		address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() ||
 		address.IsMulticast() || address.IsUnspecified() {
 		return false
 	}
 	address = address.Unmap()
-	for _, prefix := range blockedPrefixes {
+	for _, prefix := range blockedDownloadPrefixes {
 		if prefix.Contains(address) {
 			return false
 		}
