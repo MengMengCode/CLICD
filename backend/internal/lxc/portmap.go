@@ -15,6 +15,7 @@ import (
 )
 
 var (
+	iptablesMu                  sync.Mutex
 	createNATReservationMu      sync.Mutex
 	createNATReservationNextID  uint64
 	createNATReservations       = map[uint64][]config.PortMapping{}
@@ -23,6 +24,9 @@ var (
 
 // ApplyPortMappings applies iptables DNAT rules for a container's port mappings
 func (m *Manager) ApplyPortMappings(id int) error {
+	iptablesMu.Lock()
+	defer iptablesMu.Unlock()
+
 	c := config.FindContainer(id)
 	if c == nil {
 		return fmt.Errorf("container not found: %d", id)
@@ -40,7 +44,7 @@ func (m *Manager) ApplyPortMappings(id int) error {
 	}
 
 	EnsureForwardRules(bridge)
-	if err := m.CleanPortMappings(id); err != nil {
+	if err := m.cleanPortMappingsLocked(id); err != nil {
 		return fmt.Errorf("clean existing port mappings for container %d: %w", id, err)
 	}
 	deleteBridgeMasquerade(subnet)
@@ -80,7 +84,7 @@ func (m *Manager) ApplyPortMappings(id int) error {
 
 	applyIPv4EgressPolicy(c, bridge, subnet, tag)
 
-	if err := ApplyFirewallRules(id); err != nil {
+	if err := applyFirewallRulesLocked(id); err != nil {
 		return err
 	}
 
@@ -379,6 +383,12 @@ func ensureLibvirtForwardRules(bridge string) {
 
 // CleanPortMappings removes all iptables rules for a container
 func (m *Manager) CleanPortMappings(id int) error {
+	iptablesMu.Lock()
+	defer iptablesMu.Unlock()
+	return m.cleanPortMappingsLocked(id)
+}
+
+func (m *Manager) cleanPortMappingsLocked(id int) error {
 	marker := "clicd-" + clicdTag(id) + "-"
 	var cleanupErrors []error
 	for _, target := range []struct {
@@ -406,27 +416,81 @@ func deleteTaggedIPTablesRules(table, chain, marker string) error {
 	if table != "" {
 		listArgs = append(listArgs, "-t", table)
 	}
-	listArgs = append(listArgs, "-L", chain, "-n", "--line-numbers")
+	listArgs = append(listArgs, "-S", chain)
 	output, err := exec.Command("iptables", listArgs...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("list iptables %s/%s: %w: %s", tableName(table), chain, err, strings.TrimSpace(string(output)))
 	}
 
 	var deleteErrors []error
-	for _, lineNumber := range taggedRuleLineNumbers(output, marker) {
+	specs := taggedRuleSpecifications(output, marker)
+	for _, spec := range specs {
 		deleteArgs := []string{"-w", "5"}
 		if table != "" {
 			deleteArgs = append(deleteArgs, "-t", table)
 		}
-		deleteArgs = append(deleteArgs, "-D", chain, strconv.Itoa(lineNumber))
-		if output, err := exec.Command("iptables", deleteArgs...).CombinedOutput(); err != nil {
+		deleteArgs = append(deleteArgs, spec...)
+		if out, err := exec.Command("iptables", deleteArgs...).CombinedOutput(); err != nil {
+			outStr := strings.TrimSpace(string(out))
+			if isIPTablesRuleNotFoundError(outStr) {
+				continue
+			}
 			deleteErrors = append(deleteErrors, fmt.Errorf(
-				"delete iptables %s/%s rule %d: %w: %s",
-				tableName(table), chain, lineNumber, err, strings.TrimSpace(string(output)),
+				"delete iptables %s/%s rule [%s]: %w: %s",
+				tableName(table), chain, strings.Join(spec, " "), err, outStr,
 			))
 		}
 	}
 	return errors.Join(deleteErrors...)
+}
+
+func parseIPTablesRuleFields(line string) []string {
+	var fields []string
+	var current strings.Builder
+	inQuotes := false
+
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		if ch == '"' {
+			inQuotes = !inQuotes
+			continue
+		}
+		if !inQuotes && (ch == ' ' || ch == '\t') {
+			if current.Len() > 0 {
+				fields = append(fields, current.String())
+				current.Reset()
+			}
+			continue
+		}
+		current.WriteByte(ch)
+	}
+	if current.Len() > 0 {
+		fields = append(fields, current.String())
+	}
+	return fields
+}
+
+func taggedRuleSpecifications(output []byte, marker string) [][]string {
+	var specs [][]string
+	for _, line := range strings.Split(string(output), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || !strings.Contains(trimmed, marker) {
+			continue
+		}
+		fields := parseIPTablesRuleFields(trimmed)
+		if len(fields) >= 2 && fields[0] == "-A" {
+			fields[0] = "-D"
+			specs = append(specs, fields)
+		}
+	}
+	return specs
+}
+
+func isIPTablesRuleNotFoundError(errStr string) bool {
+	lower := strings.ToLower(errStr)
+	return strings.Contains(lower, "does a matching rule exist") ||
+		strings.Contains(lower, "no chain/target/match by that name") ||
+		strings.Contains(lower, "bad rule")
 }
 
 func taggedRuleLineNumbers(output []byte, marker string) []int {
@@ -1130,6 +1194,12 @@ func hostPortKey(hostIP string, port int) int {
 
 // CleanFirewallRules removes all firewall rules for a container from the FORWARD chain.
 func CleanFirewallRules(id int) {
+	iptablesMu.Lock()
+	defer iptablesMu.Unlock()
+	cleanFirewallRulesLocked(id)
+}
+
+func cleanFirewallRulesLocked(id int) {
 	tag := clicdTag(id)
 	// Remove all rules with the firewall tag prefix
 	cmd := exec.Command("bash", "-c",
@@ -1154,13 +1224,19 @@ func CleanFirewallRules(id int) {
 
 // ApplyFirewallRules applies iptables FORWARD rules for a container's firewall configuration.
 func ApplyFirewallRules(id int) error {
+	iptablesMu.Lock()
+	defer iptablesMu.Unlock()
+	return applyFirewallRulesLocked(id)
+}
+
+func applyFirewallRulesLocked(id int) error {
 	c := config.FindContainer(id)
 	if c == nil {
 		return fmt.Errorf("container not found: %d", id)
 	}
 
 	// Always clean existing firewall rules first
-	CleanFirewallRules(id)
+	cleanFirewallRulesLocked(id)
 
 	// If firewall is disabled or no rules, nothing to apply
 	if !c.FirewallEnabled {

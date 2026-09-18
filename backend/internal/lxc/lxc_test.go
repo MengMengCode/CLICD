@@ -136,6 +136,55 @@ num  target prot opt source destination
 	}
 }
 
+func TestTaggedRuleSpecifications(t *testing.T) {
+	output := []byte(`-P PREROUTING ACCEPT
+-A PREROUTING -p tcp -m tcp --dport 20010 -m comment --comment "clicd-c12-any-20010" -j DNAT --to-destination 10.0.3.5:20010
+-A PREROUTING -p tcp -m tcp --dport 22010 -m comment --comment clicd-c13-any-22010 -j DNAT --to-destination 10.0.3.5:22
+-A PREROUTING -p tcp -m tcp --dport 20011 -m comment --comment clicd-c12-any-20011 -j DNAT --to-destination 10.0.3.5:20011
+`)
+	specs := taggedRuleSpecifications(output, "clicd-c12-")
+	if len(specs) != 2 {
+		t.Fatalf("taggedRuleSpecifications() returned %d specs, want 2", len(specs))
+	}
+	if specs[0][0] != "-D" || specs[0][1] != "PREROUTING" {
+		t.Fatalf("specs[0] does not start with -D PREROUTING: %v", specs[0])
+	}
+	if specs[1][0] != "-D" || specs[1][1] != "PREROUTING" {
+		t.Fatalf("specs[1] does not start with -D PREROUTING: %v", specs[1])
+	}
+	// Check comment parsing (quotes stripped properly)
+	foundComment := false
+	for _, f := range specs[0] {
+		if f == "clicd-c12-any-20010" {
+			foundComment = true
+		}
+	}
+	if !foundComment {
+		t.Fatalf("specs[0] does not contain expected comment: %v", specs[0])
+	}
+}
+
+func TestParseIPTablesRuleFields(t *testing.T) {
+	line := `-A PREROUTING -p tcp --dport 20000 -m comment --comment "clicd-c1-any-20000" -j DNAT`
+	fields := parseIPTablesRuleFields(line)
+	expected := []string{"-A", "PREROUTING", "-p", "tcp", "--dport", "20000", "-m", "comment", "--comment", "clicd-c1-any-20000", "-j", "DNAT"}
+	if !reflect.DeepEqual(fields, expected) {
+		t.Fatalf("parseIPTablesRuleFields() = %v, want %v", fields, expected)
+	}
+}
+
+func TestIsIPTablesRuleNotFoundError(t *testing.T) {
+	if !isIPTablesRuleNotFoundError("iptables: Bad rule (does a matching rule exist in that chain?).") {
+		t.Fatalf("expected true for Bad rule error")
+	}
+	if !isIPTablesRuleNotFoundError("iptables: No chain/target/match by that name.") {
+		t.Fatalf("expected true for No chain/target error")
+	}
+	if isIPTablesRuleNotFoundError("iptables: Permission denied") {
+		t.Fatalf("expected false for Permission denied")
+	}
+}
+
 func TestPortMappingConntrackDeleteArgs(t *testing.T) {
 	got := portMappingConntrackDeleteArgs(config.PortMapping{
 		HostIP:   "203.0.113.10",
