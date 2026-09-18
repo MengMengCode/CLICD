@@ -125,6 +125,25 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
   }, [isOpen, form.virtualization])
 
   useEffect(() => {
+    if (templates.length > 0 && (!form.template_id || !templates.some((item) => item.id === form.template_id))) {
+      const defaultID = templates[0].id
+      setForm((prev) => {
+        if (prev.template_id && templates.some((item) => item.id === prev.template_id)) {
+          return prev
+        }
+        const allowed = new Set(prev.allowed_image_ids || [])
+        allowed.add(defaultID)
+        return applyTemplateDefaults({
+          ...prev,
+          template_id: defaultID,
+          allowed_image_ids: prev.image_limit_configured ? prev.allowed_image_ids : [defaultID],
+          image_limit_configured: prev.image_limit_configured,
+        })
+      })
+    }
+  }, [templates, form.template_id])
+
+  useEffect(() => {
     if (!isOpen) return
     let active = true
     setStorageLoading(true)
@@ -488,6 +507,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
               }}
               className={inputClass}
             >
+              <option value="">{t('请选择镜像')}</option>
               {templates.map((template) => (
                 <option key={template.id} value={template.id}>
                   {template.name}
