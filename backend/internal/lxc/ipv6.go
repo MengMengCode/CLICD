@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"net"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"clicd/internal/config"
@@ -1150,18 +1152,96 @@ func parseDefaultRoutes(output string) []routeInfo {
 	return routes
 }
 
-func ipv6ConnectivityOK() bool {
-	targets := [][]string{
-		{"ping", "-6", "-c", "1", "-W", "2", "2606:4700:4700::1111"},
-		{"ping", "-6", "-c", "1", "-W", "2", "2001:4860:4860::8888"},
-		{"ping6", "-c", "1", "-W", "2", "2606:4700:4700::1111"},
+var defaultIPv6TCPTargets = []string{
+	"[2606:4700:4700::1111]:53",
+	"[2001:4860:4860::8888]:53",
+	"[2606:4700:4700::1111]:443",
+	"[2001:4860:4860::8888]:443",
+}
+
+var defaultIPv6PingTargets = [][]string{
+	{"ping", "-6", "-c", "1", "-W", "2", "2606:4700:4700::1111"},
+	{"ping", "-6", "-c", "1", "-W", "2", "2001:4860:4860::8888"},
+	{"ping6", "-c", "1", "-W", "2", "2606:4700:4700::1111"},
+}
+
+func checkIPv6Connectivity(ctx context.Context, tcpTargets []string, pingTargets [][]string) bool {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	result := make(chan struct{}, 1)
+	var once sync.Once
+	reportSuccess := func() {
+		once.Do(func() {
+			select {
+			case result <- struct{}{}:
+			default:
+			}
+			cancel()
+		})
 	}
-	for _, args := range targets {
-		if exec.Command(args[0], args[1:]...).Run() == nil {
+
+	var wg sync.WaitGroup
+
+	// Launch TCP probes (tcping / 3-way handshake)
+	for _, target := range tcpTargets {
+		wg.Add(1)
+		go func(addr string) {
+			defer wg.Done()
+			var d net.Dialer
+			conn, err := d.DialContext(ctx, "tcp", addr)
+			if err == nil {
+				_ = conn.Close()
+				reportSuccess()
+			}
+		}(target)
+	}
+
+	// Launch ICMP ping probes
+	for _, args := range pingTargets {
+		if len(args) == 0 {
+			continue
+		}
+		wg.Add(1)
+		go func(cmdArgs []string) {
+			defer wg.Done()
+			cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
+			if cmd.Run() == nil {
+				reportSuccess()
+			}
+		}(args)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-result:
+		return true
+	case <-done:
+		select {
+		case <-result:
 			return true
+		default:
+			return false
+		}
+	case <-ctx.Done():
+		select {
+		case <-result:
+			return true
+		default:
+			return false
 		}
 	}
-	return false
+}
+
+func ipv6ConnectivityOK() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+	defer cancel()
+	return checkIPv6Connectivity(ctx, defaultIPv6TCPTargets, defaultIPv6PingTargets)
 }
 
 func isContainerLikeInterface(iface string) bool {
@@ -1955,13 +2035,27 @@ func removeIPv6ForwardRules(ipv6 string) {
 }
 
 func containerIPv6ConnectivityOK(lxcName string) bool {
+	// 1. Fast ICMP ping probe
 	targets := []string{"2606:4700:4700::1111", "2001:4860:4860::8888"}
 	for _, target := range targets {
 		if exec.Command("lxc-attach", "-n", lxcName, "--", "ping", "-6", "-c", "1", "-W", "2", target).Run() == nil {
 			return true
 		}
 	}
-	return false
+
+	// 2. Non-ICMP / TCP fallback probe (for environments where ICMPv6 is blocked, e.g. HE tunnel or strict firewall)
+	// Probing port 53/443 via nc, curl, wget, bash /dev/tcp, or python3
+	probeScript := `
+(nc -6 -z -w 2 2606:4700:4700::1111 53 2>/dev/null || nc -z -w 2 2606:4700:4700::1111 53 2>/dev/null || nc -6 -z -w 2 2001:4860:4860::8888 53 2>/dev/null) && exit 0
+(curl -6 -s -m 2 -o /dev/null https://[2606:4700:4700::1111] 2>/dev/null || curl -6 -s -m 2 -o /dev/null https://[2001:4860:4860::8888] 2>/dev/null) && exit 0
+(wget -6 -T 2 -q -O /dev/null https://[2606:4700:4700::1111] 2>/dev/null || wget -6 -T 2 -q -O /dev/null https://[2001:4860:4860::8888] 2>/dev/null) && exit 0
+(command -v bash >/dev/null 2>&1 && timeout 2 bash -c 'cat < /dev/null > /dev/tcp/2606:4700:4700::1111/53' 2>/dev/null) && exit 0
+(command -v python3 >/dev/null 2>&1 && python3 -c 'import socket; s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM); s.settimeout(2); s.connect(("2606:4700:4700::1111", 53)); s.close()' 2>/dev/null) && exit 0
+exit 1
+`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "lxc-attach", "-n", lxcName, "--", "sh", "-c", probeScript).Run() == nil
 }
 
 func (m *Manager) removeGuestIPv6Addresses(lxcName string, assignments []config.IPv6Assignment) {
