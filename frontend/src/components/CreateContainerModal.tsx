@@ -299,7 +299,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
         return false
       }
       const natMappingError = natEnabled
-        ? validateBatchNATPortMappings(customNATMappings, managementPort, batchCount)
+        ? validateBatchNATPortMappings(customNATMappings, managementPort, batchCount, natPortCount)
         : ''
       if (natMappingError) {
         dialog.alert(t('NAT 端口配置有误'), natMappingError)
@@ -343,7 +343,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
     }
 
     const natMappingError = natEnabled
-      ? validateBatchNATPortMappings(customNATMappings, managementPort, batchCount)
+      ? validateBatchNATPortMappings(customNATMappings, managementPort, batchCount, natPortCount)
       : ''
     if (natMappingError) {
       dialog.alert('NAT 端口配置有误', natMappingError)
@@ -365,7 +365,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
     for (let i = 0; i < batchCount; i++) {
       const name = batchCount > 1 ? `${boundedForm.name}-${startIndex + i}` : boundedForm.name
       const expandedNAT = wantsNAT
-        ? expandBatchNATConfig(boundedForm.nat_port_mappings || [], boundedForm.management_port || 0, i)
+        ? expandBatchNATConfig(boundedForm.nat_port_mappings || [], boundedForm.management_port || 0, i, boundedForm.port_mapping_count)
         : { mappings: [], managementPort: 0 }
       const natPortMappings = expandedNAT.mappings
       containers.push({
@@ -1598,8 +1598,15 @@ function findAvailableNATPort(start: number, end: number, cursor: number, unavai
   return 0
 }
 
-function expandBatchNATConfig(mappings: PortMapping[], managementPort: number, batchIndex: number) {
+function batchNATEffectiveStride(mappings: PortMapping[], managementPort: number, portMappingCount?: number) {
   const stride = batchNATPortStride(batchNATSourceMappings(mappings, managementPort))
+  if (mappings.length > 0) return stride
+  const autoCount = Math.min(Math.max(Math.round(Number(portMappingCount) || 2), 2), 64)
+  return Math.max(stride, autoCount)
+}
+
+function expandBatchNATConfig(mappings: PortMapping[], managementPort: number, batchIndex: number, portMappingCount?: number) {
+  const stride = batchNATEffectiveStride(mappings, managementPort, portMappingCount)
   const offset = batchIndex * stride
   return {
     mappings: mappings.map((mapping) => ({
@@ -1631,7 +1638,7 @@ function batchNATPortStride(mappings: PortMapping[]) {
   return Math.max(...sourcePorts) - Math.min(...sourcePorts) + 1
 }
 
-function validateBatchNATPortMappings(mappings: PortMapping[], managementPort: number, batchCount: number) {
+function validateBatchNATPortMappings(mappings: PortMapping[], managementPort: number, batchCount: number, portMappingCount?: number) {
   if (mappings.length === 0 && managementPort === 0) return ''
   if (managementPort < 0 || managementPort > 65535) {
     return 'SSH/RDP 公网源端口必须在 1-65535 之间，留空则自动分配'
@@ -1639,11 +1646,13 @@ function validateBatchNATPortMappings(mappings: PortMapping[], managementPort: n
   if (mappings.length > 63) return '每个容器最多可配置 63 条自定义 NAT 映射'
 
   const used = new Map<string, string>()
-  const stride = batchNATPortStride(batchNATSourceMappings(mappings, managementPort))
+  const stride = batchNATEffectiveStride(mappings, managementPort, portMappingCount)
+  const autoCount = Math.min(Math.max(Math.round(Number(portMappingCount) || 2), 2), 64)
   for (let batchIndex = 0; batchIndex < batchCount; batchIndex++) {
     if (managementPort > 0) {
       const expandedManagementPort = managementPort + batchIndex * stride
-      if (expandedManagementPort > 65535) {
+      const maxPort = mappings.length === 0 ? expandedManagementPort + autoCount - 1 : expandedManagementPort
+      if (maxPort > 65535) {
         return '批量展开后的 SSH/RDP 公网源端口超出 1-65535'
       }
       const managementKey = `${expandedManagementPort}/tcp`
