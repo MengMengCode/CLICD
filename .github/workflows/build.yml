@@ -56,6 +56,8 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "CLICD_VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_ENV"
+          elif [[ "$GITHUB_REF_NAME" == v* ]]; then
+            echo "CLICD_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           else
             echo "CLICD_VERSION=dev" >> "$GITHUB_ENV"
           fi
@@ -105,7 +107,7 @@ jobs:
     name: Publish GitHub Release
     needs: linux
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref_name, 'v')
 
     steps:
       - name: Checkout

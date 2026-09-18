@@ -1,0 +1,46 @@
+name: Feature Request / 功能建议
+description: 为 CLICD 提出新功能、改进建议或优化设想 / Suggest an idea or enhancement for CLICD
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢为 CLICD 提出建设性意见！请尽可能详细阐述你的需求背景与设想。
+        Thank you for suggesting an idea! Please explain the problem you're trying to solve and how CLICD can help.
+
+  - type: textarea
+    id: problem-statement
+    attributes:
+      label: 需求背景与痛点 / Problem or Motivation
+      description: 这个功能解决了什么问题？是否对应现有的操作阻碍？ / Is your feature request related to a problem?
+      placeholder: 当我尝试做某项操作时，目前无法...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: 期望的解决方案 / Proposed Solution
+      description: 清晰描述你希望新增或改善的交互与逻辑 / Clear description of what you want to happen
+      placeholder: 希望增加支持...，面板上增加...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案或临时方案 / Alternatives Considered
+      description: 你目前是如何绕过或处理这个问题的？ / Any alternative solutions or features you've considered
+      placeholder: 目前通过手动命令行执行...
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 补充说明 / Additional Context
+      description: 任何其他相关的设计草图、截图或参考资料 / Add any other context or screenshots
+      placeholder: 补充信息...
+    validations:
+      required: false

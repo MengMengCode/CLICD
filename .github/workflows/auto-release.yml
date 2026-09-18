@@ -1,0 +1,163 @@
+name: Automatic release threshold
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  # Recheck once a day in case a branch-push run was skipped or interrupted.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: automatic-release-main
+  cancel-in-progress: false
+
+jobs:
+  check-and-release:
+    name: Release after 500 changed code lines
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RELEASE_THRESHOLD: "500"
+
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate changes since the latest stable version
+        id: plan
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Tags are the release counter: every manual or automatic stable
+          # release resets the accumulated source-code difference.
+          git fetch --force --tags origin
+
+          BASE_TAG=""
+          while IFS= read -r candidate; do
+            if [[ "${candidate}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              BASE_TAG="${candidate}"
+              break
+            fi
+          done < <(git tag --merged "${HEAD_SHA}" --sort=-version:refname)
+
+          if [[ -z "${BASE_TAG}" ]]; then
+            echo "::error::No stable vMAJOR.MINOR.PATCH tag is reachable from ${HEAD_SHA}."
+            exit 1
+          fi
+
+          NUMSTAT_FILE="$(mktemp)"
+          trap 'rm -f "${NUMSTAT_FILE}"' EXIT
+
+          # Count real source changes, but ignore documentation,
+          # artwork, dependency lock files, build artifacts, and repo metadata.
+          git diff --numstat "${BASE_TAG}" "${HEAD_SHA}" -- . \
+            ':(exclude)README.md' \
+            ':(exclude)api.md' \
+            ':(exclude)docs/**' \
+            ':(exclude)img/**' \
+            ':(exclude)LICENSE' \
+            ':(exclude)linux.txt' \
+            ':(exclude)backend/go.sum' \
+            ':(exclude)frontend/package-lock.json' \
+            ':(exclude)docs/package-lock.json' \
+            ':(exclude)frontend/dist/**' \
+            ':(exclude)dist/**' \
+            ':(exclude)build/**' \
+            ':(exclude).github/**' \
+            ':(exclude).vscode/**' \
+            ':(exclude).claude/**' \
+            > "${NUMSTAT_FILE}"
+
+          read -r ADDITIONS DELETIONS < <(
+            awk '
+              $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
+                additions += $1
+                deletions += $2
+              }
+              END { printf "%d %d\n", additions, deletions }
+            ' "${NUMSTAT_FILE}"
+          )
+          CHANGED_LINES=$((ADDITIONS + DELETIONS))
+
+          VERSION="${BASE_TAG#v}"
+          IFS=. read -r MAJOR MINOR PATCH <<< "${VERSION}"
+          NEXT_TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+
+          SHOULD_RELEASE=false
+          if (( CHANGED_LINES >= RELEASE_THRESHOLD )); then
+            SHOULD_RELEASE=true
+          fi
+
+          {
+            echo "base_tag=${BASE_TAG}"
+            echo "next_tag=${NEXT_TAG}"
+            echo "additions=${ADDITIONS}"
+            echo "deletions=${DELETIONS}"
+            echo "changed_lines=${CHANGED_LINES}"
+            echo "should_release=${SHOULD_RELEASE}"
+          } >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "### Automatic release threshold"
+            echo
+            echo "- Base version: \`${BASE_TAG}\`"
+            echo "- Target commit: \`${HEAD_SHA}\`"
+            echo "- Additions: ${ADDITIONS}"
+            echo "- Deletions: ${DELETIONS}"
+            echo "- Total changed code lines: ${CHANGED_LINES}/${RELEASE_THRESHOLD}"
+            echo "- Release required: ${SHOULD_RELEASE}"
+            if [[ "${SHOULD_RELEASE}" == "true" ]]; then
+              echo "- Next version: \`${NEXT_TAG}\`"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Create the next patch-version tag
+        if: steps.plan.outputs.should_release == 'true'
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.sha }}
+          NEXT_TAG: ${{ steps.plan.outputs.next_tag }}
+        run: |
+          set -euo pipefail
+
+          # A remote existence check makes a manual release racing this job
+          # fail safely instead of overwriting an existing version tag.
+          if git ls-remote --exit-code --tags origin "refs/tags/${NEXT_TAG}" >/dev/null 2>&1; then
+            echo "::error::Tag ${NEXT_TAG} already exists; rerun to recalculate from the new baseline."
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${NEXT_TAG}" "${HEAD_SHA}" -m "CLICD ${NEXT_TAG#v}"
+          git push origin "refs/tags/${NEXT_TAG}"
+
+      - name: Start build and release workflow
+        if: steps.plan.outputs.should_release == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT_TAG: ${{ steps.plan.outputs.next_tag }}
+        run: |
+          set -euo pipefail
+
+          # Tag pushes made with GITHUB_TOKEN do not trigger other workflows,
+          # so dispatch build.yml explicitly at the tag.
+          gh workflow run build.yml --repo "${GITHUB_REPOSITORY}" --ref "${NEXT_TAG}"
+
+          {
+            echo
+            echo "Dispatched build and release workflow for \`${NEXT_TAG}\`."
+          } >> "${GITHUB_STEP_SUMMARY}"

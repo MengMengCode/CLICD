@@ -1,0 +1,192 @@
+name: Pull request size limit
+
+on:
+  pull_request_target:
+    branches:
+      - main
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: pr-size-limit-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  enforce-size-limit:
+    name: Enforce 3,000-line limit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      MAX_CHANGED_LINES: "3000"
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check conflicts and pull request size via GitHub API
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Checking PR #${PR_NUMBER}"
+
+          ############################################################
+          # Helper: comment on and close rejected PR
+          ############################################################
+
+          reject_pr() {
+            local message="$1"
+
+            echo "::error::${message}"
+
+            COMMENT_PAYLOAD="$(
+              jq -nc \
+                --arg body "${message}" \
+                '{body: $body}'
+            )"
+
+            echo "Posting rejection comment..."
+
+            curl \
+              --fail-with-body \
+              --silent \
+              --show-error \
+              --request POST \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              --data "${COMMENT_PAYLOAD}" \
+              >/dev/null
+
+            echo "Closing PR #${PR_NUMBER}..."
+
+            curl \
+              --fail-with-body \
+              --silent \
+              --show-error \
+              --request PATCH \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --data '{"state":"closed"}' \
+              >/dev/null
+
+            exit 1
+          }
+
+          ############################################################
+          # Fetch PR metadata from GitHub REST API
+          ############################################################
+
+          echo "Fetching pull request metadata from GitHub API..."
+
+          PR_JSON=""
+          for attempt in {1..10}; do
+            PR_JSON="$(
+              curl \
+                --fail-with-body \
+                --silent \
+                --show-error \
+                --request GET \
+                --header "Accept: application/vnd.github+json" \
+                --header "Authorization: Bearer ${GH_TOKEN}" \
+                --header "X-GitHub-Api-Version: 2022-11-28" \
+                "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}"
+            )"
+
+            MERGEABLE="$(echo "${PR_JSON}" | jq -r '.mergeable')"
+            if [[ "${MERGEABLE}" != "null" ]]; then
+              break
+            fi
+
+            echo "Mergeable state is calculating, waiting 2s (attempt ${attempt}/10)..."
+            sleep 2
+          done
+
+          MERGEABLE="$(echo "${PR_JSON}" | jq -r '.mergeable')"
+          ADDITIONS="$(echo "${PR_JSON}" | jq -r '.additions // 0')"
+          DELETIONS="$(echo "${PR_JSON}" | jq -r '.deletions // 0')"
+          CHANGED_FILES="$(echo "${PR_JSON}" | jq -r '.changed_files // 0')"
+
+          CHANGED_LINES=$((ADDITIONS + DELETIONS))
+
+          ############################################################
+          # STEP 1: Reject PRs with merge conflicts
+          ############################################################
+
+          echo
+          echo "Checking for merge conflicts..."
+
+          if [[ "${MERGEABLE}" == "false" ]]; then
+
+            {
+              echo "### Pull request policy"
+              echo
+              echo "- Merge conflicts: ❌ Detected"
+              echo "- Result: Rejected"
+            } >> "${GITHUB_STEP_SUMMARY}"
+
+            reject_pr "This pull request has merge conflicts with the target branch and cannot be accepted. Please update your branch with the latest changes, resolve all merge conflicts locally, and submit a conflict-free pull request."
+
+          fi
+
+          echo "No merge conflicts detected (mergeable: ${MERGEABLE})."
+
+          ############################################################
+          # Action summary
+          ############################################################
+
+          {
+            echo "### Pull request policy"
+            echo
+            echo "- Merge conflicts: ✅ None"
+            echo "- Changed files: ${CHANGED_FILES}"
+            echo "- Additions: ${ADDITIONS}"
+            echo "- Deletions: ${DELETIONS}"
+            echo "- Total changed lines: ${CHANGED_LINES}"
+            echo "- Maximum allowed: ${MAX_CHANGED_LINES}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          echo
+          echo "Changed files: ${CHANGED_FILES}"
+          echo "Additions: ${ADDITIONS}"
+          echo "Deletions: ${DELETIONS}"
+          echo "Total changed lines: ${CHANGED_LINES}"
+          echo "Limit: ${MAX_CHANGED_LINES}"
+
+          ############################################################
+          # STEP 2: Reject oversized PRs
+          ############################################################
+
+          if (( CHANGED_LINES > MAX_CHANGED_LINES )); then
+
+            reject_pr "This pull request changes ${CHANGED_LINES} lines (${ADDITIONS} additions + ${DELETIONS} deletions) across ${CHANGED_FILES} files, exceeding the repository limit of ${MAX_CHANGED_LINES} changed lines. It has been closed automatically. Please split the changes into smaller pull requests."
+
+          fi
+
+          ############################################################
+          # PASS
+          ############################################################
+
+          echo
+          echo "Pull request passed all policy checks."
+          echo "No merge conflicts."
+          echo "Changed lines: ${CHANGED_LINES}/${MAX_CHANGED_LINES}."
+
+          {
+            echo
+            echo "### Result"
+            echo
+            echo "✅ Pull request passed."
+          } >> "${GITHUB_STEP_SUMMARY}"

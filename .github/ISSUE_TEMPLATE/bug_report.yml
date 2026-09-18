@@ -1,0 +1,107 @@
+name: Bug Report / 问题反馈
+description: 报告 CLICD 运行或功能中的异常与错误 / Report a bug or problem with CLICD
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢提交反馈！请尽可能完整填写以下信息，协助我们快速定位和排查问题。
+        Thanks for taking the time to report this issue! Please provide the details below so we can diagnose and resolve it quickly.
+
+  - type: checkboxes
+    id: existing-issues
+    attributes:
+      label: 历史 Issue 查重 / Check Existing Issues
+      description: 请确认是否已检索过类似问题 / Please confirm you checked past issues
+      options:
+        - label: 我已检索过历史 Issue（含已关闭条目），确认暂无相同或高度相似的问题报告 / I searched existing issues and found no duplicate
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 现象描述 / What Happened
+      description: 清晰描述遇到的问题以及你期望的表现 / Describe what went wrong and what you expected to happen
+      placeholder: 请简要描述问题现象与预期表现...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: virtualization-type
+    attributes:
+      label: 虚拟化类型 / Virtualization Type
+      description: 问题涉及的虚拟化后端 / Affected virtualization backend
+      options:
+        - LXC
+        - KVM
+        - Both (LXC & KVM)
+        - WebUI / Panel / Other
+    validations:
+      required: true
+
+  - type: input
+    id: clicd-version
+    attributes:
+      label: CLICD 版本 / CLICD Version
+      description: 运行的 CLICD 版本号 / CLICD version (e.g. v1.1.29)
+      placeholder: "v1.1.29"
+    validations:
+      required: true
+
+  - type: input
+    id: host-os
+    attributes:
+      label: 宿主机系统与内核 / Host OS & Kernel
+      description: 运行节点的 Linux 发行版与内核版本 / Linux distribution and kernel version
+      placeholder: "Debian 12 / Ubuntu 22.04 / Proxmox VE 8.2 (Linux 6.8.x)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: 架构 / Architecture
+      description: 宿主机 CPU 架构 / Host CPU architecture
+      options:
+        - x86_64 / amd64
+        - aarch64 / arm64
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment-method
+    attributes:
+      label: 部署方式 / Deployment Method
+      description: 你是通过何种方式部署 CLICD 的？ / How did you deploy CLICD?
+      options:
+        - 一键脚本 (install.sh / systemd)
+        - 预编译二进制 (Prebuilt Binary)
+        - 源码编译 (Built from Source)
+        - 智简魔方模块 (Mofang Module)
+        - 其他 (Other)
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: 复现步骤 / Steps to Reproduce
+      description: 导致该问题出现的具体操作步骤 / Steps to reproduce the behavior
+      placeholder: |
+        1. 进入...
+        2. 点击...
+        3. 出现错误...
+    validations:
+      required: false
+
+  - type: textarea
+    id: error-logs
+    attributes:
+      label: 错误日志与终端输出 / Error Logs
+      description: 请粘贴相关日志（例如 `journalctl -u clicd`、`/var/log/clicd.log` 或浏览器控制台信息）/ Paste relevant logs or console output
+      placeholder: 粘贴错误日志或命令输出...
+      render: shell
+    validations:
+      required: false
