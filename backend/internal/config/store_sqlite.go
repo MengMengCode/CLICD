@@ -27,7 +27,7 @@ type savedTaskConfig struct {
 	VCPU                 float64       `json:"vcpu"`
 	CPUPercent           int           `json:"cpu_percent"`
 	RAMMB                int           `json:"ram_mb"`
-	DiskGB               int           `json:"disk_gb"`
+	DiskGB               float64       `json:"disk_gb"`
 	NetworkBWMbps        int           `json:"network_bw_mbps"`
 	NetworkDownMbps      int           `json:"network_down_mbps"`
 	NetworkUpMbps        int           `json:"network_up_mbps"`
@@ -199,7 +199,7 @@ func ensureSchema() error {
 			template TEXT,
 			vcpu REAL,
 			ram_mb INTEGER,
-			disk_gb INTEGER,
+			disk_gb REAL,
 			network_bw_mbps INTEGER,
 			network_down_mbps INTEGER NOT NULL DEFAULT 0,
 			network_up_mbps INTEGER NOT NULL DEFAULT 0,
@@ -347,7 +347,7 @@ func ensureSchema() error {
 			cfg_vcpu REAL,
 			cfg_cpu_percent INTEGER,
 			cfg_ram_mb INTEGER,
-			cfg_disk_gb INTEGER,
+			cfg_disk_gb REAL,
 			cfg_network_bw_mbps INTEGER,
 			cfg_network_down_mbps INTEGER NOT NULL DEFAULT 0,
 			cfg_network_up_mbps INTEGER NOT NULL DEFAULT 0,

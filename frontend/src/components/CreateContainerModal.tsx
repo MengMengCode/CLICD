@@ -1125,7 +1125,8 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
             <Field label="磁盘 (GB)">
               <NumberInput
                 value={form.disk_gb}
-                min={1}
+                min={getTemplateMinDiskGB(form.template_id, form.virtualization)}
+                step={form.virtualization === 'lxc' ? 0.25 : 1}
                 max={maxDiskGB}
                 invalid={!!resourceErrors.disk_gb}
                 onChange={(value) => setForm({ ...form, disk_gb: value })}
@@ -1377,13 +1378,35 @@ function NumberInput({
   )
 }
 
+function getTemplateMinDiskGB(templateID: string, virtualization: string): number {
+  const id = (templateID || '').toLowerCase()
+  if (virtualization === 'kvm') {
+    if (id.includes('windows-11') || id.includes('win11')) return 64
+    if (id.includes('windows') || id.includes('win')) return 30
+    if (id.includes('desktop') || id.includes('xfce') || id.includes('gnome')) return 20
+    return 5
+  }
+  // LXC
+  if (id.includes('alpine')) return 0.5
+  if (id.includes('debian')) return 1.0
+  if (id.includes('ubuntu')) return 1.5
+  if (id.includes('centos') || id.includes('rocky') || id.includes('fedora') || id.includes('almalinux') || id.includes('arch')) return 2.0
+  return 0.5
+}
+
+function normalizeLXCDisk(value: number) {
+  const val = Number.isFinite(value) ? value : 1
+  const rounded = Math.round(val * 100) / 100
+  return Math.max(0.25, Number(rounded.toFixed(2)))
+}
+
 function validateResourceInputs(form: CreateContainerRequest, maxVCPU: number, maxRAMMB?: number, maxDiskGB?: number) {
   const errors: Partial<Record<'vcpu' | 'ram_mb' | 'disk_gb', string>> = {}
   const windows = isWindowsTemplate(form.template_id)
   const windows11 = form.template_id.toLowerCase().includes('windows-11')
   const minVCPU = windows ? 2 : (form.virtualization === 'kvm' ? 1 : 0.25)
   const minRAMMB = windows11 ? 4096 : windows ? 2048 : 128
-  const minDiskGB = windows11 ? 64 : windows ? 30 : 1
+  const minDiskGB = getTemplateMinDiskGB(form.template_id, form.virtualization)
 
   if (!Number.isFinite(form.vcpu)) {
     errors.vcpu = '请输入 vCPU'
@@ -1442,7 +1465,7 @@ function normalizeCreateForm(form: CreateContainerRequest): CreateContainerReque
     ...normalized,
     vcpu: normalized.virtualization === 'kvm' ? Math.round(normalized.vcpu) : normalizeLXCvCPU(normalized.vcpu),
     ram_mb: Math.round(normalized.ram_mb),
-    disk_gb: Math.round(normalized.disk_gb),
+    disk_gb: normalized.virtualization === 'kvm' ? Math.round(normalized.disk_gb) : normalizeLXCDisk(normalized.disk_gb),
     assign_nat: wantsNAT,
     port_mapping_count: portMappingCount,
     extra_ports: [],

@@ -2,6 +2,7 @@ package lxc
 
 import (
 	"runtime"
+	"strings"
 
 	"clicd/internal/config"
 )
@@ -113,3 +114,21 @@ func FindTemplate(id string) *Template {
 	}
 	return nil
 }
+
+// GetTemplateMinDiskGB returns the minimum recommended/required disk size in GB for an LXC template.
+func GetTemplateMinDiskGB(templateID string) float64 {
+	id := strings.ToLower(strings.TrimSpace(templateID))
+	switch {
+	case strings.Contains(id, "alpine"):
+		return 0.5
+	case strings.Contains(id, "debian"):
+		return 1.0
+	case strings.Contains(id, "ubuntu"):
+		return 1.5
+	case strings.Contains(id, "centos"), strings.Contains(id, "rocky"), strings.Contains(id, "fedora"), strings.Contains(id, "arch"):
+		return 2.0
+	default:
+		return 0.5
+	}
+}
+

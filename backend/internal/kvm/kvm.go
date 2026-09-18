@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -414,7 +415,7 @@ func (m *Manager) CreateContainer(cfg lxc.ContainerConfig) error {
 	pool, err := config.SelectStoragePoolForContent(
 		config.StorageContentKVM,
 		cfg.StoragePoolID,
-		int64(cfg.DiskGB)*1024*1024*1024,
+		int64(math.Round(cfg.DiskGB*1024))*1024*1024,
 	)
 	if err != nil {
 		return err
@@ -513,8 +514,8 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 		if cfg.RAMMB < minRAMMB {
 			cfg.RAMMB = minRAMMB
 		}
-		if cfg.DiskGB < minDiskGB {
-			cfg.DiskGB = minDiskGB
+		if cfg.DiskGB < float64(minDiskGB) {
+			cfg.DiskGB = float64(minDiskGB)
 		}
 		cfg.ReportProgress("disk", "创建 Windows 虚拟磁盘")
 		if err := createEmptyDisk(diskPath, cfg.DiskGB); err != nil {
@@ -1792,15 +1793,16 @@ func libvirtNetworkActive(info string) bool {
 	return false
 }
 
-func createOverlayDisk(base, target string, diskGB int) error {
+func createOverlayDisk(base, target string, diskGB float64) error {
 	if diskGB < 1 {
 		diskGB = 5
 	}
+	diskMB := int(math.Round(diskGB * 1024))
 	cmd := exec.Command("qemu-img", "create", "-f", "qcow2", "-F", "qcow2", "-b", base, target)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("qemu-img create failed: %v, output: %s", err, string(output))
 	}
-	cmd = exec.Command("qemu-img", "resize", target, fmt.Sprintf("%dG", diskGB))
+	cmd = exec.Command("qemu-img", "resize", target, fmt.Sprintf("%dM", diskMB))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("qemu-img resize failed: %v, output: %s", err, string(output))
 	}
@@ -1831,11 +1833,12 @@ func ensureVirtioWinISO() error {
 	return nil
 }
 
-func createEmptyDisk(target string, diskGB int) error {
+func createEmptyDisk(target string, diskGB float64) error {
 	if diskGB < 1 {
 		diskGB = 5
 	}
-	cmd := exec.Command("qemu-img", "create", "-f", "qcow2", target, fmt.Sprintf("%dG", diskGB))
+	diskMB := int(math.Round(diskGB * 1024))
+	cmd := exec.Command("qemu-img", "create", "-f", "qcow2", target, fmt.Sprintf("%dM", diskMB))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("qemu-img create empty disk failed: %v, output: %s", err, string(output))
 	}
@@ -1973,6 +1976,21 @@ func windowsMinimumResources(imageID string) (float64, int, int) {
 		return 2, 4096, 64
 	}
 	return 1, 2048, 30
+}
+
+// GetKVMImageMinDiskGB returns the minimum required disk size in GB for a KVM image.
+func GetKVMImageMinDiskGB(imageID string) float64 {
+	if IsWindowsImage(imageID) {
+		if IsWindows11Image(imageID) {
+			return 64
+		}
+		return 30
+	}
+	img := FindImage(imageID)
+	if img != nil && img.Desktop != "" {
+		return 20
+	}
+	return 5
 }
 
 func sanitizeWindowsComputerName(name string) string {

@@ -444,7 +444,7 @@ func cliListContainers() {
 		if c.SSHPort > 0 {
 			ssh = fmt.Sprintf("%d->22", c.SSHPort)
 		}
-		fmt.Printf("%-18s %-10s %-18s %-6.2f %-10d %-10d %-16s\n",
+		fmt.Printf("%-18s %-10s %-18s %-6.2f %-10d %-10.2f %-16s\n",
 			c.Name, c.Status, c.Template, c.VCPU, c.RAMMB, c.DiskGB, ssh)
 	}
 }
@@ -475,7 +475,7 @@ func cliCreateContainer(reader *bufio.Reader) {
 		TemplateID:       templates[tmplIdx-1].ID,
 		VCPU:             promptFloat(reader, "vCPU", 1),
 		RAMMB:            promptInt(reader, "内存 (MB)", 512),
-		DiskGB:           promptInt(reader, "磁盘 (GB)", 10),
+		DiskGB:           promptFloat(reader, "磁盘 (GB)", 10),
 		NetworkBWMbps:    promptInt(reader, "网络带宽 (Mbps)", 100),
 		MonthlyTrafficGB: promptInt(reader, "月流量 (GB)", 1000),
 		IOSpeedMBps:      promptInt(reader, "IO 速度 (MB/s)", 500),

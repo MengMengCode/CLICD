@@ -7,7 +7,7 @@ import (
 
 const minVCPU = 0.25
 
-func validateContainerResourceRequest(vcpu float64, ramMB int, diskGB int) error {
+func validateContainerResourceRequest(vcpu float64, ramMB int, diskGB float64) error {
 	host := getHostInfo()
 
 	if vcpu <= 0 {
@@ -25,13 +25,16 @@ func validateContainerResourceRequest(vcpu float64, ramMB int, diskGB int) error
 	if host.RAM.TotalMB > 0 && ramMB > int(host.RAM.TotalMB) {
 		return fmt.Errorf("memory cannot exceed host memory (%d MB)", host.RAM.TotalMB)
 	}
+	if diskGB <= 0 {
+		return fmt.Errorf("disk must be greater than 0")
+	}
 	if host.Disk.TotalGB > 0 {
-		maxDiskGB := int(math.Floor(host.Disk.TotalGB))
+		maxDiskGB := host.Disk.TotalGB
 		if maxDiskGB < 1 {
 			maxDiskGB = 1
 		}
 		if diskGB > maxDiskGB {
-			return fmt.Errorf("disk cannot exceed host disk (%d GB)", maxDiskGB)
+			return fmt.Errorf("disk cannot exceed host disk (%.0f GB)", maxDiskGB)
 		}
 	}
 	return nil

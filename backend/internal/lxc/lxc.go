@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -235,7 +236,7 @@ type ContainerConfig struct {
 	VCPU                 float64                    `json:"vcpu"`
 	CPUPercent           int                        `json:"cpu_percent"`
 	RAMMB                int                        `json:"ram_mb"`
-	DiskGB               int                        `json:"disk_gb"`
+	DiskGB               float64                    `json:"disk_gb"`
 	NetworkBWMbps        int                        `json:"network_bw_mbps"`
 	NetworkDownMbps      int                        `json:"network_down_mbps"`
 	NetworkUpMbps        int                        `json:"network_up_mbps"`
@@ -277,6 +278,93 @@ func (cfg ContainerConfig) ReportProgress(stage, detail string) {
 	if cfg.Progress != nil {
 		cfg.Progress(stage, detail)
 	}
+}
+
+// UnmarshalJSON supports string representations for vcpu, ram_mb, and disk_gb (e.g. "0.5", "512M", "768MB").
+func (cfg *ContainerConfig) UnmarshalJSON(data []byte) error {
+	type Alias ContainerConfig
+	aux := &struct {
+		VCPU   interface{} `json:"vcpu"`
+		RAMMB  interface{} `json:"ram_mb"`
+		DiskGB interface{} `json:"disk_gb"`
+		*Alias
+	}{
+		Alias: (*Alias)(cfg),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if aux.VCPU != nil {
+		switch v := aux.VCPU.(type) {
+		case float64:
+			cfg.VCPU = v
+		case string:
+			if val, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+				cfg.VCPU = val
+			}
+		}
+	}
+	if aux.RAMMB != nil {
+		switch v := aux.RAMMB.(type) {
+		case float64:
+			cfg.RAMMB = int(v)
+		case string:
+			s := strings.TrimSpace(strings.ToUpper(v))
+			if strings.HasSuffix(s, "MB") {
+				s = strings.TrimSpace(strings.TrimSuffix(s, "MB"))
+			} else if strings.HasSuffix(s, "M") {
+				s = strings.TrimSpace(strings.TrimSuffix(s, "M"))
+			} else if strings.HasSuffix(s, "GB") {
+				val, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, "GB")), 64)
+				if err == nil {
+					cfg.RAMMB = int(val * 1024)
+					s = ""
+				}
+			} else if strings.HasSuffix(s, "G") {
+				val, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, "G")), 64)
+				if err == nil {
+					cfg.RAMMB = int(val * 1024)
+					s = ""
+				}
+			}
+			if s != "" {
+				if val, err := strconv.Atoi(s); err == nil {
+					cfg.RAMMB = val
+				}
+			}
+		}
+	}
+	if aux.DiskGB != nil {
+		switch v := aux.DiskGB.(type) {
+		case float64:
+			cfg.DiskGB = v
+		case string:
+			s := strings.TrimSpace(strings.ToUpper(v))
+			if strings.HasSuffix(s, "GB") {
+				s = strings.TrimSpace(strings.TrimSuffix(s, "GB"))
+			} else if strings.HasSuffix(s, "G") {
+				s = strings.TrimSpace(strings.TrimSuffix(s, "G"))
+			} else if strings.HasSuffix(s, "MB") {
+				val, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, "MB")), 64)
+				if err == nil {
+					cfg.DiskGB = val / 1024.0
+					s = ""
+				}
+			} else if strings.HasSuffix(s, "M") {
+				val, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, "M")), 64)
+				if err == nil {
+					cfg.DiskGB = val / 1024.0
+					s = ""
+				}
+			}
+			if s != "" {
+				if val, err := strconv.ParseFloat(s, 64); err == nil {
+					cfg.DiskGB = val
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (cfg *ContainerConfig) NormalizeResourceAliases() {
@@ -1209,14 +1297,37 @@ func (m *Manager) rootfsBlockDevices(lxcName string) ([]string, error) {
 	return devices, nil
 }
 
-func (m *Manager) applyDiskLimit(lxcName string, diskGB int) error {
+func measureDirBytes(path string) (int64, error) {
+	out, err := exec.Command("du", "-s", "-B1", path).Output()
+	if err == nil {
+		fields := strings.Fields(string(out))
+		if len(fields) > 0 {
+			if n, err := strconv.ParseInt(fields[0], 10, 64); err == nil && n > 0 {
+				return n, nil
+			}
+		}
+	}
+	var total int64
+	err = filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total, err
+}
+
+func (m *Manager) applyDiskLimit(lxcName string, diskGB float64) error {
 	if diskGB <= 0 {
 		return nil
 	}
 	return m.applyLoopbackDiskLimit(lxcName, diskGB)
 }
 
-func (m *Manager) applyProjectDiskLimit(lxcName string, diskGB int) error {
+func (m *Manager) applyProjectDiskLimit(lxcName string, diskGB float64) error {
 	if diskGB <= 0 {
 		return nil
 	}
@@ -1230,13 +1341,18 @@ func (m *Manager) applyProjectDiskLimit(lxcName string, diskGB int) error {
 	}
 	fsType = strings.TrimSpace(fsType)
 
+	diskMB := int(math.Round(diskGB * 1024))
+	if diskMB < 128 {
+		diskMB = 128
+	}
+
 	switch fsType {
 	case "btrfs":
 		if err := exec.Command("btrfs", "quota", "enable", rootfsPath).Run(); err != nil {
 			// btrfs returns an error when quota is already enabled on some versions.
 			fmt.Printf("Warning: btrfs quota enable returned: %v\n", err)
 		}
-		output, err := exec.Command("btrfs", "qgroup", "limit", fmt.Sprintf("%dG", diskGB), rootfsPath).CombinedOutput()
+		output, err := exec.Command("btrfs", "qgroup", "limit", fmt.Sprintf("%dM", diskMB), rootfsPath).CombinedOutput()
 		if err != nil {
 			fmt.Printf("Warning: failed to apply btrfs disk quota, falling back to loopback rootfs: %v, output: %s\n", err, string(output))
 			return m.applyLoopbackDiskLimit(lxcName, diskGB)
@@ -1260,7 +1376,7 @@ func (m *Manager) applyProjectDiskLimit(lxcName string, diskGB int) error {
 	}
 }
 
-func (m *Manager) applyLoopbackDiskLimit(lxcName string, diskGB int) error {
+func (m *Manager) applyLoopbackDiskLimit(lxcName string, diskGB float64) error {
 	containerDir := filepath.Join(m.LxcPath, lxcName)
 	rootfsPath := filepath.Join(containerDir, "rootfs")
 	imagePath := filepath.Join(containerDir, "rootfs.img")
@@ -1271,6 +1387,26 @@ func (m *Manager) applyLoopbackDiskLimit(lxcName string, diskGB int) error {
 		return m.ensureDiskImageMounted(lxcName)
 	}
 
+	diskMB := int(math.Round(diskGB * 1024))
+	if diskMB < 128 {
+		diskMB = 128
+	}
+	targetBytes := int64(diskMB) * 1024 * 1024
+
+	// Verify that the extracted rootfs can fit into the target disk before truncating and copying
+	rootfsBytes, _ := measureDirBytes(rootfsPath)
+	if rootfsBytes > 0 {
+		ext4Overhead := int64(32 * 1024 * 1024)
+		if ext4Overhead < targetBytes/25 {
+			ext4Overhead = targetBytes / 25
+		}
+		if rootfsBytes+ext4Overhead > targetBytes {
+			minRequiredGB := math.Ceil(float64(rootfsBytes+ext4Overhead)/(256*1024*1024)) * 0.25
+			return fmt.Errorf("rootfs size (%.0f MB) exceeds disk capacity (%d MB); requires at least %.2f GB disk",
+				float64(rootfsBytes)/(1024*1024), diskMB, minRequiredGB)
+		}
+	}
+
 	tmpMount := filepath.Join(containerDir, ".rootfs-image")
 	backupRootfs := filepath.Join(containerDir, "rootfs.dir")
 	if err := os.MkdirAll(tmpMount, 0755); err != nil {
@@ -1278,7 +1414,7 @@ func (m *Manager) applyLoopbackDiskLimit(lxcName string, diskGB int) error {
 	}
 	defer os.RemoveAll(tmpMount)
 
-	output, err := exec.Command("truncate", "-s", fmt.Sprintf("%dG", diskGB), imagePath).CombinedOutput()
+	output, err := exec.Command("truncate", "-s", fmt.Sprintf("%dM", diskMB), imagePath).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to create rootfs disk image: %v, output: %s", err, string(output))
 	}
@@ -1480,7 +1616,7 @@ func sameFilesystemPath(left, right string) bool {
 	return leftErr == nil && rightErr == nil && leftPath == rightPath
 }
 
-func applyXFSProjectQuota(rootfsPath, lxcName string, diskGB int) error {
+func applyXFSProjectQuota(rootfsPath, lxcName string, diskGB float64) error {
 	options, err := findmntValue(rootfsPath, "OPTIONS")
 	if err != nil {
 		return err
@@ -1497,9 +1633,13 @@ func applyXFSProjectQuota(rootfsPath, lxcName string, diskGB int) error {
 	if err := ensureProjectQuotaFiles(projectID, projectName, rootfsPath); err != nil {
 		return err
 	}
+	diskMB := int(math.Round(diskGB * 1024))
+	if diskMB < 128 {
+		diskMB = 128
+	}
 	output, err := exec.Command("xfs_quota", "-x",
 		"-c", "project -s "+projectName,
-		"-c", fmt.Sprintf("limit -p bhard=%dg %s", diskGB, projectName),
+		"-c", fmt.Sprintf("limit -p bhard=%dm %s", diskMB, projectName),
 		mountPoint,
 	).CombinedOutput()
 	if err != nil {
@@ -1508,7 +1648,7 @@ func applyXFSProjectQuota(rootfsPath, lxcName string, diskGB int) error {
 	return nil
 }
 
-func applyExt4ProjectQuota(rootfsPath, lxcName string, diskGB int) error {
+func applyExt4ProjectQuota(rootfsPath, lxcName string, diskGB float64) error {
 	options, err := findmntValue(rootfsPath, "OPTIONS")
 	if err != nil {
 		return err
@@ -1525,8 +1665,8 @@ func applyExt4ProjectQuota(rootfsPath, lxcName string, diskGB int) error {
 	if err != nil {
 		return fmt.Errorf("failed to assign ext4 project id: %v, output: %s", err, string(output))
 	}
-	hardKB := diskGB * 1024 * 1024
-	output, err = exec.Command("setquota", "-P", strconv.Itoa(projectID), "0", strconv.Itoa(hardKB), "0", "0", mountPoint).CombinedOutput()
+	hardKB := int64(math.Round(diskGB * 1024 * 1024))
+	output, err = exec.Command("setquota", "-P", strconv.Itoa(projectID), "0", strconv.FormatInt(hardKB, 10), "0", "0", mountPoint).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to apply ext4 project quota: %v, output: %s", err, string(output))
 	}

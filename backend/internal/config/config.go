@@ -118,7 +118,7 @@ type Container struct {
 	Template                      string                 `json:"template"`
 	VCPU                          float64                `json:"vcpu"`
 	RAMMB                         int                    `json:"ram_mb"`
-	DiskGB                        int                    `json:"disk_gb"`
+	DiskGB                        float64                `json:"disk_gb"`
 	NetworkBWMbps                 int                    `json:"network_bw_mbps"`
 	NetworkDownMbps               int                    `json:"network_down_mbps"`
 	NetworkUpMbps                 int                    `json:"network_up_mbps"`

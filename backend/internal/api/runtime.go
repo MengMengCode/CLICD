@@ -205,11 +205,29 @@ func listByRuntime() ([]config.Container, error) {
 	return containers, err
 }
 
-func validateRuntimeResourceRequest(runtime string, vcpu float64, ramMB int, diskGB int) error {
+func validateRuntimeResourceRequest(runtime string, templateID string, vcpu float64, ramMB int, diskGB float64) error {
 	if runtime == config.VirtualizationKVM {
 		if vcpu < 1 || math.Abs(vcpu-math.Round(vcpu)) > 0.000001 {
 			return fmt.Errorf("KVM vCPU must be a whole number and at least 1")
 		}
+		if templateID != "" {
+			minDisk := kvm.GetKVMImageMinDiskGB(templateID)
+			if diskGB < minDisk {
+				return fmt.Errorf("template %s requires at least %.2f GB disk, but requested %.2f GB", templateID, minDisk, diskGB)
+			}
+		} else if diskGB < 5 {
+			return fmt.Errorf("KVM disk must be at least 5 GB")
+		}
+	} else {
+		if templateID != "" {
+			minDisk := lxc.GetTemplateMinDiskGB(templateID)
+			if diskGB < minDisk {
+				return fmt.Errorf("template %s requires at least %.2f GB disk, but requested %.2f GB", templateID, minDisk, diskGB)
+			}
+		} else if diskGB < 0.25 {
+			return fmt.Errorf("disk must be at least 0.25 GB")
+		}
 	}
 	return validateContainerResourceRequest(vcpu, ramMB, diskGB)
 }
+

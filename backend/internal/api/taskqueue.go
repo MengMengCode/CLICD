@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -788,7 +789,7 @@ func HandleBatchCreate(w http.ResponseWriter, r *http.Request) {
 		if req.Containers[i].RAMMB < 128 {
 			req.Containers[i].RAMMB = 512
 		}
-		if req.Containers[i].DiskGB < 1 {
+		if req.Containers[i].DiskGB <= 0 {
 			req.Containers[i].DiskGB = 5
 		}
 		if err := validateCreateStoragePool(&req.Containers[i]); err != nil {
@@ -858,7 +859,7 @@ func HandleBatchCreate(w http.ResponseWriter, r *http.Request) {
 		if req.Containers[i].SnapshotLimit <= 0 {
 			req.Containers[i].SnapshotLimit = config.DefaultSnapshotLimit
 		}
-		if err := validateRuntimeResourceRequest(req.Containers[i].Virtualization, req.Containers[i].VCPU, req.Containers[i].RAMMB, req.Containers[i].DiskGB); err != nil {
+		if err := validateRuntimeResourceRequest(req.Containers[i].Virtualization, req.Containers[i].TemplateID, req.Containers[i].VCPU, req.Containers[i].RAMMB, req.Containers[i].DiskGB); err != nil {
 			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: name + ": " + err.Error()})
 			return
 		}
@@ -1109,7 +1110,7 @@ func validateCreateStoragePool(cfg *lxc.ContainerConfig) error {
 	if cfg.Virtualization == config.VirtualizationKVM {
 		required = config.StorageContentKVM
 	}
-	requiredBytes := int64(cfg.DiskGB) * 1024 * 1024 * 1024
+	requiredBytes := int64(math.Round(cfg.DiskGB*1024)) * 1024 * 1024
 	pool, err := config.SelectStoragePoolForContent(required, cfg.StoragePoolID, requiredBytes)
 	if err != nil {
 		return err

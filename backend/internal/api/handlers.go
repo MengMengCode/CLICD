@@ -267,7 +267,7 @@ func createContainer(w http.ResponseWriter, r *http.Request) {
 	if cfg.RAMMB < 128 {
 		cfg.RAMMB = 512
 	}
-	if cfg.DiskGB < 1 {
+	if cfg.DiskGB <= 0 {
 		cfg.DiskGB = 5
 	}
 	if cfg.PortMappingCount < 0 {
@@ -307,7 +307,7 @@ func createContainer(w http.ResponseWriter, r *http.Request) {
 	if cfg.SnapshotLimit <= 0 {
 		cfg.SnapshotLimit = config.DefaultSnapshotLimit
 	}
-	if err := validateRuntimeResourceRequest(cfg.Virtualization, cfg.VCPU, cfg.RAMMB, cfg.DiskGB); err != nil {
+	if err := validateRuntimeResourceRequest(cfg.Virtualization, cfg.TemplateID, cfg.VCPU, cfg.RAMMB, cfg.DiskGB); err != nil {
 		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: err.Error()})
 		return
 	}
@@ -454,7 +454,7 @@ func updateResourceLimit(w http.ResponseWriter, r *http.Request, id int) {
 	if req.RAMMB != nil {
 		nextRAMMB = *req.RAMMB
 	}
-	if err := validateRuntimeResourceRequest(c.Runtime(), nextVCPU, nextRAMMB, c.DiskGB); err != nil {
+	if err := validateRuntimeResourceRequest(c.Runtime(), c.Template, nextVCPU, nextRAMMB, c.DiskGB); err != nil {
 		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: err.Error()})
 		return
 	}
@@ -520,6 +520,33 @@ func normalizeCreateResourceLimits(cfg *lxc.ContainerConfig, fields map[string]j
 		}
 		if !writeSet {
 			cfg.IOWriteMBps = cfg.IOSpeedMBps
+		}
+	}
+	if diskRaw, ok := fields["disk_gb"]; ok {
+		var s string
+		if err := json.Unmarshal(diskRaw, &s); err == nil {
+			s = strings.TrimSpace(strings.ToUpper(s))
+			if strings.HasSuffix(s, "M") || strings.HasSuffix(s, "MB") {
+				numStr := strings.TrimSuffix(strings.TrimSuffix(s, "MB"), "M")
+				if mb, err := strconv.ParseFloat(numStr, 64); err == nil && mb > 0 {
+					cfg.DiskGB = mb / 1024.0
+				}
+			} else if strings.HasSuffix(s, "G") || strings.HasSuffix(s, "GB") {
+				numStr := strings.TrimSuffix(strings.TrimSuffix(s, "GB"), "G")
+				if gb, err := strconv.ParseFloat(numStr, 64); err == nil && gb > 0 {
+					cfg.DiskGB = gb
+				}
+			} else if val, err := strconv.ParseFloat(s, 64); err == nil && val > 0 {
+				cfg.DiskGB = val
+			}
+		}
+	}
+	if cfg.DiskGB <= 0 {
+		if diskMBRaw, ok := fields["disk_mb"]; ok {
+			var mb float64
+			if err := json.Unmarshal(diskMBRaw, &mb); err == nil && mb > 0 {
+				cfg.DiskGB = mb / 1024.0
+			}
 		}
 	}
 	cfg.NormalizeResourceAliases()
