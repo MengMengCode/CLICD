@@ -1918,15 +1918,18 @@ func dirExists(path string) bool {
 
 func ensureIPv6ForwardRules(ipv6 string) {
 	rules := [][]string{
-		{"FORWARD", "-i", "lxcbr0", "-s", ipv6 + "/128", "-j", "ACCEPT"},
-		{"FORWARD", "-o", "lxcbr0", "-d", ipv6 + "/128", "-j", "ACCEPT"},
+		{"-i", "lxcbr0", "-s", ipv6 + "/128", "-j", "ACCEPT"},
+		{"-o", "lxcbr0", "-d", ipv6 + "/128", "-j", "ACCEPT"},
 	}
 	for _, rule := range rules {
-		check := append([]string{"-C"}, rule...)
-		add := append([]string{"-A"}, rule...)
-		if exec.Command("ip6tables", check...).Run() != nil {
-			exec.Command("ip6tables", add...).Run()
+		for {
+			del := append([]string{"-D", "FORWARD"}, rule...)
+			if exec.Command("ip6tables", del...).Run() != nil {
+				break
+			}
 		}
+		add := append([]string{"-I", "FORWARD", "1"}, rule...)
+		exec.Command("ip6tables", add...).Run()
 	}
 }
 

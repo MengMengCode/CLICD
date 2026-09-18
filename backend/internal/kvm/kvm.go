@@ -2657,7 +2657,7 @@ func getVNCPort(name string) int {
 func firstIPv4(output string) string {
 	re := regexp.MustCompile(`\b((?:\d{1,3}\.){3}\d{1,3})(?:/\d+)?\b`)
 	for _, match := range re.FindAllStringSubmatch(output, -1) {
-		if len(match) > 1 && net.ParseIP(match[1]) != nil && !strings.HasPrefix(match[1], "127.") {
+		if len(match) > 1 && net.ParseIP(match[1]) != nil && !strings.HasPrefix(match[1], "127.") && !strings.HasPrefix(match[1], "169.254.") {
 			return match[1]
 		}
 	}

@@ -1620,6 +1620,18 @@ EOF
     sysctl --system >/dev/null 2>&1 || true
 }
 
+configure_firewall_rules() {
+    if has_cmd ufw && ufw status 2>/dev/null | grep -qw "active"; then
+        log "检测到 UFW 处于启用状态，正在为 lxcbr0 / virbr0 配置入站和转发允许规则..."
+        ufw allow in on lxcbr0 >/dev/null 2>&1 || true
+        ufw route allow in on lxcbr0 >/dev/null 2>&1 || true
+        ufw route allow out on lxcbr0 >/dev/null 2>&1 || true
+        ufw allow in on virbr0 >/dev/null 2>&1 || true
+        ufw route allow in on virbr0 >/dev/null 2>&1 || true
+        ufw route allow out on virbr0 >/dev/null 2>&1 || true
+    fi
+}
+
 systemd_unit_exists() {
     unit="$1"
     systemctl list-unit-files "$unit" >/dev/null 2>&1 || [ -e "/etc/systemd/system/$unit" ] || [ -e "/usr/lib/systemd/system/$unit" ] || [ -e "/lib/systemd/system/$unit" ]
@@ -2144,6 +2156,7 @@ run_step "存储环境检查" check_storage_compatibility
 run_step "安装系统依赖" install_dependencies
 choose_nat_networks
 run_step "配置内核网络参数" configure_kernel_networking
+run_step "配置防火墙规则" configure_firewall_rules
 run_step "配置 LXC NAT 网络" configure_lxc_nat_network
 run_step "配置运行时服务" setup_runtime_services
 run_step "配置 libvirt default NAT 网络" setup_default_libvirt_network

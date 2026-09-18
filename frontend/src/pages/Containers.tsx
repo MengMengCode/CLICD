@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import {
   ArrowDown,
   ArrowUp,
+  ArrowUpDown,
   Cpu,
   Eye,
   HardDrive,
@@ -54,6 +55,17 @@ export default function Containers() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  const [sortField, setSortField] = useState<'id' | 'cpu' | 'ram' | 'disk' | 'net' | null>(null)
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+
+  const handleSort = (field: 'id' | 'cpu' | 'ram' | 'disk' | 'net') => {
+    if (sortField === field) {
+      setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))
+    } else {
+      setSortField(field)
+      setSortOrder(field === 'id' ? 'asc' : 'desc')
+    }
+  }
 
   const refreshUsage = useCallback(async (items: Container[]) => {
     const targets = items.filter((container) => container.status === 'running')
@@ -177,18 +189,67 @@ export default function Containers() {
       taskNameMap,
     })
   }, [displayContainers, searchText, typeFilter, systemFilter, statusFilter, tasks])
-  const totalPages = Math.max(1, Math.ceil(filteredContainers.length / pageSize))
+  const sortedContainers = useMemo(() => {
+    if (!sortField) return filteredContainers
+
+    return [...filteredContainers].sort((a, b) => {
+      let valA = 0
+      let valB = 0
+
+      if (sortField === 'id') {
+        valA = a.id
+        valB = b.id
+      } else if (sortField === 'cpu') {
+        const isRunningA = a.status === 'running'
+        const isRunningB = b.status === 'running'
+        const usageA = usageByName[a.name]
+        const usageB = usageByName[b.name]
+        valA = isRunningA ? clamp((usageA?.cpu_usage_pct || 0) / (a.vcpu || 1)) : 0
+        valB = isRunningB ? clamp((usageB?.cpu_usage_pct || 0) / (b.vcpu || 1)) : 0
+      } else if (sortField === 'ram') {
+        const isRunningA = a.status === 'running'
+        const isRunningB = b.status === 'running'
+        const usageA = usageByName[a.name]
+        const usageB = usageByName[b.name]
+        const ramTotalA = usageA?.memory_total_bytes && usageA.memory_total_bytes > 0
+          ? usageA.memory_total_bytes
+          : a.ram_mb * 1024 * 1024
+        const ramTotalB = usageB?.memory_total_bytes && usageB.memory_total_bytes > 0
+          ? usageB.memory_total_bytes
+          : b.ram_mb * 1024 * 1024
+        valA = isRunningA && ramTotalA > 0 ? clamp(((usageA?.memory_usage_bytes || 0) / ramTotalA) * 100) : 0
+        valB = isRunningB && ramTotalB > 0 ? clamp(((usageB?.memory_usage_bytes || 0) / ramTotalB) * 100) : 0
+      } else if (sortField === 'disk') {
+        const usageA = usageByName[a.name]
+        const usageB = usageByName[b.name]
+        valA = a.disk_gb > 0 ? clamp(((usageA?.disk_usage_bytes || 0) / (a.disk_gb * 1024 * 1024 * 1024)) * 100) : 0
+        valB = b.disk_gb > 0 ? clamp(((usageB?.disk_usage_bytes || 0) / (b.disk_gb * 1024 * 1024 * 1024)) * 100) : 0
+      } else if (sortField === 'net') {
+        const trafficA = getTrafficUsage(a)
+        const trafficB = getTrafficUsage(b)
+        valA = trafficA.isUnlimited ? -1 : trafficA.pct
+        valB = trafficB.isUnlimited ? -1 : trafficB.pct
+      }
+
+      if (valA === valB) {
+        return a.id - b.id
+      }
+      return sortOrder === 'asc' ? valA - valB : valB - valA
+    })
+  }, [filteredContainers, sortField, sortOrder, usageByName])
+
+  const totalPages = Math.max(1, Math.ceil(sortedContainers.length / pageSize))
   const currentPage = Math.min(page, totalPages)
   const pageStart = (currentPage - 1) * pageSize
-  const pageContainers = filteredContainers.slice(pageStart, pageStart + pageSize)
-  const selectableIDs = filteredContainers
+  const pageContainers = sortedContainers.slice(pageStart, pageStart + pageSize)
+  const selectableIDs = sortedContainers
     .filter((container) => !container.isPlaceholder && !taskStatusMap[container.id] && !taskNameMap[container.name])
     .map((container) => container.id)
   const allFilteredSelected = selectableIDs.length > 0 && selectableIDs.every((id) => selected.has(id))
 
   useEffect(() => {
     setPage(1)
-  }, [searchText, typeFilter, systemFilter, statusFilter, pageSize])
+  }, [searchText, typeFilter, systemFilter, statusFilter, pageSize, sortField, sortOrder])
 
   const toggleAll = () => {
     if (allFilteredSelected) {
@@ -374,15 +435,54 @@ export default function Containers() {
                       />
                     )}
                   </th>
-                  <TableHead>ID</TableHead>
+                  <TableHead
+                    sortable
+                    sorted={sortField === 'id'}
+                    sortOrder={sortOrder}
+                    onSort={() => handleSort('id')}
+                  >
+                    ID
+                  </TableHead>
                   <TableHead>名称</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>系统</TableHead>
                   <TableHead>类型</TableHead>
-                  <TableHead icon><Cpu className="w-3.5 h-3.5" />CPU</TableHead>
-                  <TableHead icon><MemoryStick className="w-3.5 h-3.5" />MEMORY</TableHead>
-                  <TableHead icon><HardDrive className="w-3.5 h-3.5" />DISK</TableHead>
-                  <TableHead icon><Network className="w-3.5 h-3.5" />NET</TableHead>
+                  <TableHead
+                    icon
+                    sortable
+                    sorted={sortField === 'cpu'}
+                    sortOrder={sortOrder}
+                    onSort={() => handleSort('cpu')}
+                  >
+                    <Cpu className="w-3.5 h-3.5" />CPU
+                  </TableHead>
+                  <TableHead
+                    icon
+                    sortable
+                    sorted={sortField === 'ram'}
+                    sortOrder={sortOrder}
+                    onSort={() => handleSort('ram')}
+                  >
+                    <MemoryStick className="w-3.5 h-3.5" />MEMORY
+                  </TableHead>
+                  <TableHead
+                    icon
+                    sortable
+                    sorted={sortField === 'disk'}
+                    sortOrder={sortOrder}
+                    onSort={() => handleSort('disk')}
+                  >
+                    <HardDrive className="w-3.5 h-3.5" />DISK
+                  </TableHead>
+                  <TableHead
+                    icon
+                    sortable
+                    sorted={sortField === 'net'}
+                    sortOrder={sortOrder}
+                    onSort={() => handleSort('net')}
+                  >
+                    <Network className="w-3.5 h-3.5" />NET
+                  </TableHead>
                   <TableHead>配置</TableHead>
                   <TableHead>剩余时间</TableHead>
                   <TableHead right>操作</TableHead>
@@ -410,6 +510,7 @@ export default function Containers() {
                     : 0
                   const rx = isRunning ? usage?.network_rx_bps || 0 : 0
                   const tx = isRunning ? usage?.network_tx_bps || 0 : 0
+                  const traffic = getTrafficUsage(container)
 
                   return (
                     <tr key={container.isPlaceholder ? `placeholder-${container.name}` : container.id} className="hover:bg-gray-50 transition-colors">
@@ -458,14 +559,32 @@ export default function Containers() {
                         <ProgressCell pct={diskPct} />
                       </td>
                       <td className="px-2.5 py-2 align-top">
-                        <div className="space-y-0.5 text-[11px] font-medium tabular-nums min-w-[70px] whitespace-nowrap">
-                          <div className="flex items-center gap-0.5">
-                            <ArrowUp className="w-3 h-3 text-gray-400" />
-                            <span className="text-gray-700">{formatRate(tx)}</span>
-                          </div>
-                          <div className="flex items-center gap-0.5">
-                            <ArrowDown className="w-3 h-3 text-gray-400" />
-                            <span className="text-gray-700">{formatRate(rx)}</span>
+                        <div className="space-y-1 min-w-[100px]">
+                          {traffic.isUnlimited ? (
+                            <div
+                              className="flex items-center gap-2 min-w-[100px]"
+                              title={traffic.used > 0 ? `已用: ${formatBytes(traffic.used)} (无限流量)` : '无限流量'}
+                            >
+                              <span className="w-10 text-xs font-medium tabular-nums text-gray-400">∞</span>
+                              <div className="h-1.5 flex-1 rounded-full bg-gray-100 overflow-hidden">
+                                <div className="h-full bg-transparent" />
+                              </div>
+                            </div>
+                          ) : (
+                            <ProgressCell
+                              pct={traffic.pct}
+                              title={`已用: ${formatBytes(traffic.used)} / ${formatBytes(traffic.limit)} (${traffic.pct.toFixed(1)}%)`}
+                            />
+                          )}
+                          <div className="flex items-center gap-2 text-[10px] font-medium tabular-nums text-gray-500 whitespace-nowrap">
+                            <span className="inline-flex items-center gap-0.5" title={`上行: ${formatRate(tx)}`}>
+                              <ArrowUp className="w-2.5 h-2.5 text-gray-400" />
+                              <span className="text-gray-600">{formatRate(tx)}</span>
+                            </span>
+                            <span className="inline-flex items-center gap-0.5" title={`下行: ${formatRate(rx)}`}>
+                              <ArrowDown className="w-2.5 h-2.5 text-gray-400" />
+                              <span className="text-gray-600">{formatRate(rx)}</span>
+                            </span>
                           </div>
                         </div>
                       </td>
@@ -568,10 +687,48 @@ export default function Containers() {
   )
 }
 
-function TableHead({ children, right, icon }: { children: ReactNode; right?: boolean; icon?: boolean }) {
+function TableHead({
+  children,
+  right,
+  icon,
+  sortable,
+  sorted,
+  sortOrder,
+  onSort,
+}: {
+  children: ReactNode
+  right?: boolean
+  icon?: boolean
+  sortable?: boolean
+  sorted?: boolean
+  sortOrder?: 'asc' | 'desc'
+  onSort?: () => void
+}) {
   return (
-    <th className={`${right ? 'text-right' : 'text-left'} px-2.5 py-2 text-[11px] font-medium text-gray-500 uppercase whitespace-nowrap`}>
-      <span className={icon ? 'inline-flex items-center gap-1' : ''}>{children}</span>
+    <th
+      onClick={sortable ? onSort : undefined}
+      className={`${right ? 'text-right' : 'text-left'} px-2.5 py-2 text-[11px] font-medium uppercase whitespace-nowrap ${
+        sortable
+          ? 'cursor-pointer select-none text-gray-600 hover:text-black hover:bg-gray-100 transition-colors'
+          : 'text-gray-500'
+      }`}
+    >
+      <span className="inline-flex items-center gap-1">
+        {children}
+        {sortable && (
+          <span className="inline-flex items-center ml-0.5 text-gray-400">
+            {sorted ? (
+              sortOrder === 'asc' ? (
+                <ArrowUp className="w-3 h-3 text-black stroke-[2.5]" />
+              ) : (
+                <ArrowDown className="w-3 h-3 text-black stroke-[2.5]" />
+              )
+            ) : (
+              <ArrowUpDown className="w-3 h-3 text-gray-300 hover:text-gray-500" />
+            )}
+          </span>
+        )}
+      </span>
     </th>
   )
 }
@@ -958,9 +1115,9 @@ function TaskQueueModal({ tasks, onRefresh, onClose }: {
   )
 }
 
-function ProgressCell({ pct }: { pct: number }) {
+function ProgressCell({ pct, title }: { pct: number; title?: string }) {
   return (
-    <div className="flex items-center gap-2 min-w-[100px]">
+    <div className="flex items-center gap-2 min-w-[100px]" title={title}>
       <span className="w-10 text-xs font-medium tabular-nums text-gray-700">{pct.toFixed(1)}%</span>
       <div className="h-1.5 flex-1 rounded-full bg-gray-100 overflow-hidden">
         <div
@@ -970,6 +1127,40 @@ function ProgressCell({ pct }: { pct: number }) {
       </div>
     </div>
   )
+}
+
+function getTrafficUsage(container: Container) {
+  const rx = container.traffic_used_rx || 0
+  const tx = container.traffic_used_tx || 0
+  const total = rx + tx
+  const mode = container.traffic_mode || 'total'
+
+  if (mode === 'in_out') {
+    const inLimit = (container.traffic_in_gb || 0) * 1073741824
+    const outLimit = (container.traffic_out_gb || 0) * 1073741824
+    const totalLimit = inLimit + outLimit
+    if (totalLimit <= 0) {
+      return { isUnlimited: true, pct: 0, used: total, limit: 0 }
+    }
+    const pct = clamp((total / totalLimit) * 100)
+    return { isUnlimited: false, pct, used: total, limit: totalLimit }
+  }
+
+  const monthlyLimitGb = container.monthly_traffic_gb || 0
+  if (monthlyLimitGb <= 0) {
+    return { isUnlimited: true, pct: 0, used: total, limit: 0 }
+  }
+  const limitBytes = monthlyLimitGb * 1073741824
+  const pct = clamp((total / limitBytes) * 100)
+  return { isUnlimited: false, pct, used: total, limit: limitBytes }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
 }
 
 function getTemplateName(id: string) {

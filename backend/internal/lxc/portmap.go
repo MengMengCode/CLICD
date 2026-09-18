@@ -291,27 +291,63 @@ func (m *Manager) cleanOrphanedPortMappings() {
 	}
 }
 
-// EnsureForwardRules makes sure iptables FORWARD chain allows bridge traffic.
+// EnsureForwardRules makes sure iptables FORWARD and INPUT chains allow bridge traffic,
+// and ensures UFW rules allow bridge traffic when UFW is active.
 func EnsureForwardRules(bridge string) {
 	if bridge == "" {
 		bridge = "lxcbr0"
 	}
 	ensureLibvirtForwardRules(bridge)
-	rules := [][]string{
+	ensureUFWRules(bridge)
+
+	// Allow bridge traffic in INPUT chain so DHCP (UDP 67) and DNS (UDP 53) reach host services.
+	inputRules := [][]string{
+		{"-i", bridge, "-j", "ACCEPT"},
+	}
+	for _, args := range inputRules {
+		for {
+			deleteArgs := append([]string{"-D", "INPUT"}, args...)
+			if exec.Command("iptables", deleteArgs...).Run() != nil {
+				break
+			}
+		}
+		insertArgs := append([]string{"-I", "INPUT", "1"}, args...)
+		exec.Command("iptables", insertArgs...).Run()
+	}
+
+	forwardRules := [][]string{
 		{"-i", bridge, "-j", "ACCEPT"},
 		{"-o", bridge, "-j", "ACCEPT"},
 		{"-i", bridge, "-o", bridge, "-j", "ACCEPT"},
 	}
-	for _, args := range rules {
+	for _, args := range forwardRules {
 		for {
 			deleteArgs := append([]string{"-D", "FORWARD"}, args...)
 			if exec.Command("iptables", deleteArgs...).Run() != nil {
 				break
 			}
 		}
-		appendArgs := append([]string{"-A", "FORWARD"}, args...)
-		exec.Command("iptables", appendArgs...).Run()
+		insertArgs := append([]string{"-I", "FORWARD", "1"}, args...)
+		exec.Command("iptables", insertArgs...).Run()
 	}
+}
+
+var ufwBridgeConfigured sync.Map
+
+func ensureUFWRules(bridge string) {
+	if bridge == "" {
+		return
+	}
+	if _, loaded := ufwBridgeConfigured.LoadOrStore(bridge, true); loaded {
+		return
+	}
+	out, err := exec.Command("ufw", "status").CombinedOutput()
+	if err != nil || !strings.Contains(strings.ToLower(string(out)), "status: active") {
+		return
+	}
+	exec.Command("ufw", "allow", "in", "on", bridge).Run()
+	exec.Command("ufw", "route", "allow", "in", "on", bridge).Run()
+	exec.Command("ufw", "route", "allow", "out", "on", bridge).Run()
 }
 
 func ensureLibvirtForwardRules(bridge string) {

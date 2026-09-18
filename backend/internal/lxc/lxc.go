@@ -3145,17 +3145,25 @@ func (m *Manager) GetContainerIP(lxcName string) (string, error) {
 
 	ip := strings.TrimSpace(string(output))
 	// Always prefer IPv4; IPv6 addresses break WebSSH and port forwarding.
-	re := regexp.MustCompile(`(\d+\.\d+\.\d+\.\d+)`)
-	matches := re.FindStringSubmatch(ip)
-	if len(matches) > 1 {
-		return matches[1], nil
+	re := regexp.MustCompile(`\b((?:\d{1,3}\.){3}\d{1,3})\b`)
+	for _, match := range re.FindAllStringSubmatch(ip, -1) {
+		if len(match) > 1 {
+			candidate := match[1]
+			if !strings.HasPrefix(candidate, "127.") && !strings.HasPrefix(candidate, "169.254.") {
+				return candidate, nil
+			}
+		}
 	}
 	// If no IPv4 found, try lxc-attach as fallback (DHCP may be delayed)
 	attachCmd := exec.Command("lxc-attach", "-n", lxcName, "--", "sh", "-c", "ip -4 addr show eth0 2>/dev/null | grep -oP 'inet \\K[\\d.]+' || true")
 	if attachOut, attachErr := attachCmd.Output(); attachErr == nil {
-		v4 := strings.TrimSpace(string(attachOut))
-		if v4 != "" {
-			return v4, nil
+		for _, match := range re.FindAllStringSubmatch(string(attachOut), -1) {
+			if len(match) > 1 {
+				candidate := match[1]
+				if !strings.HasPrefix(candidate, "127.") && !strings.HasPrefix(candidate, "169.254.") {
+					return candidate, nil
+				}
+			}
 		}
 	}
 	return "", fmt.Errorf("no IPv4 address found for %s (IPv6 is disabled for containers)", lxcName)
@@ -3163,7 +3171,7 @@ func (m *Manager) GetContainerIP(lxcName string) (string, error) {
 
 func (m *Manager) GetContainerIPv4Details(lxcName string) (string, int, string, error) {
 	script := `
-addr="$(ip -4 -o addr show dev eth0 scope global 2>/dev/null | awk '{print $4; exit}')"
+addr="$(ip -4 -o addr show dev eth0 scope global 2>/dev/null | grep -v ' 169\.254\.' | awk '{print $4; exit}')"
 gateway="$(ip route show default 0.0.0.0/0 dev eth0 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i=="via") {print $(i+1); exit}}')"
 printf '%s\n%s\n' "$addr" "$gateway"
 `
