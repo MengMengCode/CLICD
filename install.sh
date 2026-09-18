@@ -1103,32 +1103,19 @@ install_apt() {
         dnsmasq-base
 
     if kvm_supported_arch; then
-        if [ "$CLICD_ARCH_NORMALIZED" = "arm64" ]; then
-            apt-get install -y \
-                "$(qemu_system_package_apt)" \
-                qemu-utils \
-                libvirt-daemon-system \
-                libvirt-clients \
-                cloud-image-utils \
-                genisoimage \
-                xorriso \
-                smartmontools \
-                virtinst \
-                "$(qemu_efi_package_apt)"
-        else
-            apt-get install -y \
-                qemu-kvm \
-                "$(qemu_system_package_apt)" \
-                qemu-utils \
-                libvirt-daemon-system \
-                libvirt-clients \
-                cloud-image-utils \
-                genisoimage \
-                xorriso \
-                smartmontools \
-                virtinst \
-                "$(qemu_efi_package_apt)"
-        fi
+        apt-get install -y \
+            "$(qemu_system_package_apt)" \
+            qemu-utils \
+            libvirt-daemon-system \
+            libvirt-clients \
+            cloud-image-utils \
+            genisoimage \
+            xorriso \
+            smartmontools \
+            virtinst \
+            "$(qemu_efi_package_apt)"
+        # qemu-kvm is a transitional/virtual package in newer Ubuntu/Debian releases; try installing optionally without blocking
+        apt-get install -y qemu-kvm >/dev/null 2>&1 || true
     else
         warn_kvm_unsupported_arch
         apt-get install -y qemu-utils genisoimage xorriso smartmontools >/dev/null 2>&1 || true
