@@ -857,6 +857,8 @@ const exact: Record<string, string> = {
   '初始化失败': 'Initialization failed',
   '初始化完成': 'Initialization complete',
   '排队等待': 'Queued',
+  '排队中': 'Queued',
+  '排队等待下载中': 'Queued for download',
   '当前阶段': 'Current Stage',
   '准备初始化环境': 'Preparing initialization environment',
   '检查模板与创建参数': 'Checking template and creation settings',

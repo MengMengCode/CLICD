@@ -638,8 +638,9 @@ function ImageTable({
 
 function StatusBadge({ img }: { img: ImageInfo }) {
   if (img.downloading) {
+    const isQueued = img.stage === 'queued'
     const progress = Math.max(0, Math.min(100, img.progress || 0))
-    const showProgress = img.stage === 'downloading' && (progress > 0 || img.downloaded_bytes > 0)
+    const showProgress = !isQueued && img.stage === 'downloading' && (progress > 0 || img.downloaded_bytes > 0)
     return (
       <div className="inline-flex flex-col gap-1">
         <span
@@ -696,6 +697,7 @@ function StatusBadge({ img }: { img: ImageInfo }) {
 }
 
 function downloadStatusLabel(img: ImageInfo) {
+  if (img.stage === 'queued') return '排队中'
   if (img.stage === 'canceling') return '取消中'
   if (img.stage === 'converting') return '转换中'
   if (img.stage === 'validating') return '校验中'
@@ -706,6 +708,7 @@ function downloadStatusLabel(img: ImageInfo) {
 }
 
 function downloadStatusTitle(img: ImageInfo) {
+  if (img.stage === 'queued') return '排队等待下载中'
   const parts = [downloadStatusLabel(img)]
   if (img.stage) parts.push(`阶段：${img.stage}`)
   if (img.downloaded_bytes > 0 || img.total_bytes > 0) {

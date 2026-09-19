@@ -53,8 +53,18 @@ var sha256Pattern = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
 var imageDownloadsMu sync.Mutex
 var imageDownloads = map[string]*imageDownloadStatus{}
 var lxcImageCacheMu sync.Mutex
-var lxcImageDownloadMu sync.Mutex
-var lxcImageDownloadActive bool
+
+type lxcImageDownloadTask struct {
+	template lxc.Template
+	ctx      context.Context
+	cancel   context.CancelFunc
+}
+
+var (
+	lxcDownloadQueueMu sync.Mutex
+	lxcDownloadQueue   []*lxcImageDownloadTask
+	lxcActiveDownload  *lxcImageDownloadTask
+)
 
 type imageDownloadStatus struct {
 	Downloading     bool
@@ -150,20 +160,158 @@ func isImageDownloadActive(id string) bool {
 	return st != nil && st.Downloading
 }
 
-func beginLXCImageDownload() bool {
-	lxcImageDownloadMu.Lock()
-	defer lxcImageDownloadMu.Unlock()
-	if lxcImageDownloadActive {
-		return false
+func enqueueLXCImageDownload(tmpl lxc.Template) (queued bool, ok bool) {
+	lxcDownloadQueueMu.Lock()
+	defer lxcDownloadQueueMu.Unlock()
+
+	// Check if already actively downloading
+	if lxcActiveDownload != nil && lxcActiveDownload.template.ID == tmpl.ID {
+		return false, false
 	}
-	lxcImageDownloadActive = true
-	return true
+	// Check if already queued
+	for _, task := range lxcDownloadQueue {
+		if task.template.ID == tmpl.ID {
+			return false, false
+		}
+	}
+
+	startStage := "lxc-create"
+	if tmpl.Custom {
+		startStage = "downloading"
+	}
+
+	// If no download is currently active, start immediately
+	if lxcActiveDownload == nil {
+		ctx, started := startImageDownload(tmpl.ID, startStage)
+		if !started {
+			return false, false
+		}
+		imageDownloadsMu.Lock()
+		var cancel context.CancelFunc
+		if st := imageDownloads[tmpl.ID]; st != nil {
+			cancel = st.Cancel
+		}
+		imageDownloadsMu.Unlock()
+
+		task := &lxcImageDownloadTask{
+			template: tmpl,
+			ctx:      ctx,
+			cancel:   cancel,
+		}
+		lxcActiveDownload = task
+		go executeLXCImageDownload(task)
+		return false, true
+	}
+
+	// Otherwise, add to the FIFO queue with stage "queued"
+	ctx, started := startImageDownload(tmpl.ID, "queued")
+	if !started {
+		return false, false
+	}
+	imageDownloadsMu.Lock()
+	var cancel context.CancelFunc
+	if st := imageDownloads[tmpl.ID]; st != nil {
+		cancel = st.Cancel
+	}
+	imageDownloadsMu.Unlock()
+
+	task := &lxcImageDownloadTask{
+		template: tmpl,
+		ctx:      ctx,
+		cancel:   cancel,
+	}
+	lxcDownloadQueue = append(lxcDownloadQueue, task)
+	return true, true
 }
 
-func endLXCImageDownload() {
-	lxcImageDownloadMu.Lock()
-	lxcImageDownloadActive = false
-	lxcImageDownloadMu.Unlock()
+func executeLXCImageDownload(task *lxcImageDownloadTask) {
+	tmpl := task.template
+	ctx := task.ctx
+
+	defer func() {
+		lxcDownloadQueueMu.Lock()
+		var nextTask *lxcImageDownloadTask
+		for len(lxcDownloadQueue) > 0 {
+			candidate := lxcDownloadQueue[0]
+			lxcDownloadQueue = lxcDownloadQueue[1:]
+			// Skip if canceled while waiting in queue
+			if candidate.ctx.Err() != nil {
+				continue
+			}
+			// Skip if already downloaded in the meantime
+			if downloaded, _ := lxcTemplateDownloadedInfo(candidate.template); downloaded {
+				ensureImageEnabled(candidate.template.ID)
+				clearImageDownload(candidate.template.ID)
+				continue
+			}
+			nextTask = candidate
+			break
+		}
+		lxcActiveDownload = nextTask
+		if nextTask != nil {
+			stage := "lxc-create"
+			if nextTask.template.Custom {
+				stage = "downloading"
+			}
+			updateImageDownload(nextTask.template.ID, func(st *imageDownloadStatus) {
+				st.Stage = stage
+			})
+			go executeLXCImageDownload(nextTask)
+		}
+		lxcDownloadQueueMu.Unlock()
+	}()
+
+	if tmpl.Custom {
+		err := lxc.DownloadCustomImageWithProgress(ctx, tmpl, func(progress lxc.CustomImageDownloadProgress) {
+			updateImageDownload(tmpl.ID, func(status *imageDownloadStatus) {
+				status.Stage = progress.Stage
+				status.DownloadedBytes = progress.DownloadedBytes
+				status.TotalBytes = progress.TotalBytes
+				status.Progress = progress.Percent
+			})
+		})
+		if err != nil {
+			if ctx.Err() != nil {
+				_ = os.Remove(lxc.CustomImagePath(tmpl.ID) + ".tmp")
+				_ = os.Remove(lxc.CustomImagePath(tmpl.ID))
+				finishImageDownload(tmpl.ID, nil)
+				return
+			}
+			finishImageDownload(tmpl.ID, err)
+			return
+		}
+		ensureImageEnabled(tmpl.ID)
+		finishImageDownload(tmpl.ID, nil)
+		return
+	}
+
+	// Official template download via lxc-create
+	tmpName := lxcImageDownloadTempName(tmpl.ID)
+	args := []string{"-n", tmpName, "-t", "download", "--",
+		"-d", tmpl.Distro, "-r", tmpl.Release, "-a", tmpl.Arch}
+	if tmpl.Variant != "" {
+		args = append(args, "--variant", tmpl.Variant)
+	}
+	updateImageDownload(tmpl.ID, func(st *imageDownloadStatus) {
+		st.Stage = "lxc-create"
+	})
+	cmd := exec.CommandContext(ctx, "lxc-create", args...)
+	output, err := runLXCImageDownloadCommand(cmd, tmpl.ID)
+
+	// Clean up the temp container unconditionally.
+	cleanupLXCImageDownloadTemp(tmpl.ID)
+
+	if err != nil {
+		if ctx.Err() != nil {
+			finishImageDownload(tmpl.ID, nil)
+			return
+		}
+		err = fmt.Errorf("Download failed: %v, output: %s", err, string(output))
+		finishImageDownload(tmpl.ID, err)
+		return
+	}
+	ensureImageEnabled(tmpl.ID)
+	finishImageDownload(tmpl.ID, nil)
 }
 
 func lxcImageDownloadTempName(id string) string {
@@ -664,16 +812,6 @@ func HandleImageDownload(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusAccepted, APIResponse{Success: true, Message: "Download started"})
 		return
 	}
-	if !beginLXCImageDownload() {
-		jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "Another LXC image download is active"})
-		return
-	}
-	lxcDownloadHandedOff := false
-	defer func() {
-		if !lxcDownloadHandedOff {
-			endLXCImageDownload()
-		}
-	}()
 	imagePool, err := config.SelectStoragePoolForContent(
 		config.StorageContentImages,
 		"",
@@ -696,76 +834,16 @@ func HandleImageDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	startStage := "lxc-create"
-	if tmpl.Custom {
-		startStage = "downloading"
-	}
-	ctx, ok := startImageDownload(tmpl.ID, startStage)
+	queued, ok := enqueueLXCImageDownload(*tmpl)
 	if !ok {
-		jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "Already downloading"})
+		jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "Already downloading or queued"})
 		return
 	}
 
-	if tmpl.Custom {
-		go func(tmpl lxc.Template) {
-			defer endLXCImageDownload()
-			err := lxc.DownloadCustomImageWithProgress(ctx, tmpl, func(progress lxc.CustomImageDownloadProgress) {
-				updateImageDownload(tmpl.ID, func(status *imageDownloadStatus) {
-					status.Stage = progress.Stage
-					status.DownloadedBytes = progress.DownloadedBytes
-					status.TotalBytes = progress.TotalBytes
-					status.Progress = progress.Percent
-				})
-			})
-			if err != nil {
-				if ctx.Err() != nil {
-					_ = os.Remove(lxc.CustomImagePath(tmpl.ID) + ".tmp")
-					_ = os.Remove(lxc.CustomImagePath(tmpl.ID))
-					finishImageDownload(tmpl.ID, nil)
-					return
-				}
-				finishImageDownload(tmpl.ID, err)
-				return
-			}
-			ensureImageEnabled(tmpl.ID)
-			finishImageDownload(tmpl.ID, nil)
-		}(*tmpl)
-		lxcDownloadHandedOff = true
-		jsonResponse(w, http.StatusAccepted, APIResponse{Success: true, Message: "Download started"})
+	if queued {
+		jsonResponse(w, http.StatusAccepted, APIResponse{Success: true, Message: "Download queued"})
 		return
 	}
-
-	go func(tmpl lxc.Template) {
-		defer endLXCImageDownload()
-		// Download via lxc-create with a temp container, then destroy it.
-		tmpName := lxcImageDownloadTempName(tmpl.ID)
-		args := []string{"-n", tmpName, "-t", "download", "--",
-			"-d", tmpl.Distro, "-r", tmpl.Release, "-a", tmpl.Arch}
-		if tmpl.Variant != "" {
-			args = append(args, "--variant", tmpl.Variant)
-		}
-		updateImageDownload(tmpl.ID, func(st *imageDownloadStatus) {
-			st.Stage = "lxc-create"
-		})
-		cmd := exec.CommandContext(ctx, "lxc-create", args...)
-		output, err := runLXCImageDownloadCommand(cmd, tmpl.ID)
-
-		// Clean up the temp container unconditionally.
-		cleanupLXCImageDownloadTemp(tmpl.ID)
-
-		if err != nil {
-			if ctx.Err() != nil {
-				finishImageDownload(tmpl.ID, nil)
-				return
-			}
-			err = fmt.Errorf("Download failed: %v, output: %s", err, string(output))
-			finishImageDownload(tmpl.ID, err)
-			return
-		}
-		ensureImageEnabled(tmpl.ID)
-		finishImageDownload(tmpl.ID, nil)
-	}(*tmpl)
-	lxcDownloadHandedOff = true
 
 	jsonResponse(w, http.StatusAccepted, APIResponse{Success: true, Message: "Download started"})
 }
@@ -929,6 +1007,20 @@ func HandleImageCancel(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "template_id required"})
 		return
 	}
+
+	// Check if this template is currently waiting in the LXC download queue
+	lxcDownloadQueueMu.Lock()
+	for i, task := range lxcDownloadQueue {
+		if task.template.ID == req.TemplateID {
+			task.cancel()
+			lxcDownloadQueue = append(lxcDownloadQueue[:i], lxcDownloadQueue[i+1:]...)
+			lxcDownloadQueueMu.Unlock()
+			finishImageDownload(req.TemplateID, nil)
+			jsonResponse(w, http.StatusOK, APIResponse{Success: true, Message: "Queued download canceled"})
+			return
+		}
+	}
+	lxcDownloadQueueMu.Unlock()
 
 	imageDownloadsMu.Lock()
 	st := imageDownloads[req.TemplateID]
