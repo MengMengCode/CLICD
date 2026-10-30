@@ -115,16 +115,3 @@ This open-source software is intended solely for educational purposes, specifica
 ## Thanks / 鸣谢
 - [Nodeseek.com](https://www.nodeseek.com) — 一个专注于服务器的社区
 - [Linux.do](https://linux.do) — 一个充满灵感的科技社区
-
-
-## Star History
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=mengmengcode%2Fclicd&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=mengmengcode/clicd&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=mengmengcode/clicd&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=mengmengcode/clicd&type=date&legend=top-left" />
- </picture>
-</a>
