@@ -380,17 +380,27 @@ func taskConcurrencyKey(task *Task) string {
 	if task == nil {
 		return "task:nil"
 	}
+	// Delete tasks must never be serialized behind a create/start task for the
+	// same container. A create task that waits for a guest IP (KVM VMs whose
+	// OS never reports an address) can occupy the per-container slot for
+	// minutes and used to leave every subsequent delete pending forever.
+	// Giving deletes their own key keeps them runnable so a wedged VM can
+	// always be torn down.
+	prefix := "name:"
+	if task.Type == TaskDelete {
+		prefix = "delete:"
+	}
 	name := strings.TrimSpace(task.ContainerName)
 	if name == "" {
 		name = strings.TrimSpace(task.Config.Name)
 	}
 	if name != "" {
-		return "name:" + strings.ToLower(name)
+		return prefix + strings.ToLower(name)
 	}
 	if task.ContainerID > 0 {
-		return fmt.Sprintf("id:%d", task.ContainerID)
+		return prefix + fmt.Sprintf("id:%d", task.ContainerID)
 	}
-	return "task:" + task.ID
+	return prefix + "task:" + task.ID
 }
 
 func (q *TaskQueue) finishTask(task *Task, status string, taskErr error) {

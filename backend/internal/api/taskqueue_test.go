@@ -21,10 +21,26 @@ func TestRunnableTaskIndexSkipsActiveContainer(t *testing.T) {
 }
 
 func TestTaskConcurrencyKeyUsesContainerName(t *testing.T) {
+	// Non-delete tasks for the same container must serialize on one key.
 	create := &Task{ID: "task-1", Type: TaskCreate, Config: lxcConfigWithName("Example")}
-	operation := &Task{ID: "task-2", Type: TaskDelete, ContainerID: 9, ContainerName: "example"}
+	operation := &Task{ID: "task-2", Type: TaskStart, ContainerID: 9, ContainerName: "example"}
 	if taskConcurrencyKey(create) != taskConcurrencyKey(operation) {
 		t.Fatalf("same container received different concurrency keys: %q and %q", taskConcurrencyKey(create), taskConcurrencyKey(operation))
+	}
+}
+
+// A delete must stay runnable even while a create/start task for the same
+// container is still active. Otherwise a create task blocked waiting for a
+// guest IPv4 address (common for KVM Windows images) keeps the per-container
+// slot busy forever and every queued delete stays pending.
+func TestTaskConcurrencyKeyDeleteDoesNotBlockOnCreate(t *testing.T) {
+	create := &Task{ID: "task-1", Type: TaskCreate, Config: lxcConfigWithName("example")}
+	del := &Task{ID: "task-2", Type: TaskDelete, ContainerID: 9, ContainerName: "example"}
+
+	active := map[string]bool{taskConcurrencyKey(create): true}
+	queue := []*Task{del}
+	if got := runnableTaskIndex(queue, active); got != 0 {
+		t.Fatalf("delete was not runnable while a create task for the same container was active (got index %d)", got)
 	}
 }
 

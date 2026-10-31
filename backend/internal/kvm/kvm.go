@@ -830,7 +830,17 @@ func (m *Manager) DestroyContainer(id int) error {
 	}
 	name := c.VirshName()
 	removeKVMIPv6Runtime(c)
-	_ = m.StopContainer(id)
+	// A KVM VM can be wedged (shutdown ignored, virsh destroy failing, or the
+	// domain already half-removed). Stop failures must not leave the domain
+	// behind, which previously surfaced as "container still exists after
+	// delete" while the config entry stayed in place.
+	stopErr := m.StopContainer(id)
+	if stopErr != nil {
+		fmt.Printf("Warning: failed to stop KVM VM %s before destroy: %v\n", name, stopErr)
+	}
+	// Always try to remove the domain definition even if the VM could not be
+	// stopped cleanly; virsh undefine on a running domain is a no-op error we
+	// can ignore once destroy has been attempted.
 	_ = undefineDomain(name)
 	if err := os.RemoveAll(m.instanceDir(name)); err != nil {
 		return err
