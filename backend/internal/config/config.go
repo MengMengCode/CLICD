@@ -169,9 +169,6 @@ type Container struct {
 	SnapshotScheduleLastRun       string                 `json:"snapshot_schedule_last_run"`
 	SnapshotScheduleNextRun       string                 `json:"snapshot_schedule_next_run"`
 	SnapshotScheduleCreatedBy     string                 `json:"snapshot_schedule_created_by"`
-	PolicyBlocked                 bool                   `json:"policy_blocked"`
-	PolicyBlockedReason           string                 `json:"policy_blocked_reason,omitempty"`
-	PolicyBlockedAt               string                 `json:"policy_blocked_at,omitempty"`
 }
 
 const (
@@ -815,7 +812,6 @@ type ClicdConfig struct {
 	IPv6NAT              IPv6NATSettings        `json:"ipv6_nat"`
 	WebSSHAllowedOrigins []string               `json:"webssh_allowed_origins"`
 	PanelAccessPolicy    PanelAccessPolicy      `json:"panel_access_policy"`
-	SecurityAutoShutdown bool                   `json:"security_auto_shutdown"`
 	TaskConcurrency      int                    `json:"task_concurrency"`
 	Language             string                 `json:"language"`
 	SSL                  SSLConfig              `json:"ssl"`
@@ -1803,22 +1799,6 @@ func SetContainerRestoreOnHostBoot(id int, restore bool) {
 		c.RestoreOnHostBoot = restore
 		SaveConfig()
 	}
-}
-
-func SetContainerPolicyBlock(id int, blocked bool, reason string) {
-	c := FindContainer(id)
-	if c == nil {
-		return
-	}
-	c.PolicyBlocked = blocked
-	if blocked {
-		c.PolicyBlockedReason = reason
-		c.PolicyBlockedAt = time.Now().Format("2006-01-02 15:04:05")
-	} else {
-		c.PolicyBlockedReason = ""
-		c.PolicyBlockedAt = ""
-	}
-	SaveConfig()
 }
 
 // UpdateVNC refreshes all container statuses

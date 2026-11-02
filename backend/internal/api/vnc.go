@@ -55,10 +55,6 @@ func HandleVNCTicket(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusNotFound, APIResponse{Success: false, Message: "Container not found"})
 		return
 	}
-	if isSubUserRequest(r) && c.PolicyBlocked {
-		jsonResponse(w, http.StatusForbidden, APIResponse{Success: false, Message: policyBlockedMessage(c)})
-		return
-	}
 	if !c.IsKVM() {
 		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "VNC console is only available for KVM VMs"})
 		return
@@ -108,10 +104,6 @@ func HandleVNCProxy(w http.ResponseWriter, r *http.Request) {
 	c := config.FindContainerByName(containerName)
 	if c == nil || c.UUID != item.ContainerUUID {
 		http.Error(w, "container not found", http.StatusNotFound)
-		return
-	}
-	if item.SubUser && c.PolicyBlocked {
-		http.Error(w, "虚拟机被策略临时封禁", http.StatusForbidden)
 		return
 	}
 	if !c.IsKVM() {

@@ -328,12 +328,6 @@ print(resp.json())
 | POST | `/api/v1/images/cancel` | 取消镜像下载 |
 | DELETE | `/api/v1/images/delete` | 删除镜像缓存 |
 | PUT | `/api/v1/images/toggle` | 启用/禁用镜像 |
-| GET | `/api/v1/security/alerts` | 安全告警 |
-| POST | `/api/v1/security/check` | 立即安全检查 |
-| GET | `/api/v1/security/logs?container={name}` | 安全连接日志 |
-| GET | `/api/v1/security/summary` | 安全汇总 |
-| GET | `/api/v1/security/settings` | 安全设置 |
-| PUT | `/api/v1/security/settings` | 更新安全设置 |
 | GET | `/api/v1/swap` | Swap 信息 |
 | POST | `/api/v1/swap` | 调整 Swap |
 | GET | `/api/v1/language` | 当前面板语言 |
@@ -522,8 +516,7 @@ print(resp.json())
       "ip": "10.0.0.10",
       "ipv6": "2001:db8:100::1005",
       "ssh_port": 22004,
-      "ssh_password": "***",
-      "policy_blocked": false
+      "ssh_password": "***"
     }
   },
   "POST /api/v1/containers/{id}/start": {
@@ -734,30 +727,6 @@ print(resp.json())
   "PUT /api/v1/images/toggle": {
     "success": true,
     "message": "OK"
-  },
-  "GET /api/v1/security/alerts": {
-    "success": true,
-    "data": []
-  },
-  "POST /api/v1/security/check": {
-    "success": true,
-    "message": "Security check completed"
-  },
-  "GET /api/v1/security/logs?container={name}": {
-    "success": true,
-    "data": []
-  },
-  "GET /api/v1/security/summary": {
-    "success": true,
-    "data": { "critical": 0, "high": 0, "medium": 0, "low": 0, "total_alerts": 0 }
-  },
-  "GET /api/v1/security/settings": {
-    "success": true,
-    "data": { "auto_shutdown": false }
-  },
-  "PUT /api/v1/security/settings": {
-    "success": true,
-    "data": { "auto_shutdown": false }
   },
   "GET /api/v1/swap": {
     "success": true,

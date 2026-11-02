@@ -101,11 +101,6 @@ func TestAccessCodeFirewallAccessPreservesRestrictions(t *testing.T) {
 	if unauthenticated.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated firewall write = %d, want unauthorized", unauthenticated.Code)
 	}
-	config.FindContainer(11).PolicyBlocked = true
-	blocked := requestFirewallAs(handler, token, http.MethodPut, "/api/containers/11/firewall", `{"enabled":true}`)
-	if blocked.Code != http.StatusForbidden || config.FindContainer(11).FirewallEnabled {
-		t.Fatalf("policy-blocked firewall write = %d, want forbidden without changes", blocked.Code)
-	}
 }
 
 func TestFirewallRequiresNetworkScope(t *testing.T) {

@@ -34,7 +34,7 @@ const toastStyles = {
 
 function toastTone(title: string): ToastTone {
   if (/失败|错误|异常|不可用|failed|error/i.test(title)) return 'error'
-  if (/提示|警告|未配置|格式|配额|封禁|warning/i.test(title)) return 'warning'
+  if (/提示|警告|未配置|格式|配额|warning/i.test(title)) return 'warning'
   if (/完成|成功|已保存|success/i.test(title)) return 'success'
   return 'info'
 }

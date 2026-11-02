@@ -359,56 +359,6 @@ func (q *TaskQueue) enqueueSingleWithAudit(containerID int, containerName string
 	return task.ID
 }
 
-func (q *TaskQueue) EnqueueSecurityStop(containerID int, containerName string) (string, bool) {
-	if !config.AppConfig.SecurityAutoShutdown {
-		return "", false
-	}
-
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	for _, task := range q.tasks {
-		if task.Type != TaskStop || task.ContainerID != containerID {
-			continue
-		}
-		if task.Status == "pending" || task.Status == "running" {
-			return task.ID, false
-		}
-	}
-
-	taskID := q.enqueueSingleWithAudit(containerID, containerName, TaskStop, "", "system:security", "", "")
-	q.persistTasks()
-	return taskID, true
-}
-
-func (q *TaskQueue) CancelPendingSecurityStops() int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	cancelled := 0
-	newOpQueue := make([]*Task, 0, len(q.opQueue))
-	for _, task := range q.opQueue {
-		if isSecurityStopTask(task) && task.Status == "pending" {
-			delete(q.tasks, task.ID)
-			cancelled++
-			continue
-		}
-		newOpQueue = append(newOpQueue, task)
-	}
-	q.opQueue = newOpQueue
-
-	for id, task := range q.tasks {
-		if isSecurityStopTask(task) && task.Status == "pending" {
-			delete(q.tasks, id)
-			cancelled++
-		}
-	}
-	if cancelled > 0 {
-		q.persistTasks()
-	}
-	return cancelled
-}
-
 // The two dispatchers keep long-running creates from blocking power operations,
 // while sharing one global concurrency budget.
 func (q *TaskQueue) createDispatcher() {
@@ -644,7 +594,6 @@ func (q *TaskQueue) runOperationTask(task *Task) {
 		ctx = context.Background()
 	}
 	q.mu.Unlock()
-	skipped := false
 	if err == nil && (task.Type == TaskStart || task.Type == TaskRestart || task.Type == TaskReinstall) {
 		c := config.FindContainer(task.ContainerID)
 		if c != nil {
@@ -655,10 +604,7 @@ func (q *TaskQueue) runOperationTask(task *Task) {
 			}
 		}
 	}
-	if err == nil && isSecurityStopTask(task) && !config.AppConfig.SecurityAutoShutdown {
-		skipped = true
-	}
-	if err == nil && !skipped {
+	if err == nil {
 		switch task.Type {
 		case TaskStart:
 			err = q.runtime.start(ctx, task.ContainerID)
@@ -692,41 +638,16 @@ func (q *TaskQueue) runOperationTask(task *Task) {
 		q.finishTask(task, "failed", err)
 		return
 	}
-	if skipped {
-		config.AddAuditLogFull(string(task.Type), task.ContainerName, "跳过: 安全告警自动关机已关闭", auditUser, task.IP, task.UserAgent, true, "")
-		q.finishTask(task, "done", nil)
-		return
-	}
-
 	config.AddAuditLogFull(string(task.Type), task.ContainerName, "成功", auditUser, task.IP, task.UserAgent, true, "")
 	switch task.Type {
 	case TaskStart:
 		config.UpdateContainerStatus(task.ContainerID, "running")
-		clearPolicyBlockAfterAdminRecovery(task)
 	case TaskStop:
 		config.UpdateContainerStatus(task.ContainerID, "stopped")
 	case TaskRestart:
 		config.UpdateContainerStatus(task.ContainerID, "running")
-		clearPolicyBlockAfterAdminRecovery(task)
-	case TaskReinstall:
-		clearPolicyBlockAfterAdminRecovery(task)
 	}
 	q.finishTask(task, "done", nil)
-}
-
-func isSecurityStopTask(task *Task) bool {
-	return task != nil && task.Type == TaskStop && task.User == "system:security"
-}
-
-func clearPolicyBlockAfterAdminRecovery(task *Task) {
-	if task == nil || strings.HasPrefix(task.User, "user:") || task.User == "system:security" {
-		return
-	}
-	c := config.FindContainer(task.ContainerID)
-	if c != nil && c.PolicyBlocked {
-		config.SetContainerPolicyBlock(c.ID, false, "")
-		config.AddAuditLog("security_policy_unblock", c.Name, "管理员操作后解除策略临时封禁", task.User)
-	}
 }
 
 func resolveTaskContainer(task *Task) error {
@@ -1197,7 +1118,8 @@ func RestoreTasks() {
 	globalQueue.mu.Lock()
 	defer globalQueue.mu.Unlock()
 	for _, st := range config.AppConfig.Tasks {
-		if st.Type == string(TaskStop) && st.User == "system:security" && !config.AppConfig.SecurityAutoShutdown {
+		// Retired alert automation must not replay shutdowns saved by older versions.
+		if st.Type == string(TaskStop) && st.User == "system:security" {
 			continue
 		}
 		var cfg lxc.ContainerConfig

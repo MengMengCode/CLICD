@@ -5,7 +5,6 @@ import Dashboard from './pages/Dashboard'
 import Containers from './pages/Containers'
 import ContainerDetail from './pages/ContainerDetail'
 
-import Security from './pages/Security'
 import AuditLogs from './pages/AuditLogs'
 import ApiIntegration from './pages/ApiIntegration'
 import HostReport from './pages/HostReport'
@@ -61,7 +60,6 @@ function App() {
         <Route path="images" element={<ImageManagement />} />
         <Route path="container/:id" element={<ContainerDetail />} />
 
-        <Route path="security" element={<Security />} />
         <Route path="snapshots" element={<Snapshots />} />
         <Route path="routing" element={<Routing />} />
         <Route path="storage" element={<Storage />} />

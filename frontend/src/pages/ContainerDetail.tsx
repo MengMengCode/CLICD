@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { useParams, useNavigate } from 'react-router'
 import {
   ArrowLeft,
-  AlertTriangle,
   Camera,
   Clock,
   Copy,
@@ -358,17 +357,8 @@ export default function ContainerDetail() {
     start: '开机中...', stop: '关机中...', restart: '重启中...', delete: '删除中...', reinstall: '重装中...',
   }
 
-  const ensureSubUserCanOperate = async () => {
-    if (isSubUser && container?.policy_blocked) {
-      await dialog.alert('策略临时封禁', container.policy_blocked_reason || '虚拟机被策略临时封禁，暂不能执行操作。')
-      return false
-    }
-    return true
-  }
-
   const handleAction = async (action: string) => {
     if (!containerIdentifier) return
-    if (!(await ensureSubUserCanOperate())) return
     setActionLoading(action)
     try {
       switch (action) {
@@ -708,14 +698,12 @@ export default function ContainerDetail() {
   }
 
   const openAddMapping = () => {
-    if (isSubUser && container?.policy_blocked) return
     setDraft(emptyDraft)
     setShowNat(true)
     setShowMappingEditor(true)
   }
 
   const openEditMapping = (pm: PortMapping, index: number) => {
-    if (isSubUser && container?.policy_blocked) return
     setDraft({
       index,
       description: pm.description,
@@ -730,7 +718,6 @@ export default function ContainerDetail() {
 
   const submitMapping = async (): Promise<boolean> => {
     if (!containerIdentifier) return false
-    if (!(await ensureSubUserCanOperate())) return false
     if (draft.index === null && container) {
       const currentCount = container.port_mappings?.length || 0
       const limit = Math.max(container.port_mapping_limit || 0, currentCount)
@@ -788,7 +775,6 @@ export default function ContainerDetail() {
 
   const removeMapping = async (index: number) => {
     if (!containerIdentifier || !(await dialog.confirm('删除映射', '确定要删除这条映射规则吗？'))) return
-    if (!(await ensureSubUserCanOperate())) return
     try {
       await deletePortMapping(containerIdentifier, index)
       await fetchContainer()
@@ -801,7 +787,6 @@ export default function ContainerDetail() {
 
   const handleCreateSnapshot = async () => {
     if (!containerIdentifier) return
-    if (!(await ensureSubUserCanOperate())) return
     if (!snapshotStorageReady) {
       await dialog.alert('未配置快照存储', '请先在存储管理中为快照开启至少一块存储磁盘。')
       return
@@ -830,7 +815,6 @@ export default function ContainerDetail() {
   }
 
   const openSnapshotSchedule = () => {
-    if (isSubUser && container?.policy_blocked) return
     if (!snapshotStorageReady) {
       dialog.alert('未配置快照存储', '请先在存储管理中为快照开启至少一块存储磁盘。')
       return
@@ -844,7 +828,6 @@ export default function ContainerDetail() {
 
   const saveSnapshotSchedule = async (enabled: boolean) => {
     if (!containerIdentifier) return
-    if (!(await ensureSubUserCanOperate())) return
     const intervalHours = snapshotScheduleDraft.intervalHours
     const scheduleTime = snapshotScheduleDraft.time || '03:00'
     if (enabled && intervalHours < 24) {
@@ -884,7 +867,6 @@ export default function ContainerDetail() {
 
   const handleDeleteSnapshot = async (snapshot: Snapshot) => {
     if (!containerIdentifier) return
-    if (!(await ensureSubUserCanOperate())) return
     if (!(await dialog.confirm('删除快照', `确定删除 ${snapshot.created_at} 的快照吗？`))) return
     setSnapshotBusy(snapshot.id)
     try {
@@ -900,7 +882,6 @@ export default function ContainerDetail() {
 
   const handleRestoreSnapshot = async (snapshot: Snapshot) => {
     if (!containerIdentifier) return
-    if (!(await ensureSubUserCanOperate())) return
     if (!(await dialog.confirm('恢复快照', `确定恢复到 ${snapshot.created_at} 的快照吗？当前容器数据会被覆盖。`))) return
     setSnapshotBusy(snapshot.id)
     try {
@@ -944,9 +925,6 @@ export default function ContainerDetail() {
   const reinstallLinuxTemplate = !isWindowsTemplate(selectedTemplate)
   const canOpenVNC = isKVM && isRunning
   const isExpired = container.expires_at ? new Date(container.expires_at) < new Date() : false
-  const isPolicyBlocked = !!container.policy_blocked
-  const isSubUserPolicyBlocked = isSubUser && isPolicyBlocked
-  const policyBlockedText = container.policy_blocked_reason || '虚拟机被策略临时封禁'
   const publicIPv4s = container.public_ipv4s || []
   const assignedIPv4List = publicIPv4s.map((item) => item.address).filter(Boolean)
   const allocatableIPv4s = mergeIPv4Choices(hostInfo?.network.public_ipv4_addresses || [], publicIPv4s)
@@ -1019,7 +997,7 @@ export default function ContainerDetail() {
   const mappingCount = container.port_mappings?.length || 0
   const mappingLimit = Math.max(container.port_mapping_limit || 0, mappingCount)
   const hasNATQuota = mappingLimit > 0
-  const canAddMapping = hasNATQuota && mappingCount < mappingLimit && !isSubUserPolicyBlocked
+  const canAddMapping = hasNATQuota && mappingCount < mappingLimit
   const hasFirewallIPv4 = hasIndependentIPv4 || hasNATQuota
   const hasFirewallIPv6 = hasIndependentIPv6 || hasIPv6NAT
   const firewallNetworkOptions: Array<{ value: NonNullable<FirewallRule['network']>; label: string }> = []
@@ -1117,35 +1095,34 @@ export default function ContainerDetail() {
                   <InfoTag color="amber">IPv4 NAT {hasNATQuota ? `${mappingCount} 条` : '未分配'}</InfoTag>
                 )}
                 <InfoTag color="violet">{isWindows ? 'RDP' : 'SSH'} {publicEndpoint}</InfoTag>
-                {isPolicyBlocked && <InfoTag color="red">策略封禁</InfoTag>}
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap justify-end">
             {!isRunning ? (
-              <ActionButton dark disabled={!!taskStatus || isExpired || isSubUserPolicyBlocked} onClick={() => handleAction('start')}>
+              <ActionButton dark disabled={!!taskStatus || isExpired} onClick={() => handleAction('start')}>
                 <Play className="w-3.5 h-3.5" />
-                {isSubUserPolicyBlocked ? '已封禁' : isExpired ? '已到期' : taskStatus === 'start' ? taskActionLabels['start'] : '开机'}
+                {isExpired ? '已到期' : taskStatus === 'start' ? taskActionLabels['start'] : '开机'}
               </ActionButton>
             ) : (
               <>
-                <ActionButton disabled={!!taskStatus || isExpired || isSubUserPolicyBlocked} onClick={() => handleAction('stop')}>
+                <ActionButton disabled={!!taskStatus || isExpired} onClick={() => handleAction('stop')}>
                   <Square className="w-3.5 h-3.5" />
-                  {isSubUserPolicyBlocked ? '已封禁' : isExpired ? '已到期' : taskStatus === 'stop' ? taskActionLabels['stop'] : '关机'}
+                  {isExpired ? '已到期' : taskStatus === 'stop' ? taskActionLabels['stop'] : '关机'}
                 </ActionButton>
-                <ActionButton disabled={!!taskStatus || isExpired || isSubUserPolicyBlocked} onClick={() => handleAction('restart')}>
+                <ActionButton disabled={!!taskStatus || isExpired} onClick={() => handleAction('restart')}>
                   <RefreshCw className="w-3.5 h-3.5" />
-                  {isSubUserPolicyBlocked ? '已封禁' : isExpired ? '已到期' : taskStatus === 'restart' ? taskActionLabels['restart'] : '重启'}
+                  {isExpired ? '已到期' : taskStatus === 'restart' ? taskActionLabels['restart'] : '重启'}
                 </ActionButton>
                 {!isWindows && (
-                  <ActionButton dark disabled={isSubUserPolicyBlocked} onClick={() => setShowSSH(true)}>
+                  <ActionButton dark onClick={() => setShowSSH(true)}>
                     <TerminalSquare className="w-3.5 h-3.5" />
                     WebSSH
                   </ActionButton>
                 )}
                 {isKVM && (
-                  <ActionButton dark disabled={!canOpenVNC || isSubUserPolicyBlocked} onClick={() => setShowVNC(true)}>
+                  <ActionButton dark disabled={!canOpenVNC} onClick={() => setShowVNC(true)}>
                     <Monitor className="w-3.5 h-3.5" />
                     WebVNC
                   </ActionButton>
@@ -1159,20 +1136,20 @@ export default function ContainerDetail() {
               </ActionButton>
             )}
             {!hasIndependentIPv4 && hasNATQuota && (
-              <ActionButton disabled={isSubUserPolicyBlocked} onClick={() => setShowNat(true)}>
+              <ActionButton onClick={() => setShowNat(true)}>
                 <Settings className="w-3.5 h-3.5" />
                 IPv4 NAT 管理
               </ActionButton>
             )}
-            <ActionButton onClick={openFirewall} disabled={isSubUserPolicyBlocked}>
+            <ActionButton onClick={openFirewall}>
               <FirewallIcon className="w-3.5 h-3.5" />
               防火墙
             </ActionButton>
-            <ActionButton onClick={() => setShowSnapshots(true)} disabled={!!taskStatus || !!snapshotBusy || isSubUserPolicyBlocked}>
+            <ActionButton onClick={() => setShowSnapshots(true)} disabled={!!taskStatus || !!snapshotBusy}>
               <Camera className="w-3.5 h-3.5" />
               快照
             </ActionButton>
-            <ActionButton onClick={openReinstall} disabled={!!taskStatus || isExpired || isSubUserPolicyBlocked}>
+            <ActionButton onClick={openReinstall} disabled={!!taskStatus || isExpired}>
               <RefreshCw className="w-3.5 h-3.5" />
               {isExpired ? '已到期' : taskStatus === 'reinstall' ? taskActionLabels['reinstall'] : '重装'}
             </ActionButton>
@@ -1186,20 +1163,10 @@ export default function ContainerDetail() {
         </div>
       </div>
 
-      {isSubUserPolicyBlocked && (
-        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <div>
-            <div className="font-medium">虚拟机被策略临时封禁</div>
-            <div className="mt-1 text-xs text-red-600">{policyBlockedText}</div>
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Panel
           title="连接信息"
-          extra={!isWindows && !isSubUserPolicyBlocked ? (
+          extra={!isWindows ? (
             <button
               onClick={openResetPassword}
               className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-100 hover:text-black"
@@ -1209,11 +1176,7 @@ export default function ContainerDetail() {
             </button>
           ) : undefined}
         >
-          {isSubUserPolicyBlocked ? (
-            <div className="rounded-md border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
-              虚拟机被策略临时封禁，连接信息暂不可用。
-            </div>
-          ) : isWindows ? (
+          {isWindows ? (
             <>
               <PlainRow label="RDP 地址" value={publicEndpoint} mono />
               <PlainRow label="用户名" value="Administrator" mono />
@@ -1321,7 +1284,6 @@ export default function ContainerDetail() {
           key={container.id}
           containerId={container.id}
           isSubUser={isSubUser}
-          policyBlocked={isSubUserPolicyBlocked}
           refreshKey={JSON.stringify([ipv6NATAddress, container.ipv6_nat_sync_ipv4, container.ipv6_port_mapping_limit, container.ipv6_port_mappings, container.port_mappings])}
           onUpdated={fetchContainer}
         />

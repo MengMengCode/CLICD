@@ -8,7 +8,6 @@ The dashboard shows the overall state of the host and virtualization resources.
 - CPU, memory, disk, and Swap overview.
 - Entry points for host network and routing status.
 - Task queue status.
-- Security alert summary.
 
 ## Related APIs
 

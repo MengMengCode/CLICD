@@ -11,7 +11,6 @@ After installation, CLICD runs as a systemd service. Runtime configuration and t
 | Database | SQLite storage for container metadata, sub-users, audit logs, API keys, and more. |
 | NAT port range | Used for random ports and port mapping allocation. |
 | IPv6 prefixes | Used when the host has routable IPv6 prefixes. |
-| Security alerts | Policies such as automatic shutdown can be configured. |
 
 ## Service Commands
 

@@ -27,7 +27,6 @@ type terminalResizeMessage struct {
 
 type webSSHTicket struct {
 	ContainerName string
-	SubUser       bool
 	ExpiresAt     time.Time
 }
 
@@ -61,17 +60,12 @@ func HandleWebSSHTicket(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusNotFound, APIResponse{Success: false, Message: "Container not found"})
 		return
 	}
-	if isSubUserRequest(r) && c.PolicyBlocked {
-		jsonResponse(w, http.StatusForbidden, APIResponse{Success: false, Message: policyBlockedMessage(c)})
-		return
-	}
 
 	ticket := randomHex(32)
 	webSSHTickets.Lock()
 	cleanupExpiredWebSSHTicketsLocked(time.Now())
 	webSSHTickets.items[ticket] = webSSHTicket{
 		ContainerName: req.ContainerName,
-		SubUser:       isSubUserRequest(r),
 		ExpiresAt:     time.Now().Add(60 * time.Second),
 	}
 	webSSHTickets.Unlock()
@@ -96,7 +90,7 @@ func HandleWebSSH(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, ok := consumeWebSSHTicket(ticket, containerName)
+	_, ok := consumeWebSSHTicket(ticket, containerName)
 	if !ok {
 		http.Error(w, "invalid or expired ticket", http.StatusUnauthorized)
 		return
@@ -105,10 +99,6 @@ func HandleWebSSH(w http.ResponseWriter, r *http.Request) {
 	c := config.FindContainerByName(containerName)
 	if c == nil {
 		http.Error(w, "container not found", http.StatusNotFound)
-		return
-	}
-	if item.SubUser && c.PolicyBlocked {
-		http.Error(w, "虚拟机被策略临时封禁", http.StatusForbidden)
 		return
 	}
 	if c.Status != "running" {

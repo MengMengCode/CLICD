@@ -24,7 +24,6 @@ Main pages:
 - Container list: `Containers.tsx`
 - Container details: `ContainerDetail.tsx`
 - Image Management: `ImageManagement.tsx`
-- Security Alerts: `Security.tsx`
 - Snapshot Management: `Snapshots.tsx`
 - Routing Management: `Routing.tsx`
 - API Integration: `ApiIntegration.tsx`

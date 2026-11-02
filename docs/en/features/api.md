@@ -328,12 +328,6 @@ print(resp.json())
 | POST | `/api/v1/images/cancel` | Cancel image download |
 | DELETE | `/api/v1/images/delete` | Delete image cache |
 | PUT | `/api/v1/images/toggle` | Enable or disable image |
-| GET | `/api/v1/security/alerts` | Security alerts |
-| POST | `/api/v1/security/check` | Run security check |
-| GET | `/api/v1/security/logs?container={name}` | Security connection logs |
-| GET | `/api/v1/security/summary` | Security summary |
-| GET | `/api/v1/security/settings` | Security settings |
-| PUT | `/api/v1/security/settings` | Update security settings |
 | GET | `/api/v1/swap` | Swap information |
 | POST | `/api/v1/swap` | Adjust Swap |
 | GET | `/api/v1/language` | Current panel language |
@@ -522,8 +516,7 @@ The samples below are grouped by endpoint path. Resource numbers, task IDs, cont
       "ip": "10.0.0.10",
       "ipv6": "2001:db8:100::1005",
       "ssh_port": 22004,
-      "ssh_password": "***",
-      "policy_blocked": false
+      "ssh_password": "***"
     }
   },
   "POST /api/v1/containers/{id}/start": {
@@ -734,30 +727,6 @@ The samples below are grouped by endpoint path. Resource numbers, task IDs, cont
   "PUT /api/v1/images/toggle": {
     "success": true,
     "message": "OK"
-  },
-  "GET /api/v1/security/alerts": {
-    "success": true,
-    "data": []
-  },
-  "POST /api/v1/security/check": {
-    "success": true,
-    "message": "Security check completed"
-  },
-  "GET /api/v1/security/logs?container={name}": {
-    "success": true,
-    "data": []
-  },
-  "GET /api/v1/security/summary": {
-    "success": true,
-    "data": { "critical": 0, "high": 0, "medium": 0, "low": 0, "total_alerts": 0 }
-  },
-  "GET /api/v1/security/settings": {
-    "success": true,
-    "data": { "auto_shutdown": false }
-  },
-  "PUT /api/v1/security/settings": {
-    "success": true,
-    "data": { "auto_shutdown": false }
   },
   "GET /api/v1/swap": {
     "success": true,

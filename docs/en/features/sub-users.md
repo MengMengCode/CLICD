@@ -25,4 +25,4 @@ Rotating the password invalidates old credentials. Audit logs and login logs hel
 
 ## Permission Scope
 
-Sub-users can only manage authorized containers. Global configuration, image management, security policy, API keys, and other administrator features are not exposed to sub-users.
+Sub-users can only manage authorized containers. Global configuration, image management, API keys, and other administrator features are not exposed to sub-users.

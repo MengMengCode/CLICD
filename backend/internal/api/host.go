@@ -1902,7 +1902,7 @@ func detectHostEnvironment() []HostEnvCheck {
 		commandCheck("lxc-start", "LXC 启动工具", true, "lxc-start", ""),
 		commandCheck("iptables", "iptables 网络规则", true, "iptables", ""),
 		commandCheck("ip", "iproute2 网络工具", true, "ip", ""),
-		commandCheck("conntrack", "conntrack 安全扫描", false, "conntrack", ""),
+		commandCheck("conntrack", "conntrack NAT 连接清理", false, "conntrack", ""),
 		commandCheck("virsh", "libvirt virsh", false, "virsh", ""),
 		qemuCheck,
 		commandCheck("genisoimage", "KVM cloud-init ISO 工具", false, "genisoimage", "xorriso/mkisofs 可替代"),

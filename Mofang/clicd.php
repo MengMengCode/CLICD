@@ -989,12 +989,8 @@ function clicd_domain_status_from_container($container)
         return 'Active';
     }
 
-    if (!empty($container['policy_blocked'])) {
-        return 'Suspended';
-    }
-
     $status = strtolower(trim((string)($container['status'] ?? '')));
-    if (in_array($status, ['suspended', 'blocked', 'policy_blocked', 'disabled'], true)) {
+    if (in_array($status, ['suspended', 'blocked', 'disabled'], true)) {
         return 'Suspended';
     }
 
@@ -1612,9 +1608,6 @@ function clicd_ipv6Nat($params)
     if (empty($container)) {
         return ['status' => 'error', 'msg' => '无法读取当前实例，未执行 IPv6 NAT 操作'];
     }
-    if ($action !== 'list' && !empty($container['policy_blocked'])) {
-        return ['status' => 'error', 'msg' => '实例被策略封禁，不能修改映射'];
-    }
     $base = '/api/v1/containers/' . rawurlencode($containerId);
     if ($action === 'sync') {
         $enabled = clicd_param_value($input, 'enabled', null);
@@ -1649,9 +1642,6 @@ function clicd_ipv6Nat($params)
         return ['status' => 'error', 'msg' => clicd_message($res, 'IPv6 NAT 操作失败')];
     }
     $state = clicd_request($params, $base . '/ipv6-port-mappings', [], 'GET', 30);
-    if (clicd_success($state)) {
-        $state['data']['policy_blocked'] = !empty($container['policy_blocked']);
-    }
     return clicd_success($state)
         ? ['status' => 200, 'msg' => 'IPv6 NAT 配置已读取', 'data' => $state['data'] ?? []]
         : ['status' => 'error', 'msg' => clicd_message($state, '读取 IPv6 NAT 失败，请检查节点版本及 IPv6 NAT 设置')];
