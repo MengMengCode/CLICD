@@ -1,9 +1,11 @@
 package kvm
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"clicd/internal/config"
 )
@@ -219,40 +221,84 @@ func CacheDir() string {
 
 func ImagePath(id string) string {
 	img := FindImage(id)
-	ext := ".qcow2"
 	safeID := "__invalid_image_id__"
 	if img != nil {
 		safeID = img.ID
 	}
-	if img != nil && img.IsWindows() {
-		ext = ".iso"
+	// A custom image ID carries no reliable extension hint: a Windows golden
+	// image is commonly shipped as .qcow2 (sysprep clone source) while an
+	// install ISO is .iso. Probing only the extension implied by IsWindows()
+	// made an existing .qcow2 report "not downloaded" whenever the image was
+	// recognised as Windows. Try both, preferring the type-appropriate one.
+	exts := []string{".qcow2", ".iso"}
+	if img != nil && img.downloadExtension() == ".iso" {
+		exts = []string{".iso", ".qcow2"}
 	}
-	fileName := safeID + ext
-	for _, pool := range config.StoragePoolsForContent(config.StorageContentImages) {
-		candidate := filepath.Join(pool.Path, "images", "kvm", fileName)
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate
+	for _, ext := range exts {
+		fileName := safeID + ext
+		for _, pool := range config.StoragePoolsForContent(config.StorageContentImages) {
+			candidate := filepath.Join(pool.Path, "images", "kvm", fileName)
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				return candidate
+			}
+		}
+		legacy := filepath.Join("/var/lib/clicd/kvm/images", fileName)
+		if info, err := os.Stat(legacy); err == nil && !info.IsDir() {
+			return legacy
 		}
 	}
-	legacy := filepath.Join("/var/lib/clicd/kvm/images", fileName)
-	if info, err := os.Stat(legacy); err == nil && !info.IsDir() {
-		return legacy
-	}
-	return filepath.Join(CacheDir(), fileName)
+	return filepath.Join(CacheDir(), safeID+exts[0])
 }
 
 func (image Image) IsWindows() bool {
-	return image.Provisioner == config.KVMProvisionerWindows10 ||
-		image.Provisioner == config.KVMProvisionerWindows11 ||
-		(image.Provisioner == "" && image.Distro == "windows")
+	// Custom images are user-supplied: "distro" is free text and people write
+	// windows / win10 / win11. Previously any non-empty Provisioner (including
+	// a leftover "linux-cloud-init") masked a Windows distro, so the VM was
+	// treated as a Linux guest and start-up failed after ~3 minutes waiting
+	// for an IPv4 address the guest never reports.
+	return isWindowsProvisioner(image.Provisioner) || isWindowsDistro(image.Distro)
+}
+
+func isWindowsProvisioner(p string) bool {
+	switch strings.ToLower(strings.TrimSpace(p)) {
+	case config.KVMProvisionerWindows10, config.KVMProvisionerWindows11:
+		return true
+	}
+	return false
+}
+
+func isWindowsDistro(d string) bool {
+	d = strings.ToLower(strings.TrimSpace(d))
+	return d == "windows" || strings.HasPrefix(d, "win")
 }
 
 func (image Image) IsWindows11() bool {
-	return image.Provisioner == config.KVMProvisionerWindows11 ||
-		(image.Provisioner == "" && image.Distro == "windows" && image.Release == "11")
+	switch strings.ToLower(strings.TrimSpace(image.Provisioner)) {
+	case config.KVMProvisionerWindows11:
+		return true
+	case config.KVMProvisionerWindows10:
+		return false
+	}
+	distro := strings.ToLower(strings.TrimSpace(image.Distro))
+	return image.IsWindows() && (distro == "win11" || distro == "windows11" || strings.TrimSpace(image.Release) == "11")
 }
 
-// IsWindowsImage returns true if the image uses Windows unattended installation.
+// downloadExtension chooses a cache name before the downloaded format is known.
+// Windows disk images are normalized to QCOW2; installation media remain ISO.
+func (image Image) downloadExtension() string {
+	if source, err := url.Parse(image.URL); err == nil {
+		switch strings.ToLower(filepath.Ext(source.Path)) {
+		case ".qcow2", ".img":
+			return ".qcow2"
+		}
+	}
+	if image.IsWindows() {
+		return ".iso"
+	}
+	return ".qcow2"
+}
+
+// IsWindowsImage returns true if the image contains a Windows guest.
 func IsWindowsImage(id string) bool {
 	img := FindImage(id)
 	return img != nil && img.IsWindows()

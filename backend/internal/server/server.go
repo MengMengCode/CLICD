@@ -2,9 +2,9 @@ package server
 
 import (
 	"crypto/tls"
-	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"clicd/internal/api"
@@ -190,8 +190,11 @@ func Run() error {
 	mux := http.NewServeMux()
 	setupRoutes(mux)
 
-	addr := fmt.Sprintf("0.0.0.0:%d", config.AppConfig.Port)
-	log.Printf("CLICD Web Server starting on http://0.0.0.0:%d", config.AppConfig.Port)
+	// The panel used to bind 0.0.0.0 unconditionally, so an operator who only
+	// reaches it over the LAN still exposed it on every interface. Honour
+	// CLICD_BIND_ADDR when set; default to all interfaces for compatibility.
+	addr := serverListenAddress(os.Getenv("CLICD_BIND_ADDR"), config.AppConfig.Port)
+	log.Printf("CLICD Web Server starting on http://%s", addr)
 	log.Printf("Admin user: %s", config.AppConfig.AdminUser)
 
 	server := &http.Server{
@@ -222,7 +225,7 @@ func Run() error {
 				return &cert, nil
 			},
 		}
-		log.Printf("CLICD Web Server SSL enabled on https://0.0.0.0:%d", config.AppConfig.Port)
+		log.Printf("CLICD Web Server SSL enabled on https://%s", addr)
 		return server.ListenAndServeTLS("", "")
 	}
 
