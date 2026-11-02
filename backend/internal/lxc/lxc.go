@@ -266,6 +266,8 @@ type ContainerConfig struct {
 	AssignIPv6           bool                       `json:"assign_ipv6"`
 	IPv6Count            int                        `json:"ipv6_count,omitempty"`
 	IPv6Addresses        []string                   `json:"ipv6_addresses,omitempty"`
+	IPv6PortMappingCount int                        `json:"ipv6_port_mapping_count,omitempty"`
+	IPv6NATSyncIPv4      *bool                      `json:"ipv6_nat_sync_ipv4,omitempty"`
 	SSHAuthMode          string                     `json:"ssh_auth_mode,omitempty"`
 	SSHPassword          string                     `json:"ssh_password,omitempty"`
 	SSHPublicKey         string                     `json:"ssh_public_key,omitempty"`
@@ -412,6 +414,9 @@ func (cfg ContainerConfig) WantsNAT() bool {
 func (cfg *ContainerConfig) NormalizeCreateNATMappings() error {
 	if cfg == nil {
 		return nil
+	}
+	if cfg.IPv6PortMappingCount < 0 || cfg.IPv6PortMappingCount > 64 {
+		return fmt.Errorf("IPv6 port mapping quota must be between 0 and 64")
 	}
 	if !cfg.WantsNAT() {
 		cfg.ExtraPorts = nil
@@ -566,13 +571,11 @@ func (m *Manager) CreateContainer(cfg ContainerConfig) error {
 	}
 	sshPort := 0
 	releaseNATReservation := func() {}
-	if cfg.WantsNAT() {
-		sshPort, releaseNATReservation, err = ReserveCreateNATPorts(cfg)
-		if err != nil {
-			return err
-		}
-		defer releaseNATReservation()
+	sshPort, releaseNATReservation, err = ReserveCreateNATPorts(cfg)
+	if err != nil {
+		return err
 	}
+	defer releaseNATReservation()
 
 	// Allocate ID and build LXC name
 	id := config.AllocateContainerID()
@@ -723,6 +726,8 @@ func (m *Manager) CreateContainer(cfg ContainerConfig) error {
 		MACAddress:           readLXCConfigValue(lxcName, "lxc.net.0.hwaddr"),
 		PublicIPv4s:          publicIPv4s,
 		IPv6Addresses:        ipv6Assignments,
+		IPv6PortMappingLimit: cfg.IPv6PortMappingCount,
+		IPv6NATSyncIPv4:      cfg.IPv6NATSyncIPv4,
 		VNCPort:              0,
 		SSHPort:              sshPort,
 		SSHPassword:          sshPassword,
@@ -735,6 +740,16 @@ func (m *Manager) CreateContainer(cfg ContainerConfig) error {
 		ExpiresAt:            cfg.ExpiresAt,
 	}
 	container.NormalizeNetworkAssignments()
+	if err := prepareIPv6NATAddress(&container); err != nil {
+		_ = m.cleanupContainerStorage(lxcName)
+		return err
+	}
+	if container.IPv6NATAddress != "" {
+		if err := m.applyIPv6Config(lxcName, lxcIPv6AddressStrings(&container)...); err != nil {
+			_ = m.cleanupContainerStorage(lxcName)
+			return err
+		}
+	}
 	cfg.ReportProgress("metadata", "保存容器配置")
 	config.AddContainer(container)
 
@@ -742,8 +757,8 @@ func (m *Manager) CreateContainer(cfg ContainerConfig) error {
 	rootfsPath := filepath.Join(m.LxcPath, lxcName, "rootfs")
 	cfg.ReportProgress("network", "写入容器网络配置")
 	m.preconfigureNetwork(rootfsPath, cfg)
-	if len(ipv6Assignments) > 0 {
-		if err := installContainerIPv6Init(rootfsPath, ipv6AssignmentAddresses(ipv6Assignments)...); err != nil {
+	if hasLXCIPv6(&container) {
+		if err := installContainerIPv6Init(rootfsPath, lxcIPv6AddressStrings(&container)...); err != nil {
 			fmt.Printf("Warning: failed to install IPv6 init in %s: %v\n", lxcName, err)
 		}
 	}
@@ -2109,8 +2124,22 @@ func (m *Manager) StartContainer(id int) error {
 		return fmt.Errorf("container not found: %d", id)
 	}
 	lxcName := c.LxcName()
+	previousNAT6 := c.IPv6NATAddress
+	if err := prepareIPv6NATAddress(c); err != nil {
+		return err
+	}
+	if c.IPv6NATAddress != previousNAT6 {
+		if err := config.SaveConfig(); err != nil {
+			c.IPv6NATAddress = previousNAT6
+			return err
+		}
+	}
 
+	initialIPv6 := *c
 	if err := m.ensureDiskImageMounted(lxcName); err != nil {
+		return err
+	}
+	if err := m.syncLXCIPv6Config(&initialIPv6); err != nil {
 		return err
 	}
 	if m.hasUnprivilegedIDMap(lxcName) && !m.rootfsShifted(lxcName) {
@@ -2132,15 +2161,15 @@ func (m *Manager) StartContainer(id int) error {
 			IOSpeedMBps:      c.IOSpeedMBps,
 			IOReadMBps:       c.IOReadMBps,
 			IOWriteMBps:      c.IOWriteMBps,
-			AssignIPv6:       c.IPv6 != "" || len(c.IPv6Addresses) > 0,
+			AssignIPv6:       hasLXCIPv6(c),
 			ExpiresAt:        c.ExpiresAt,
 		}); err != nil {
 			return err
 		}
 	}
-	if c.IPv6 != "" || len(c.IPv6Addresses) > 0 {
+	if hasLXCIPv6(c) {
 		c.NormalizeNetworkAssignments()
-		if err := m.applyIPv6Config(lxcName, c.IPv6AddressStrings()...); err != nil {
+		if err := m.applyIPv6Config(lxcName, lxcIPv6AddressStrings(c)...); err != nil {
 			return err
 		}
 		if err := m.ApplyIPv6(id); err != nil {
@@ -2206,7 +2235,7 @@ func (m *Manager) StartContainer(id int) error {
 	if err := ApplyFirewallRules(id); err != nil {
 		fmt.Printf("Warning: failed to apply firewall rules: %v\n", err)
 	}
-	if c.IPv6 != "" || len(c.IPv6Addresses) > 0 {
+	if hasLXCIPv6(c) {
 		if err := m.ApplyIPv6(id); err != nil {
 			fmt.Printf("Warning: failed to apply IPv6 routing for %s: %v\n", lxcName, err)
 		}
@@ -2272,7 +2301,7 @@ func (m *Manager) ApplyContainerLimits(c *config.Container) error {
 		IOSpeedMBps:      c.IOSpeedMBps,
 		IOReadMBps:       c.IOReadMBps,
 		IOWriteMBps:      c.IOWriteMBps,
-		AssignIPv6:       c.IPv6 != "" || len(c.IPv6Addresses) > 0,
+		AssignIPv6:       hasLXCIPv6(c),
 		ExpiresAt:        c.ExpiresAt,
 	}); err != nil {
 		return err
@@ -2375,6 +2404,7 @@ func (m *Manager) StopContainer(id int) error {
 		return fmt.Errorf("container not found: %d", id)
 	}
 	lxcName := c.LxcName()
+	ipv6Snapshot := *c
 
 	status, _ := m.GetContainerStatus(lxcName)
 	if status != "running" {
@@ -2382,7 +2412,7 @@ func (m *Manager) StopContainer(id int) error {
 		m.CleanPortMappings(id)
 		CleanFirewallRules(id)
 		m.cleanupBandwidthLimit(lxcName)
-		return nil
+		return m.cleanupIPv6NAT(&ipv6Snapshot)
 	}
 
 	m.CleanPortMappings(id)
@@ -2394,14 +2424,14 @@ func (m *Manager) StopContainer(id int) error {
 	if err != nil {
 		if strings.Contains(string(output), "not running") {
 			config.UpdateContainerStatusAndRestore(id, "stopped", false)
-			return nil
+			return m.cleanupIPv6NAT(&ipv6Snapshot)
 		}
 		return fmt.Errorf("failed to stop container: %v, output: %s", err, string(output))
 	}
 
 	config.UpdateContainerStatusAndRestore(id, "stopped", false)
 	fmt.Printf("Container %d (%s) stopped\n", id, c.Name)
-	return nil
+	return m.cleanupIPv6NAT(&ipv6Snapshot)
 }
 
 // RestartContainer restarts an LXC container by its ID
@@ -2569,7 +2599,7 @@ func (m *Manager) DestroyContainer(id int) error {
 		return fmt.Errorf("container not found: %d", id)
 	}
 	lxcName := c.LxcName()
-	if c.IPv6 != "" || len(c.IPv6Addresses) > 0 {
+	if hasLXCIPv6(c) {
 		c.NormalizeNetworkAssignments()
 		for _, assignment := range c.IPv6Addresses {
 			uplink := assignment.Interface
@@ -3643,15 +3673,15 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...Co
 		IOSpeedMBps:      c.IOSpeedMBps,
 		IOReadMBps:       c.IOReadMBps,
 		IOWriteMBps:      c.IOWriteMBps,
-		AssignIPv6:       c.IPv6 != "" || len(c.IPv6Addresses) > 0,
+		AssignIPv6:       hasLXCIPv6(c),
 		ExpiresAt:        c.ExpiresAt,
 	}
 	if err := m.applyResourceLimits(lxcName, cfg); err != nil {
 		return err
 	}
-	if c.IPv6 != "" || len(c.IPv6Addresses) > 0 {
+	if hasLXCIPv6(c) {
 		c.NormalizeNetworkAssignments()
-		if err := m.applyIPv6Config(lxcName, c.IPv6AddressStrings()...); err != nil {
+		if err := m.applyIPv6Config(lxcName, lxcIPv6AddressStrings(c)...); err != nil {
 			return err
 		}
 	}
@@ -3659,8 +3689,8 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...Co
 	// Set root password and pre-configure network/SSH via chroot.
 	rootfsPath := filepath.Join(m.LxcPath, lxcName, "rootfs")
 	m.preconfigureNetwork(rootfsPath, ContainerConfig{TemplateID: templateID})
-	if c.IPv6 != "" || len(c.IPv6Addresses) > 0 {
-		if err := installContainerIPv6Init(rootfsPath, c.IPv6AddressStrings()...); err != nil {
+	if hasLXCIPv6(c) {
+		if err := installContainerIPv6Init(rootfsPath, lxcIPv6AddressStrings(c)...); err != nil {
 			fmt.Printf("Warning: failed to install IPv6 init in %s after reinstall: %v\n", lxcName, err)
 		}
 	}
@@ -3729,7 +3759,7 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...Co
 	// Apply bandwidth limit after reinstall
 	config.NormalizeContainerResourceAliases(c)
 	m.applyBandwidthLimit(c.LxcName(), c.NetworkDownMbps, c.NetworkUpMbps)
-	if c.IPv6 != "" || len(c.IPv6Addresses) > 0 {
+	if hasLXCIPv6(c) {
 		if err := m.ApplyIPv6(id); err != nil {
 			fmt.Printf("Warning: failed to apply IPv6 after reinstall: %v\n", err)
 		}

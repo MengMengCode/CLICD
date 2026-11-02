@@ -57,6 +57,8 @@ type savedTaskConfig struct {
 	AssignIPv6           bool          `json:"assign_ipv6"`
 	IPv6Count            int           `json:"ipv6_count,omitempty"`
 	IPv6Addresses        []string      `json:"ipv6_addresses,omitempty"`
+	IPv6PortMappingCount int           `json:"ipv6_port_mapping_count,omitempty"`
+	IPv6NATSyncIPv4      *bool         `json:"ipv6_nat_sync_ipv4,omitempty"`
 	SSHAuthMode          string        `json:"ssh_auth_mode,omitempty"`
 	SSHPassword          string        `json:"ssh_password,omitempty"`
 	SSHPublicKey         string        `json:"ssh_public_key,omitempty"`
@@ -484,6 +486,12 @@ func ensureSchemaMigrations() error {
 		{"containers", "lan_ipv4_address", "TEXT NOT NULL DEFAULT ''"},
 		{"containers", "lan_ipv4_prefix_len", "INTEGER NOT NULL DEFAULT 0"},
 		{"containers", "lan_ipv4_gateway", "TEXT NOT NULL DEFAULT ''"},
+		{"containers", "ipv6_nat_address", "TEXT NOT NULL DEFAULT ''"},
+		{"containers", "ipv6_port_mappings", "TEXT"},
+		{"containers", "ipv6_nat_sync_ipv4", "INTEGER"},
+		{"containers", "ipv6_port_mapping_limit", "INTEGER NOT NULL DEFAULT 0"},
+		{"tasks", "cfg_ipv6_port_mapping_count", "INTEGER NOT NULL DEFAULT 0"},
+		{"tasks", "cfg_ipv6_nat_sync_ipv4", "INTEGER"},
 	} {
 		wasAdded, err := ensureColumn(column.table, column.name, column.def)
 		if err != nil {
@@ -625,6 +633,9 @@ func loadConfigFromDB() (*ClicdConfig, bool, error) {
 	if raw := strings.TrimSpace(meta["public_ipv6_prefixes"]); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &cfg.PublicIPv6Prefixes)
 	}
+	if raw := strings.TrimSpace(meta["ipv6_nat"]); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg.IPv6NAT)
+	}
 	if raw := strings.TrimSpace(meta["webssh_allowed_origins"]); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &cfg.WebSSHAllowedOrigins)
 	}
@@ -739,6 +750,7 @@ func saveMeta(tx *sql.Tx) error {
 	sslCertificatesJSON, _ := json.Marshal(AppConfig.SSLCertificates)
 	publicIPv4PoolJSON, _ := json.Marshal(AppConfig.PublicIPv4Pool)
 	publicIPv6PrefixesJSON, _ := json.Marshal(AppConfig.PublicIPv6Prefixes)
+	ipv6NATJSON, _ := json.Marshal(AppConfig.IPv6NAT)
 	webSSHAllowedOriginsJSON, _ := json.Marshal(AppConfig.WebSSHAllowedOrigins)
 	panelAccessPolicyJSON, _ := json.Marshal(AppConfig.PanelAccessPolicy)
 	storagePoolsJSON, _ := json.Marshal(AppConfig.StoragePools)
@@ -765,6 +777,7 @@ func saveMeta(tx *sql.Tx) error {
 		"ssl_certificates":       string(sslCertificatesJSON),
 		"public_ipv4_pool":       string(publicIPv4PoolJSON),
 		"public_ipv6_prefixes":   string(publicIPv6PrefixesJSON),
+		"ipv6_nat":               string(ipv6NATJSON),
 		"webssh_allowed_origins": string(webSSHAllowedOriginsJSON),
 		"panel_access_policy":    string(panelAccessPolicyJSON),
 		"storage_pools":          string(storagePoolsJSON),
@@ -797,8 +810,9 @@ func saveContainers(tx *sql.Tx) error {
 			snapshot_schedule_enabled, snapshot_schedule_interval_hours, snapshot_schedule_time,
 			snapshot_schedule_last_run, snapshot_schedule_next_run, snapshot_schedule_created_by,
 			policy_blocked, policy_blocked_reason, policy_blocked_at,
-			firewall_enabled, firewall_default_action, firewall_rules, allowed_image_ids, image_limit_configured
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			firewall_enabled, firewall_default_action, firewall_rules, allowed_image_ids, image_limit_configured,
+			ipv6_nat_address, ipv6_port_mappings, ipv6_nat_sync_ipv4, ipv6_port_mapping_limit
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			c.ID, c.UUID, c.Name, c.Virtualization, c.LXCName, c.KVMName, c.DiskImage, c.StoragePoolID, c.StoragePath, c.MACAddress, c.Template,
 			c.VCPU, c.RAMMB, c.DiskGB, c.NetworkBWMbps, c.NetworkDownMbps, c.NetworkUpMbps,
 			c.MonthlyTrafficGB, c.TrafficMode, c.TrafficInGB,
@@ -811,6 +825,7 @@ func saveContainers(tx *sql.Tx) error {
 			c.SnapshotScheduleLastRun, c.SnapshotScheduleNextRun, c.SnapshotScheduleCreatedBy,
 			boolInt(c.PolicyBlocked), c.PolicyBlockedReason, c.PolicyBlockedAt,
 			boolInt(c.FirewallEnabled), normalizeFirewallDefaultAction(c.FirewallDefaultAction), marshalFirewallRules(c.FirewallRules), allowedImageIDs, boolInt(c.ImageLimitConfigured),
+			c.IPv6NATAddress, marshalIPv6PortMappings(c.IPv6PortMappings), boolPtrInt(c.IPv6NATSyncIPv4), c.IPv6PortMappingLimit,
 		); err != nil {
 			return err
 		}
@@ -952,8 +967,9 @@ func saveTasksDB(tx *sql.Tx) error {
 			cfg_management_port, cfg_port_mapping_count, cfg_assign_nat, cfg_lan_ipv4_mode, cfg_lan_interface,
 			cfg_lan_ipv4_address, cfg_lan_ipv4_prefix_len, cfg_lan_ipv4_gateway, cfg_snapshot_limit,
 			cfg_assign_ipv4, cfg_ipv4_count, cfg_public_ipv4s, cfg_assign_ipv6, cfg_ipv6_count, cfg_ipv6_addresses,
-			cfg_ssh_auth_mode, cfg_ssh_password, cfg_ssh_public_key, cfg_allowed_image_ids, cfg_image_limit_configured, cfg_expires_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			cfg_ssh_auth_mode, cfg_ssh_password, cfg_ssh_public_key, cfg_allowed_image_ids, cfg_image_limit_configured, cfg_expires_at,
+			cfg_ipv6_port_mapping_count, cfg_ipv6_nat_sync_ipv4
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			task.ID, task.Type, task.ContainerID, task.ContainerName, task.Status, task.Error, task.CreatedAt, task.TemplateID, task.User, task.IP, task.UserAgent,
 			cfg.Name, cfg.Virtualization, cfg.TemplateID, cfg.VCPU, cfg.CPUPercent, cfg.RAMMB, cfg.DiskGB,
 			cfg.NetworkBWMbps, cfg.NetworkDownMbps, cfg.NetworkUpMbps,
@@ -964,6 +980,7 @@ func saveTasksDB(tx *sql.Tx) error {
 			boolInt(cfg.AssignIPv4), cfg.IPv4Count, encodeStringSlice(cfg.PublicIPv4s),
 			boolInt(cfg.AssignIPv6), cfg.IPv6Count, encodeStringSlice(cfg.IPv6Addresses),
 			cfg.SSHAuthMode, cfg.SSHPassword, cfg.SSHPublicKey, encodeStringSlice(cfg.AllowedImageIDs), boolInt(cfg.ImageLimitConfigured), cfg.ExpiresAt,
+			cfg.IPv6PortMappingCount, boolPtrInt(cfg.IPv6NATSyncIPv4),
 		); err != nil {
 			return err
 		}
@@ -1026,7 +1043,8 @@ func loadContainers() ([]Container, error) {
 		snapshot_schedule_enabled, snapshot_schedule_interval_hours, snapshot_schedule_time,
 		snapshot_schedule_last_run, snapshot_schedule_next_run, snapshot_schedule_created_by,
 		policy_blocked, policy_blocked_reason, policy_blocked_at,
-		firewall_enabled, firewall_default_action, firewall_rules, allowed_image_ids, image_limit_configured
+		firewall_enabled, firewall_default_action, firewall_rules, allowed_image_ids, image_limit_configured,
+			ipv6_nat_address, ipv6_port_mappings, ipv6_nat_sync_ipv4, ipv6_port_mapping_limit
 		FROM containers ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -1038,7 +1056,8 @@ func loadContainers() ([]Container, error) {
 		var c Container
 		var scheduleEnabled, policyBlocked, firewallEnabled, imageLimitConfigured, restoreOnHostBoot int
 		var firewallDefaultAction string
-		var firewallRulesJSON, allowedImageIDs sql.NullString
+		var firewallRulesJSON, allowedImageIDs, ipv6PortMappingsJSON sql.NullString
+		var ipv6NATSyncIPv4 sql.NullInt64
 		var storagePoolID, storagePath sql.NullString
 		var lanIPv4Mode, lanInterface sql.NullString
 		var lanIPv4Address, lanIPv4Gateway sql.NullString
@@ -1056,8 +1075,16 @@ func loadContainers() ([]Container, error) {
 			&c.SnapshotScheduleLastRun, &c.SnapshotScheduleNextRun, &c.SnapshotScheduleCreatedBy,
 			&policyBlocked, &c.PolicyBlockedReason, &c.PolicyBlockedAt,
 			&firewallEnabled, &firewallDefaultAction, &firewallRulesJSON, &allowedImageIDs, &imageLimitConfigured,
+			&c.IPv6NATAddress, &ipv6PortMappingsJSON, &ipv6NATSyncIPv4, &c.IPv6PortMappingLimit,
 		); err != nil {
 			return nil, err
+		}
+		if ipv6NATSyncIPv4.Valid {
+			value := ipv6NATSyncIPv4.Int64 != 0
+			c.IPv6NATSyncIPv4 = &value
+		}
+		if ipv6PortMappingsJSON.Valid {
+			_ = json.Unmarshal([]byte(ipv6PortMappingsJSON.String), &c.IPv6PortMappings)
 		}
 		c.StoragePoolID = storagePoolID.String
 		c.StoragePath = storagePath.String
@@ -1282,7 +1309,8 @@ func loadTasks() ([]SavedTask, error) {
 		cfg_management_port, cfg_port_mapping_count, cfg_assign_nat, cfg_lan_ipv4_mode, cfg_lan_interface,
 		cfg_lan_ipv4_address, cfg_lan_ipv4_prefix_len, cfg_lan_ipv4_gateway, cfg_snapshot_limit,
 		cfg_assign_ipv4, cfg_ipv4_count, cfg_public_ipv4s, cfg_assign_ipv6, cfg_ipv6_count, cfg_ipv6_addresses,
-		cfg_ssh_auth_mode, cfg_ssh_password, cfg_ssh_public_key, cfg_allowed_image_ids, cfg_image_limit_configured, cfg_expires_at
+		cfg_ssh_auth_mode, cfg_ssh_password, cfg_ssh_public_key, cfg_allowed_image_ids, cfg_image_limit_configured, cfg_expires_at,
+			cfg_ipv6_port_mapping_count, cfg_ipv6_nat_sync_ipv4
 		FROM tasks ORDER BY created_at, id`)
 	if err != nil {
 		return nil, err
@@ -1296,7 +1324,7 @@ func loadTasks() ([]SavedTask, error) {
 		var assignIPv4, assignIPv6, imageLimitConfigured int
 		var ip, userAgent, publicIPv4s, ipv6Addresses sql.NullString
 		var lanIPv4Mode, lanInterface, lanIPv4Address, lanIPv4Gateway, sshAuthMode, sshPassword, sshPublicKey, allowedImageIDs sql.NullString
-		var assignNAT, lanIPv4PrefixLen, ipv4Count, ipv6Count sql.NullInt64
+		var assignNAT, lanIPv4PrefixLen, ipv4Count, ipv6Count, ipv6NATSyncIPv4 sql.NullInt64
 		if err := rows.Scan(
 			&t.ID, &t.Type, &t.ContainerID, &t.ContainerName, &t.Status, &t.Error, &t.CreatedAt, &t.TemplateID, &t.User, &ip, &userAgent,
 			&cfg.Name, &cfg.Virtualization, &cfg.TemplateID, &cfg.VCPU, &cfg.CPUPercent, &cfg.RAMMB, &cfg.DiskGB,
@@ -1307,8 +1335,13 @@ func loadTasks() ([]SavedTask, error) {
 			&lanIPv4Address, &lanIPv4PrefixLen, &lanIPv4Gateway, &cfg.SnapshotLimit,
 			&assignIPv4, &ipv4Count, &publicIPv4s, &assignIPv6, &ipv6Count, &ipv6Addresses,
 			&sshAuthMode, &sshPassword, &sshPublicKey, &allowedImageIDs, &imageLimitConfigured, &cfg.ExpiresAt,
+			&cfg.IPv6PortMappingCount, &ipv6NATSyncIPv4,
 		); err != nil {
 			return nil, err
+		}
+		if ipv6NATSyncIPv4.Valid {
+			value := ipv6NATSyncIPv4.Int64 != 0
+			cfg.IPv6NATSyncIPv4 = &value
 		}
 		t.IP = ip.String
 		t.UserAgent = userAgent.String
@@ -1514,4 +1547,9 @@ func atob(value string) bool {
 func atoi(value string) int {
 	n, _ := strconv.Atoi(value)
 	return n
+}
+
+func marshalIPv6PortMappings(mappings []PortMapping) string {
+	value, _ := json.Marshal(mappings)
+	return string(value)
 }
