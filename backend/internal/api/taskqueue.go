@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -25,22 +26,31 @@ const (
 )
 
 type Task struct {
-	ID            string              `json:"id"`
-	Type          TaskType            `json:"type"`
-	ContainerID   int                 `json:"container_id"`
-	ContainerName string              `json:"container_name"`
-	Status        string              `json:"status"`
-	Error         string              `json:"error,omitempty"`
-	Stage         string              `json:"stage,omitempty"`
-	StageDetail   string              `json:"stage_detail,omitempty"`
-	CreatedAt     string              `json:"created_at"`
-	TemplateID    string              `json:"template_id,omitempty"`
-	Config        lxc.ContainerConfig `json:"config,omitempty"`
-	Name          string              `json:"name,omitempty"`
-	User          string              `json:"user,omitempty"` // who created this task
-	IP            string              `json:"ip,omitempty"`
-	UserAgent     string              `json:"user_agent,omitempty"`
-	activeKey     string
+	ID              string              `json:"id"`
+	Type            TaskType            `json:"type"`
+	ContainerID     int                 `json:"container_id"`
+	ContainerName   string              `json:"container_name"`
+	Status          string              `json:"status"`
+	Error           string              `json:"error,omitempty"`
+	Stage           string              `json:"stage,omitempty"`
+	StageDetail     string              `json:"stage_detail,omitempty"`
+	CreatedAt       string              `json:"created_at"`
+	TemplateID      string              `json:"template_id,omitempty"`
+	Config          lxc.ContainerConfig `json:"config,omitempty"`
+	Name            string              `json:"name,omitempty"`
+	User            string              `json:"user,omitempty"` // who created this task
+	IP              string              `json:"ip,omitempty"`
+	UserAgent       string              `json:"user_agent,omitempty"`
+	activeKey       string
+	ctx             context.Context
+	cancel          context.CancelFunc
+	deleteRequested bool
+}
+
+type taskRuntime struct {
+	create  func(lxc.ContainerConfig) error
+	start   func(context.Context, int) error
+	destroy func(int) error
 }
 
 type TaskQueue struct {
@@ -54,7 +64,9 @@ type TaskQueue struct {
 	maxConcurrency int
 	activeTasks    int
 	activeTargets  map[string]bool
+	runningTasks   map[*Task]bool
 	stop           chan struct{}
+	runtime        taskRuntime
 }
 
 type TaskQueueSettings struct {
@@ -76,7 +88,13 @@ func newTaskQueue(concurrency int) *TaskQueue {
 		tasks:          make(map[string]*Task),
 		maxConcurrency: config.NormalizeTaskConcurrency(concurrency),
 		activeTargets:  make(map[string]bool),
+		runningTasks:   make(map[*Task]bool),
 		stop:           make(chan struct{}),
+		runtime: taskRuntime{
+			create:  createByRuntime,
+			start:   startByRuntimeContext,
+			destroy: destroyByRuntime,
+		},
 	}
 	q.createCond = sync.NewCond(&q.mu)
 	q.opCond = sync.NewCond(&q.mu)
@@ -111,7 +129,22 @@ func (q *TaskQueue) signalDispatchers() {
 }
 
 func (q *TaskQueue) enqueueTask(task *Task) {
+	if task.ContainerID > 0 && config.AppConfig != nil {
+		if c := config.FindContainer(task.ContainerID); c != nil {
+			task.ContainerName = c.Name
+		}
+	}
 	q.tasks[task.ID] = task
+	if task.Type == TaskDelete {
+		q.cancelTasksForDelete(task)
+	} else {
+		for _, existing := range q.tasks {
+			if existing.Type == TaskDelete && (existing.Status == "pending" || existing.Status == "running") && sameTaskTarget(existing, task) {
+				cancelPendingTaskForDelete(task)
+				return
+			}
+		}
+	}
 	if task.Type == TaskCreate {
 		q.createQueue = append(q.createQueue, task)
 		q.createCond.Signal()
@@ -119,6 +152,67 @@ func (q *TaskQueue) enqueueTask(task *Task) {
 		q.opQueue = append(q.opQueue, task)
 		q.opCond.Signal()
 	}
+}
+
+// Cancellation is requested while enqueueing, even when all dispatch slots are
+// occupied. The active worker retains its target key until it has fully exited.
+func (q *TaskQueue) cancelTasksForDelete(del *Task) {
+	for task := range q.runningTasks {
+		if !sameTaskTarget(task, del) {
+			continue
+		}
+		if task.Type == TaskCreate || task.Type == TaskStart {
+			task.deleteRequested = true
+			if task.cancel != nil {
+				task.cancel()
+			}
+		}
+	}
+	for _, task := range q.tasks {
+		if task.Type != TaskDelete && task.Status == "pending" && sameTaskTarget(task, del) {
+			cancelPendingTaskForDelete(task)
+		}
+	}
+	q.createQueue = pendingTasks(q.createQueue)
+	q.opQueue = pendingTasks(q.opQueue)
+}
+
+func cancelPendingTaskForDelete(task *Task) {
+	task.Status = "failed"
+	task.Error = "cancelled because container deletion was requested"
+	task.Stage = "failed"
+	task.StageDetail = "已取消，等待删除"
+	if task.Type == TaskCreate {
+		name := task.Config.Name
+		if name == "" {
+			name = task.ContainerName
+		}
+		lxc.ReleaseQueuedCreateNATPorts(name)
+	}
+}
+
+func sameTaskTarget(a, b *Task) bool {
+	if a.ContainerID > 0 && b.ContainerID > 0 {
+		return a.ContainerID == b.ContainerID
+	}
+	name := func(task *Task) string {
+		if value := strings.TrimSpace(task.ContainerName); value != "" {
+			return value
+		}
+		return strings.TrimSpace(task.Config.Name)
+	}
+	aName, bName := name(a), name(b)
+	return aName != "" && aName == bName
+}
+
+func pendingTasks(tasks []*Task) []*Task {
+	pending := tasks[:0]
+	for _, task := range tasks {
+		if task.Status == "pending" {
+			pending = append(pending, task)
+		}
+	}
+	return pending
 }
 
 func (q *TaskQueue) Enqueue(containerID int, containerName string, taskType TaskType, templateID string, cfg *lxc.ContainerConfig) []string {
@@ -320,6 +414,9 @@ func (q *TaskQueue) CancelPendingSecurityStops() int {
 func (q *TaskQueue) createDispatcher() {
 	for {
 		task := q.takeNextTask(true)
+		if task == nil {
+			return
+		}
 		go q.runCreateTask(task)
 	}
 }
@@ -327,6 +424,9 @@ func (q *TaskQueue) createDispatcher() {
 func (q *TaskQueue) opDispatcher() {
 	for {
 		task := q.takeNextTask(false)
+		if task == nil {
+			return
+		}
 		go q.runOperationTask(task)
 	}
 }
@@ -339,12 +439,27 @@ func (q *TaskQueue) takeNextTask(create bool) *Task {
 		cond = q.createCond
 	}
 	for {
+		select {
+		case <-q.stop:
+			return nil
+		default:
+		}
 		queue := q.opQueue
 		if create {
 			queue = q.createQueue
 		}
 		if q.activeTasks < q.maxConcurrency {
-			if index := runnableTaskIndex(queue, q.activeTargets); index >= 0 {
+			index := runnableTaskIndex(queue, q.activeTargets)
+			deleteIndex := runnableDeleteTaskIndex(q.opQueue, q.activeTargets)
+			if deleteIndex >= 0 {
+				if create {
+					index = -1
+					q.opCond.Signal()
+				} else {
+					index = deleteIndex
+				}
+			}
+			if index >= 0 {
 				task := queue[index]
 				queue = append(queue[:index], queue[index+1:]...)
 				if create {
@@ -357,6 +472,8 @@ func (q *TaskQueue) takeNextTask(create bool) *Task {
 				task.Stage = "preparing"
 				task.StageDetail = "准备初始化环境"
 				task.activeKey = taskConcurrencyKey(task)
+				task.ctx, task.cancel = context.WithCancel(context.Background())
+				q.runningTasks[task] = true
 				q.activeTargets[task.activeKey] = true
 				q.activeTasks++
 				q.persistTasks()
@@ -365,6 +482,15 @@ func (q *TaskQueue) takeNextTask(create bool) *Task {
 		}
 		cond.Wait()
 	}
+}
+
+func runnableDeleteTaskIndex(queue []*Task, activeTargets map[string]bool) int {
+	for index, task := range queue {
+		if task.Type == TaskDelete && !activeTargets[taskConcurrencyKey(task)] {
+			return index
+		}
+	}
+	return -1
 }
 
 func runnableTaskIndex(queue []*Task, activeTargets map[string]bool) int {
@@ -380,31 +506,27 @@ func taskConcurrencyKey(task *Task) string {
 	if task == nil {
 		return "task:nil"
 	}
-	// Delete tasks must never be serialized behind a create/start task for the
-	// same container. A create task that waits for a guest IP (KVM VMs whose
-	// OS never reports an address) can occupy the per-container slot for
-	// minutes and used to leave every subsequent delete pending forever.
-	// Giving deletes their own key keeps them runnable so a wedged VM can
-	// always be torn down.
-	prefix := "name:"
-	if task.Type == TaskDelete {
-		prefix = "delete:"
-	}
+	// A delete cancels active startup work, then waits on the same key until
+	// that worker has exited; resource removal must never race initialization.
 	name := strings.TrimSpace(task.ContainerName)
 	if name == "" {
 		name = strings.TrimSpace(task.Config.Name)
 	}
 	if name != "" {
-		return prefix + strings.ToLower(name)
+		return "name:" + strings.ToLower(name)
 	}
 	if task.ContainerID > 0 {
-		return prefix + fmt.Sprintf("id:%d", task.ContainerID)
+		return fmt.Sprintf("id:%d", task.ContainerID)
 	}
-	return prefix + "task:" + task.ID
+	return "task:" + task.ID
 }
 
 func (q *TaskQueue) finishTask(task *Task, status string, taskErr error) {
 	q.mu.Lock()
+	if task.cancel != nil {
+		task.cancel()
+		task.cancel = nil
+	}
 	task.Status = status
 	if taskErr != nil {
 		task.Error = taskErr.Error()
@@ -423,6 +545,7 @@ func (q *TaskQueue) finishTask(task *Task, status string, taskErr error) {
 		delete(q.activeTargets, task.activeKey)
 		task.activeKey = ""
 	}
+	delete(q.runningTasks, task)
 	if q.activeTasks > 0 {
 		q.activeTasks--
 	}
@@ -448,6 +571,10 @@ func (q *TaskQueue) runCreateTask(task *Task) {
 	}
 	task.Config.NormalizeResourceAliases()
 	cfg := task.Config
+	ctx := task.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	q.mu.Unlock()
 	cfg.Progress = func(stage, detail string) {
 		q.updateTaskStage(task, stage, detail)
@@ -458,9 +585,14 @@ func (q *TaskQueue) runCreateTask(task *Task) {
 		q.finishTask(task, "failed", err)
 		return
 	}
+	if err := ctx.Err(); err != nil {
+		lxc.ReleaseQueuedCreateNATPorts(cfg.Name)
+		q.finishTask(task, "failed", err)
+		return
+	}
 	c := config.FindContainerByName(cfg.Name)
 	if c == nil {
-		if err := createByRuntime(cfg); err != nil {
+		if err := q.runtime.create(cfg); err != nil {
 			config.AddAuditLog(string(task.Type), cfg.Name, "失败: "+err.Error(), "admin")
 			q.finishTask(task, "failed", err)
 			return
@@ -477,18 +609,24 @@ func (q *TaskQueue) runCreateTask(task *Task) {
 		lxc.ReleaseQueuedCreateNATPorts(cfg.Name)
 	}
 
+	// FindContainer returns a slice-backed pointer. Another container's removal
+	// can shift that slice while startup waits, so never retain it for cleanup.
+	containerID, containerName := c.ID, c.Name
 	q.mu.Lock()
-	task.ContainerID = c.ID
-	task.ContainerName = c.Name
+	task.ContainerID = containerID
+	task.ContainerName = containerName
 	q.mu.Unlock()
 	startDetail := "启动容器并等待网络就绪"
 	if strings.EqualFold(cfg.Virtualization, config.VirtualizationKVM) {
 		startDetail = "启动虚拟机并等待网络就绪"
 	}
 	q.updateTaskStage(task, "starting", startDetail)
-	if err := startByRuntime(c.ID); err != nil {
-		if createdByTask {
-			_ = destroyByRuntime(c.ID)
+	if err := q.runtime.start(ctx, containerID); err != nil {
+		q.mu.Lock()
+		deleting := task.deleteRequested
+		q.mu.Unlock()
+		if createdByTask && !deleting {
+			_ = q.runtime.destroy(containerID)
 		}
 		config.AddAuditLog(string(task.Type), task.ContainerName, "初始化失败: "+err.Error(), "admin")
 		q.finishTask(task, "failed", err)
@@ -501,6 +639,10 @@ func (q *TaskQueue) runCreateTask(task *Task) {
 func (q *TaskQueue) runOperationTask(task *Task) {
 	q.mu.Lock()
 	err := resolveTaskContainer(task)
+	ctx := task.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	q.mu.Unlock()
 	skipped := false
 	if err == nil && (task.Type == TaskStart || task.Type == TaskRestart || task.Type == TaskReinstall) {
@@ -519,13 +661,13 @@ func (q *TaskQueue) runOperationTask(task *Task) {
 	if err == nil && !skipped {
 		switch task.Type {
 		case TaskStart:
-			err = startByRuntime(task.ContainerID)
+			err = q.runtime.start(ctx, task.ContainerID)
 		case TaskStop:
 			err = stopByRuntime(task.ContainerID)
 		case TaskRestart:
 			err = restartByRuntime(task.ContainerID)
 		case TaskDelete:
-			err = destroyByRuntime(task.ContainerID)
+			err = q.runtime.destroy(task.ContainerID)
 			if err == nil {
 				time.Sleep(time.Second)
 				if config.FindContainer(task.ContainerID) != nil {

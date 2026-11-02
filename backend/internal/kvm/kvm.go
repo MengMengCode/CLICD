@@ -167,11 +167,7 @@ func DownloadImageWithProgress(ctx context.Context, image Image, progress Downlo
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return err
 	}
-	ext := ".qcow2"
-	if image.IsWindows() {
-		ext = ".iso"
-	}
-	target := filepath.Join(cacheDir, image.ID+ext)
+	target := filepath.Join(cacheDir, image.ID+image.downloadExtension())
 	if ok, _ := ImageDownloadedInfo(image.ID); ok {
 		return nil
 	}
@@ -186,12 +182,11 @@ func DownloadImageWithProgress(ctx context.Context, image Image, progress Downlo
 	}
 	tmp := target + ".tmp"
 	_ = os.Remove(tmp)
+	var validate downloadResponseValidator
 	if image.IsWindows() {
-		if err := downloadFileWithValidator(ctx, image.URL, tmp, validateWindowsISOResponse(target), progress); err != nil {
-			_ = os.Remove(tmp)
-			return err
-		}
-	} else if err := downloadFile(ctx, image.URL, tmp, progress); err != nil {
+		validate = validateWindowsImageResponse(target)
+	}
+	if err := downloadFileWithValidator(ctx, image.URL, tmp, validate, progress); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
@@ -205,7 +200,13 @@ func DownloadImageWithProgress(ctx context.Context, image Image, progress Downlo
 			return err
 		}
 	}
-	if image.IsWindows() {
+	qcow2, err := isQCOW2File(tmp)
+	if err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if image.IsWindows() && !qcow2 {
+		target = filepath.Join(cacheDir, image.ID+".iso")
 		if err := validateWindowsISO(tmp, target); err != nil {
 			_ = os.Remove(tmp)
 			return err
@@ -216,6 +217,7 @@ func DownloadImageWithProgress(ctx context.Context, image Image, progress Downlo
 			return err
 		}
 	} else {
+		target = filepath.Join(cacheDir, image.ID+".qcow2")
 		if progress != nil {
 			progress(DownloadProgress{Stage: "converting", Percent: 100})
 		}
@@ -227,6 +229,24 @@ func DownloadImageWithProgress(ctx context.Context, image Image, progress Downlo
 	}
 	_ = os.Chmod(target, 0644)
 	return nil
+}
+
+// isQCOW2File checks the format header rather than inferring the guest disk
+// format from its operating system or the download URL.
+func isQCOW2File(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	var header [4]byte
+	if _, err := io.ReadFull(f, header[:]); err != nil {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return false, nil
+		}
+		return false, err
+	}
+	return bytes.Equal(header[:], []byte{'Q', 'F', 'I', 0xfb}), nil
 }
 
 func verifyFileSHA256(path, expected string) error {
@@ -323,26 +343,11 @@ func downloadFileWithValidator(ctx context.Context, url, target string, validate
 	return out.Sync()
 }
 
-func validateWindowsISOResponse(target string) downloadResponseValidator {
+func validateWindowsImageResponse(target string) downloadResponseValidator {
 	return func(resp *http.Response) error {
 		contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
 		if strings.Contains(contentType, "text/html") || strings.Contains(contentType, "text/plain") {
-			return fmt.Errorf("downloaded Windows image response was %q instead of an ISO. Microsoft download links may be region/time limited; manually upload the ISO to: %s", contentType, target)
-		}
-		finalURL := ""
-		if resp.Request != nil && resp.Request.URL != nil {
-			finalURL = resp.Request.URL.String()
-		}
-		path := ""
-		if resp.Request != nil && resp.Request.URL != nil {
-			path = strings.ToLower(resp.Request.URL.Path)
-		}
-		looksLikeISO := strings.HasSuffix(path, ".iso") ||
-			strings.Contains(contentType, "iso") ||
-			strings.Contains(contentType, "octet-stream") ||
-			contentType == ""
-		if !looksLikeISO {
-			return fmt.Errorf("Microsoft redirect did not appear to return an ISO (final URL: %s, Content-Type: %s). Please manually upload the ISO to: %s", finalURL, contentType, target)
+			return fmt.Errorf("downloaded Windows image response was %q instead of ISO or QCOW2 media; manually upload the image to: %s", contentType, target)
 		}
 		return nil
 	}
@@ -394,7 +399,7 @@ func (m *Manager) CreateContainer(cfg lxc.ContainerConfig) error {
 	if ok, _ := ImageDownloadedInfo(image.ID); !ok {
 		return fmt.Errorf("KVM image is not downloaded: %s", cfg.TemplateID)
 	}
-	if err := m.validateHost(IsWindowsImage(image.ID)); err != nil {
+	if err := m.validateHost(image.ID); err != nil {
 		return err
 	}
 	if !config.IsValidContainerName(cfg.Name) {
@@ -473,7 +478,7 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 	diskPath := filepath.Join(m.instanceDir(vmName), "disk.qcow2")
 	seedPath := filepath.Join(m.instanceDir(vmName), "seed.iso")
 	mac := randomMAC()
-	sshPassword := generateRandomString(16)
+	sshPassword := ""
 	sshPublicKey := ""
 	sshAuthMode := ""
 	if !IsWindowsImage(image.ID) {
@@ -518,19 +523,30 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 			cfg.DiskGB = float64(minDiskGB)
 		}
 		cfg.ReportProgress("disk", "创建 Windows 虚拟磁盘")
-		if err := createEmptyDisk(diskPath, cfg.DiskGB); err != nil {
-			return nil, err
+		installISO := windowsInstallISOPath(image.ID)
+		unattendPath := ""
+		if installISO != "" {
+			if err := createEmptyDisk(diskPath, cfg.DiskGB); err != nil {
+				return nil, err
+			}
+			if err := ensureVirtioWinISO(); err != nil {
+				return nil, err
+			}
+			winAdminPassword = generateWindowsPassword()
+			unattendPath = filepath.Join(m.instanceDir(vmName), "unattend.iso")
+			cfg.ReportProgress("cloud_init", "生成 Windows 自动应答配置")
+			if err := createWindowsUnattendISO(unattendPath, cfg.Name, winAdminPassword, mac, ipv6List, ipv4List, IsWindows11Image(image.ID)); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := createOverlayDisk(ImagePath(image.ID), diskPath, cfg.DiskGB); err != nil {
+				return nil, err
+			}
+			// A golden disk retains its existing guest configuration. Do not
+			// advertise a newly generated password that was never installed.
+			sshPassword = cfg.SSHPassword
 		}
-		if err := ensureVirtioWinISO(); err != nil {
-			return nil, err
-		}
-		winAdminPassword = generateWindowsPassword()
-		unattendPath := filepath.Join(m.instanceDir(vmName), "unattend.iso")
-		cfg.ReportProgress("cloud_init", "生成 Windows 自动应答配置")
-		if err := createWindowsUnattendISO(unattendPath, cfg.Name, winAdminPassword, mac, ipv6List, ipv4List, IsWindows11Image(image.ID)); err != nil {
-			return nil, err
-		}
-		xml = windowsDomainXML(vmName, int(cfg.VCPU), cfg.RAMMB, diskPath, ImagePath(image.ID), unattendPath, mac, cfg.IOReadMBps, cfg.IOWriteMBps, cfg.NetworkDownMbps, cfg.NetworkUpMbps)
+		xml = windowsDomainXML(vmName, int(cfg.VCPU), cfg.RAMMB, diskPath, installISO, unattendPath, mac, cfg.IOReadMBps, cfg.IOWriteMBps, cfg.NetworkDownMbps, cfg.NetworkUpMbps)
 	} else {
 		if image.Desktop != "" {
 			if cfg.RAMMB < 2048 {
@@ -652,21 +668,33 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 }
 
 func (m *Manager) StartContainer(id int) error {
-	c := config.FindContainer(id)
-	if c == nil {
+	return m.StartContainerContext(context.Background(), id)
+}
+
+// StartContainerContext lets a queued deletion interrupt guest readiness
+// waits. The queue must wait for this call to return before removing the VM.
+func (m *Manager) StartContainerContext(ctx context.Context, id int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	stored := config.FindContainer(id)
+	if stored == nil {
 		return fmt.Errorf("container not found: %d", id)
 	}
-	if err := m.validateHost(IsWindowsImage(c.Template)); err != nil {
+	// Config deletion compacts the container slice. Never keep its element
+	// pointer across guest polling or external commands.
+	c := *stored
+	if err := m.validateHost(c.Template); err != nil {
 		return err
 	}
 	lxc.EnsureAssignedPublicIPv4s(c.PublicIPv4s)
 	name := c.VirshName()
-	if err := m.ensureDomainDefinition(c); err != nil {
+	if err := m.ensureDomainDefinition(&c); err != nil {
 		fmt.Printf("Warning: failed to refresh KVM domain definition for %s: %v\n", name, err)
 	}
 	status, _ := m.GetContainerStatus(name)
 	if status != "running" {
-		cmd := exec.Command("virsh", "start", name)
+		cmd := exec.CommandContext(ctx, "virsh", "start", name)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			if !strings.Contains(strings.ToLower(string(output)), "domain is already active") {
 				return fmt.Errorf("virsh start failed: %v, output: %s", err, string(output))
@@ -678,31 +706,27 @@ func (m *Manager) StartContainer(id int) error {
 	if _, err := m.RefreshVNCPort(id); err != nil {
 		fmt.Printf("Warning: failed to refresh VNC port for %s: %v\n", name, err)
 	}
-	_ = exec.Command("virsh", "dommemstat", name, "--period", "10", "--live").Run()
-	_ = exec.Command("virsh", "dommemstat", name, "--period", "10", "--config").Run()
+	_ = exec.CommandContext(ctx, "virsh", "dommemstat", name, "--period", "10", "--live").Run()
+	_ = exec.CommandContext(ctx, "virsh", "dommemstat", name, "--period", "10", "--config").Run()
 	// Windows VMs need manual install via VNC — don't require IP on first boot
 	isWindows := IsWindowsImage(c.Template)
+	attempts := 90
 	if isWindows {
-		for i := 0; i < 15; i++ {
-			if ip, err := m.GetContainerIP(name); err == nil && ip != "" {
-				c.IP = ip
-				config.SaveConfig()
-				break
-			}
-			time.Sleep(2 * time.Second)
+		attempts = 15
+	}
+	ip, err := m.waitForContainerIP(ctx, name, attempts)
+	if err != nil {
+		return err
+	}
+	if ip != "" {
+		c.IP = ip
+		if current := config.FindContainer(id); current != nil {
+			current.IP = ip
+			config.SaveConfig()
 		}
-	} else {
-		for i := 0; i < 90; i++ {
-			if ip, err := m.GetContainerIP(name); err == nil && ip != "" {
-				c.IP = ip
-				config.SaveConfig()
-				break
-			}
-			time.Sleep(2 * time.Second)
-		}
-		if c.IP == "" {
-			return fmt.Errorf("KVM VM %s started but no IPv4 address was detected", c.Name)
-		}
+	}
+	if !isWindows && c.IP == "" {
+		return fmt.Errorf("KVM VM %s started but no IPv4 address was detected", c.Name)
 	}
 	// Apply port mappings if IP is available (Linux: always; Windows: after installation)
 	if c.IP != "" {
@@ -715,17 +739,48 @@ func (m *Manager) StartContainer(id int) error {
 	}
 	// Wait for cloud-init to finish and SSH to be reachable (password-only mode)
 	if !isWindows && c.IP != "" {
-		m.waitForCloudInitReady(name, c.IP, c.SSHPassword)
+		if err := m.waitForCloudInitReady(ctx, name, c.IP, c.SSHPassword); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	config.UpdateContainerStatusAndRestore(id, "running", true)
 	if c.IPv6 != "" || len(c.IPv6Addresses) > 0 {
-		if err := m.applyIPv6Runtime(c); err != nil {
+		if err := m.applyIPv6Runtime(&c); err != nil {
 			return err
 		}
 	} else {
 		ensureKVMIPv6DenyRule("virbr0", c.MACAddress)
 	}
 	return nil
+}
+
+func (m *Manager) waitForContainerIP(ctx context.Context, name string, attempts int) (string, error) {
+	for i := 0; i < attempts; i++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if ip, err := m.getContainerIPContext(ctx, name); err == nil && ip != "" {
+			return ip, nil
+		}
+		if err := waitForContext(ctx, 2*time.Second); err != nil {
+			return "", err
+		}
+	}
+	return "", nil
+}
+
+func waitForContext(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // waitForCloudInitReady waits for cloud-init to finish and SSH to be reachable.
@@ -743,9 +798,9 @@ func tofuHostKeyCallback(hostname string, remote net.Addr, key ssh.PublicKey) er
 	return nil
 }
 
-func (m *Manager) waitForCloudInitReady(vmName, ip, password string) {
+func (m *Manager) waitForCloudInitReady(ctx context.Context, vmName, ip, password string) error {
 	if ip == "" || password == "" {
-		return
+		return ctx.Err()
 	}
 	deadline := time.Now().Add(3 * time.Minute)
 	target := net.JoinHostPort(ip, "22")
@@ -753,7 +808,10 @@ func (m *Manager) waitForCloudInitReady(vmName, ip, password string) {
 	qgaAttempted := false
 
 	for time.Now().Before(deadline) {
-		client, err := ssh.Dial("tcp", target, &ssh.ClientConfig{
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		client, err := dialReadinessSSH(ctx, target, &ssh.ClientConfig{
 			User:            "root",
 			Auth:            []ssh.AuthMethod{ssh.Password(password)},
 			HostKeyCallback: tofuHostKeyCallback,
@@ -764,26 +822,52 @@ func (m *Manager) waitForCloudInitReady(vmName, ip, password string) {
 			if !sshWasUp {
 				sshWasUp = true
 				fmt.Printf("KVM %s SSH up, waiting for cloud-init to settle...\n", vmName)
-				time.Sleep(10 * time.Second)
+				if err := waitForContext(ctx, 10*time.Second); err != nil {
+					return err
+				}
 				continue
 			}
 			fmt.Printf("KVM %s ready\n", vmName)
-			return
+			return nil
 		}
 
 		// Try guest agent ONCE to speed things up, with timeout to avoid blocking
-		if !qgaAttempted && qemuGuestPing(vmName) == nil {
+		if !qgaAttempted && qemuGuestPingContext(ctx, vmName) == nil {
 			qgaAttempted = true
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			cmd := exec.CommandContext(ctx, "virsh", "qemu-agent-command", vmName,
+			agentCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			cmd := exec.CommandContext(agentCtx, "virsh", "qemu-agent-command", vmName,
 				`{"execute":"guest-exec","arguments":{"path":"/bin/sh","arg":["-c","cloud-init status --wait 2>/dev/null; systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null; true"],"capture-output":false}}`)
 			cmd.Run()
 			cancel()
 		}
 
-		time.Sleep(5 * time.Second)
+		if err := waitForContext(ctx, 5*time.Second); err != nil {
+			return err
+		}
 	}
 	fmt.Printf("Warning: KVM %s not ready after 3 minutes\n", vmName)
+	return nil
+}
+
+func dialReadinessSSH(ctx context.Context, target string, clientConfig *ssh.ClientConfig) (*ssh.Client, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", target)
+	if err != nil {
+		return nil, err
+	}
+	stopClose := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopClose()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	sshConn, channels, requests, err := ssh.NewClientConn(conn, target, clientConfig)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return ssh.NewClient(sshConn, channels, requests), nil
 }
 
 func (m *Manager) StopContainer(id int) error {
@@ -791,21 +875,32 @@ func (m *Manager) StopContainer(id int) error {
 	if c == nil {
 		return fmt.Errorf("container not found: %d", id)
 	}
+	// Firewall cleanup invokes external commands. Capture the immutable
+	// domain name before another deletion can compact the config slice.
+	name := c.VirshName()
 	_ = lxc.NewManager().CleanPortMappings(id)
 	lxc.CleanFirewallRules(id)
-	name := c.VirshName()
-	status, _ := m.GetContainerStatus(name)
-	if status != "running" {
+	status, err := m.GetContainerStatus(name)
+	if err != nil {
+		return fmt.Errorf("cannot inspect KVM VM %s before stopping: %w", name, err)
+	}
+	if status == "stopped" {
 		config.UpdateContainerStatusAndRestore(id, "stopped", false)
 		return nil
 	}
-	exec.Command("virsh", "shutdown", name).Run()
-	for i := 0; i < 20; i++ {
-		if status, _ := m.GetContainerStatus(name); status != "running" {
-			config.UpdateContainerStatusAndRestore(id, "stopped", false)
-			return nil
+	if status == "running" {
+		exec.Command("virsh", "shutdown", name).Run()
+		for i := 0; i < 20; i++ {
+			status, err := m.GetContainerStatus(name)
+			if err != nil {
+				return fmt.Errorf("cannot inspect KVM VM %s during shutdown: %w", name, err)
+			}
+			if status == "stopped" {
+				config.UpdateContainerStatusAndRestore(id, "stopped", false)
+				return nil
+			}
+			time.Sleep(1 * time.Second)
 		}
-		time.Sleep(1 * time.Second)
 	}
 	cmd := exec.Command("virsh", "destroy", name)
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -829,20 +924,30 @@ func (m *Manager) DestroyContainer(id int) error {
 		return fmt.Errorf("container not found: %d", id)
 	}
 	name := c.VirshName()
-	removeKVMIPv6Runtime(c)
-	// A KVM VM can be wedged (shutdown ignored, virsh destroy failing, or the
-	// domain already half-removed). Stop failures must not leave the domain
-	// behind, which previously surfaced as "container still exists after
-	// delete" while the config entry stayed in place.
-	stopErr := m.StopContainer(id)
-	if stopErr != nil {
-		fmt.Printf("Warning: failed to stop KVM VM %s before destroy: %v\n", name, stopErr)
+	container := *c
+	instanceDir := m.instanceDir(name)
+	// Undefining an active domain can succeed without stopping QEMU. Keep
+	// its disk and config until shutdown and undefinition both succeed.
+	exists, err := domainExists(name)
+	if err != nil {
+		return err
 	}
-	// Always try to remove the domain definition even if the VM could not be
-	// stopped cleanly; virsh undefine on a running domain is a no-op error we
-	// can ignore once destroy has been attempted.
-	_ = undefineDomain(name)
-	if err := os.RemoveAll(m.instanceDir(name)); err != nil {
+	if exists {
+		if err := m.StopContainer(id); err != nil {
+			return fmt.Errorf("failed to stop KVM VM %s before deletion: %w", name, err)
+		}
+		if status, err := m.GetContainerStatus(name); err != nil || status != "stopped" {
+			if err != nil {
+				return fmt.Errorf("cannot verify KVM VM %s is stopped: %w", name, err)
+			}
+			return fmt.Errorf("KVM VM %s is still active (%s)", name, status)
+		}
+		if err := undefineDomain(name); err != nil {
+			return fmt.Errorf("failed to undefine KVM VM %s: %w", name, err)
+		}
+	}
+	removeKVMIPv6Runtime(&container)
+	if err := os.RemoveAll(instanceDir); err != nil {
 		return err
 	}
 	if !config.RemoveContainer(id) {
@@ -989,7 +1094,7 @@ func (m *Manager) ApplyContainerLimits(c *config.Container) error {
 	}
 	var xml string
 	if IsWindowsImage(c.Template) {
-		winISO := ImagePath(c.Template)
+		winISO := windowsInstallISOPath(c.Template)
 		unattendISO := existingWindowsUnattendISO(m.instanceDir(c.VirshName()))
 		xml = windowsDomainXML(c.VirshName(), int(c.VCPU), c.RAMMB, c.DiskImage, winISO, unattendISO, c.MACAddress, c.IOReadMBps, c.IOWriteMBps, c.NetworkDownMbps, c.NetworkUpMbps)
 	} else {
@@ -1015,7 +1120,7 @@ func (m *Manager) ensureDomainDefinition(c *config.Container) error {
 	var xml string
 	xmlPath := filepath.Join(m.instanceDir(c.VirshName()), "domain.xml")
 	if IsWindowsImage(c.Template) {
-		winISO := ImagePath(c.Template)
+		winISO := windowsInstallISOPath(c.Template)
 		unattendISO := existingWindowsUnattendISO(m.instanceDir(c.VirshName()))
 		xml = windowsDomainXML(c.VirshName(), int(c.VCPU), c.RAMMB, c.DiskImage, winISO, unattendISO, c.MACAddress, c.IOReadMBps, c.IOWriteMBps, c.NetworkDownMbps, c.NetworkUpMbps)
 	} else {
@@ -1620,7 +1725,7 @@ func shouldApplyPortMappings(id int, force bool) bool {
 }
 
 func (m *Manager) GetContainerStatus(name string) (string, error) {
-	cmd := exec.Command("virsh", "domstate", name)
+	cmd := virshCLocaleCommand("domstate", name)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -1636,8 +1741,15 @@ func (m *Manager) GetContainerStatus(name string) (string, error) {
 }
 
 func (m *Manager) GetContainerIP(name string) (string, error) {
+	return m.getContainerIPContext(context.Background(), name)
+}
+
+func (m *Manager) getContainerIPContext(ctx context.Context, name string) (string, error) {
 	for _, source := range []string{"lease", "arp", "agent"} {
-		cmd := exec.Command("virsh", "domifaddr", name, "--source", source)
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		cmd := exec.CommandContext(ctx, "virsh", "domifaddr", name, "--source", source)
 		out, err := cmd.Output()
 		if err != nil {
 			continue
@@ -1646,15 +1758,15 @@ func (m *Manager) GetContainerIP(name string) (string, error) {
 			return ip, nil
 		}
 	}
-	if mac := domainMACAddress(name); mac != "" {
-		if ip := dhcpLeaseIP("default", mac); ip != "" {
+	if mac := domainMACAddressContext(ctx, name); mac != "" {
+		if ip := dhcpLeaseIPContext(ctx, "default", mac); ip != "" {
 			return ip, nil
 		}
 	}
 	return "", fmt.Errorf("no IPv4 address found for %s", name)
 }
 
-func (m *Manager) validateHost(skipCloudInit bool) error {
+func (m *Manager) validateHost(imageID string) error {
 	for _, name := range []string{"virsh", "qemu-img"} {
 		if err := requireCommand(name); err != nil {
 			return err
@@ -1663,12 +1775,14 @@ func (m *Manager) validateHost(skipCloudInit bool) error {
 	if err := requireCommand(kvmEmulatorCommand()); err != nil {
 		return err
 	}
-	if skipCloudInit {
+	if IsWindowsImage(imageID) {
 		if runtime.GOARCH != "amd64" {
 			return fmt.Errorf("Windows KVM is currently supported only on x86_64/amd64 hosts")
 		}
-		if err := requireAnyCommand("genisoimage", "mkisofs", "xorriso"); err != nil {
-			return fmt.Errorf("%w (needed to generate Windows unattended setup ISO)", err)
+		if windowsInstallISOPath(imageID) != "" {
+			if err := requireAnyCommand("genisoimage", "mkisofs", "xorriso"); err != nil {
+				return fmt.Errorf("%w (needed to generate Windows unattended setup ISO)", err)
+			}
 		}
 	} else {
 		if err := requireCommand("cloud-localds"); err != nil {
@@ -2489,9 +2603,27 @@ func windowsDomainXML(name string, vcpu int, ramMB int, diskPath, winISOPath, un
 %s
       </bandwidth>`, strings.Join(parts, "\n"))
 	}
-	virtioWinISO := virtioWinISOPath()
+	bootOrder := 1
+	installDisks := ""
+	if winISOPath != "" {
+		bootOrder = 2
+		installDisks = fmt.Sprintf(`
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='%s'/>
+      <target dev='hdb' bus='ide'/>
+      <readonly/>
+      <boot order='1'/>
+    </disk>
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='%s'/>
+      <target dev='hdc' bus='ide'/>
+      <readonly/>
+    </disk>`, xmlEscape(winISOPath), xmlEscape(virtioWinISOPath()))
+	}
 	unattendDisk := ""
-	if strings.TrimSpace(unattendISOPath) != "" {
+	if winISOPath != "" && strings.TrimSpace(unattendISOPath) != "" {
 		unattendDisk = fmt.Sprintf(`
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
@@ -2534,21 +2666,8 @@ func windowsDomainXML(name string, vcpu int, ramMB int, diskPath, winISOPath, un
       <driver name='qemu' type='qcow2' cache='none'/>
       <source file='%s'/>
       <target dev='sda' bus='sata'/>
-      <boot order='2'/>%s
-    </disk>
-    <disk type='file' device='cdrom'>
-      <driver name='qemu' type='raw'/>
-      <source file='%s'/>
-      <target dev='hdb' bus='ide'/>
-      <readonly/>
-      <boot order='1'/>
-    </disk>
-    <disk type='file' device='cdrom'>
-      <driver name='qemu' type='raw'/>
-      <source file='%s'/>
-      <target dev='hdc' bus='ide'/>
-      <readonly/>
-    </disk>%s
+      <boot order='%d'/>%s
+    </disk>%s%s
     <interface type='network'>
       <mac address='%s'/>
       <source network='default'/>
@@ -2562,8 +2681,18 @@ func windowsDomainXML(name string, vcpu int, ramMB int, diskPath, winISOPath, un
     <video><model type='qxl'/></video>
   </devices>
 </domain>`, xmlEscape(name), domainUUIDXML(name), ramMB, ramMB, vcpu, vcpu, vcpu,
-		xmlEscape(diskPath), iotune,
-		xmlEscape(winISOPath), xmlEscape(virtioWinISO), unattendDisk, xmlEscape(mac), bandwidth)
+		xmlEscape(diskPath), bootOrder, iotune,
+		installDisks, unattendDisk, xmlEscape(mac), bandwidth)
+}
+
+// windowsInstallISOPath returns installation media only. A Windows QCOW2 is
+// the backing system disk and must never be mounted as a raw CD-ROM.
+func windowsInstallISOPath(imageID string) string {
+	path := ImagePath(imageID)
+	if qcow2, _ := isQCOW2File(path); qcow2 || !strings.EqualFold(filepath.Ext(path), ".iso") {
+		return ""
+	}
+	return path
 }
 
 func xmlEscape(value string) string {
@@ -2601,6 +2730,19 @@ func undefineDomain(name string) error {
 		return nil
 	}
 	return exec.Command("virsh", "undefine", name).Run()
+}
+
+func domainExists(name string) (bool, error) {
+	out, err := exec.Command("virsh", "list", "--all", "--name").Output()
+	if err != nil {
+		return false, fmt.Errorf("cannot inspect KVM domains: %w", err)
+	}
+	for _, domain := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(domain) == name {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (m *Manager) RefreshVNCPort(id int) (int, error) {
@@ -2693,7 +2835,11 @@ func firstIPv4(output string) string {
 }
 
 func domainMACAddress(name string) string {
-	out, err := exec.Command("virsh", "domiflist", name).Output()
+	return domainMACAddressContext(context.Background(), name)
+}
+
+func domainMACAddressContext(ctx context.Context, name string) string {
+	out, err := exec.CommandContext(ctx, "virsh", "domiflist", name).Output()
 	if err != nil {
 		return ""
 	}
@@ -2712,10 +2858,14 @@ func domainMACAddress(name string) string {
 }
 
 func dhcpLeaseIP(networkName string, mac string) string {
+	return dhcpLeaseIPContext(context.Background(), networkName, mac)
+}
+
+func dhcpLeaseIPContext(ctx context.Context, networkName string, mac string) string {
 	if mac == "" {
 		return ""
 	}
-	out, err := exec.Command("virsh", "net-dhcp-leases", networkName, "--mac", mac).Output()
+	out, err := exec.CommandContext(ctx, "virsh", "net-dhcp-leases", networkName, "--mac", mac).Output()
 	if err != nil {
 		return ""
 	}
@@ -3004,7 +3154,11 @@ fi
 }
 
 func qemuGuestPing(name string) error {
-	out, err := exec.Command("virsh", "qemu-agent-command", name, `{"execute":"guest-ping"}`).CombinedOutput()
+	return qemuGuestPingContext(context.Background(), name)
+}
+
+func qemuGuestPingContext(ctx context.Context, name string) error {
+	out, err := exec.CommandContext(ctx, "virsh", "qemu-agent-command", name, `{"execute":"guest-ping"}`).CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if strings.Contains(msg, "guest agent is not configured") || strings.Contains(msg, "QEMU guest agent is not configured") || strings.Contains(msg, "argument unsupported") {

@@ -1,6 +1,7 @@
 package kvm
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -230,7 +231,7 @@ func ImagePath(id string) string {
 	// made an existing .qcow2 report "not downloaded" whenever the image was
 	// recognised as Windows. Try both, preferring the type-appropriate one.
 	exts := []string{".qcow2", ".iso"}
-	if img != nil && img.IsWindows() {
+	if img != nil && img.downloadExtension() == ".iso" {
 		exts = []string{".iso", ".qcow2"}
 	}
 	for _, ext := range exts {
@@ -250,19 +251,12 @@ func ImagePath(id string) string {
 }
 
 func (image Image) IsWindows() bool {
-	if image.Provisioner == config.KVMProvisionerWindows10 ||
-		image.Provisioner == config.KVMProvisionerWindows11 {
-		return true
-	}
 	// Custom images are user-supplied: "distro" is free text and people write
 	// windows / win10 / win11. Previously any non-empty Provisioner (including
 	// a leftover "linux-cloud-init") masked a Windows distro, so the VM was
 	// treated as a Linux guest and start-up failed after ~3 minutes waiting
 	// for an IPv4 address the guest never reports.
-	if image.Provisioner == "" || !isWindowsProvisioner(image.Provisioner) {
-		return isWindowsDistro(image.Distro)
-	}
-	return false
+	return isWindowsProvisioner(image.Provisioner) || isWindowsDistro(image.Distro)
 }
 
 func isWindowsProvisioner(p string) bool {
@@ -279,11 +273,32 @@ func isWindowsDistro(d string) bool {
 }
 
 func (image Image) IsWindows11() bool {
-	return image.Provisioner == config.KVMProvisionerWindows11 ||
-		(image.Provisioner == "" && image.Distro == "windows" && image.Release == "11")
+	switch strings.ToLower(strings.TrimSpace(image.Provisioner)) {
+	case config.KVMProvisionerWindows11:
+		return true
+	case config.KVMProvisionerWindows10:
+		return false
+	}
+	distro := strings.ToLower(strings.TrimSpace(image.Distro))
+	return image.IsWindows() && (distro == "win11" || distro == "windows11" || strings.TrimSpace(image.Release) == "11")
 }
 
-// IsWindowsImage returns true if the image uses Windows unattended installation.
+// downloadExtension chooses a cache name before the downloaded format is known.
+// Windows disk images are normalized to QCOW2; installation media remain ISO.
+func (image Image) downloadExtension() string {
+	if source, err := url.Parse(image.URL); err == nil {
+		switch strings.ToLower(filepath.Ext(source.Path)) {
+		case ".qcow2", ".img":
+			return ".qcow2"
+		}
+	}
+	if image.IsWindows() {
+		return ".iso"
+	}
+	return ".qcow2"
+}
+
+// IsWindowsImage returns true if the image contains a Windows guest.
 func IsWindowsImage(id string) bool {
 	img := FindImage(id)
 	return img != nil && img.IsWindows()

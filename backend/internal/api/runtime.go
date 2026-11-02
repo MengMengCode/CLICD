@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -60,9 +61,16 @@ func validateReinstallSSHAuth(c *config.Container, templateID string, cfg lxc.Co
 }
 
 func startByRuntime(id int) error {
+	return startByRuntimeContext(context.Background(), id)
+}
+
+func startByRuntimeContext(ctx context.Context, id int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	c := config.FindContainer(id)
 	if c != nil && c.IsKVM() {
-		return kvmManager.StartContainer(id)
+		return kvmManager.StartContainerContext(ctx, id)
 	}
 	return lxcManager.StartContainer(id)
 }
@@ -230,4 +238,3 @@ func validateRuntimeResourceRequest(runtime string, templateID string, vcpu floa
 	}
 	return validateContainerResourceRequest(vcpu, ramMB, diskGB)
 }
-

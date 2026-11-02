@@ -2,7 +2,6 @@ package server
 
 import (
 	"crypto/tls"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -194,12 +193,8 @@ func Run() error {
 	// The panel used to bind 0.0.0.0 unconditionally, so an operator who only
 	// reaches it over the LAN still exposed it on every interface. Honour
 	// CLICD_BIND_ADDR when set; default to all interfaces for compatibility.
-	bindAddr := strings.TrimSpace(os.Getenv("CLICD_BIND_ADDR"))
-	if bindAddr == "" {
-		bindAddr = "0.0.0.0"
-	}
-	addr := fmt.Sprintf("%s:%d", bindAddr, config.AppConfig.Port)
-	log.Printf("CLICD Web Server starting on http://%s:%d", bindAddr, config.AppConfig.Port)
+	addr := serverListenAddress(os.Getenv("CLICD_BIND_ADDR"), config.AppConfig.Port)
+	log.Printf("CLICD Web Server starting on http://%s", addr)
 	log.Printf("Admin user: %s", config.AppConfig.AdminUser)
 
 	server := &http.Server{
@@ -230,7 +225,7 @@ func Run() error {
 				return &cert, nil
 			},
 		}
-		log.Printf("CLICD Web Server SSL enabled on https://0.0.0.0:%d", config.AppConfig.Port)
+		log.Printf("CLICD Web Server SSL enabled on https://%s", addr)
 		return server.ListenAndServeTLS("", "")
 	}
 
