@@ -21,6 +21,7 @@ func TestValidateURLRejectsUnsafeDestinations(t *testing.T) {
 		"http://100.100.100.200/latest/meta-data",
 		"http://[fd00:ec2::254]/latest/meta-data",
 		"http://example.com:99999/image",
+		"http://example.com/image#fragment",
 	} {
 		if _, err := ValidateURL(rawURL); err == nil {
 			t.Fatalf("ValidateURL(%q) succeeded, want rejection", rawURL)
@@ -101,6 +102,7 @@ func TestGetAllowsPrivateNetworkMirror(t *testing.T) {
 		t.Fatalf("failed to listen on private interface: %v", err)
 	}
 	defer listener.Close()
+	t.Setenv(imageMirrorOriginsEnv, "http://"+listener.Addr().String())
 
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "private mirror ok")

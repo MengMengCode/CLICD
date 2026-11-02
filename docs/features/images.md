@@ -24,6 +24,21 @@ PUT /api/v1/images/toggle
 - `delete` 删除本地镜像缓存。
 - `toggle` 控制模板是否对创建流程可用。
 
+镜像源创建、下载、取消、删除和启用管理需要管理员权限。使用外部 API Key 时，需同时授予 `admin:access` 和对应的 `image:*` 操作权限。
+
+## 私网镜像源
+
+下载器默认只连接公网镜像。要使用内网镜像站，请在服务器上设置 `CLICD_IMAGE_MIRROR_ORIGINS`，列出允许访问的来源，多个来源用逗号分隔：
+
+```ini
+[Service]
+Environment="CLICD_IMAGE_MIRROR_ORIGINS=http://192.168.1.10:8080,https://mirror.example.lan"
+```
+
+systemd 部署可通过 `sudo systemctl edit clicd` 添加上述配置，再执行 `sudo systemctl daemon-reload` 和 `sudo systemctl restart clicd`。
+
+每项只填写协议、主机和可选端口，不填写镜像路径、查询参数或登录凭据。镜像的完整下载 URL 仍在面板中填写。协议或端口不同的来源需要单独批准；重定向不会扩大内网访问范围。本机回环、链路本地和云元数据地址始终禁止访问。
+
 ## Windows 镜像说明
 
 - ISO 镜像用于安装 Windows，可通过 WebVNC 查看安装过程。
