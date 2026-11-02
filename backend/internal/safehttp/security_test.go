@@ -60,6 +60,22 @@ func TestGetPrivateMirrorRequiresServerApproval(t *testing.T) {
 	}
 }
 
+func TestPrivateMirrorPolicyAllowsRepeatedDNSAnswers(t *testing.T) {
+	source, err := ValidateURL("http://mirror.test/image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := netip.MustParseAddr("10.0.0.10")
+	addresses := []netip.Addr{address, address}
+	policy, err := newDownloadPolicy(source, addresses, map[string]bool{"http://mirror.test:80": true})
+	if err != nil {
+		t.Fatalf("duplicate private answers were treated as mixed addresses: %v", err)
+	}
+	if err := policy.approve(source, addresses); err != nil {
+		t.Fatalf("approved repeated answers were rejected: %v", err)
+	}
+}
+
 func TestPrivateMirrorApprovalMatchesExactOrigin(t *testing.T) {
 	for _, allowed := range []string{
 		"http://other.test:8080", "http://mirror.test:8081", "https://mirror.test:8080",
