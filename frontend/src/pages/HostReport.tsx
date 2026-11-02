@@ -1,3 +1,7 @@
+import { Button } from '../components/ui/button'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
+import { Card } from '../components/ui/card'
+import { Badge } from '../components/ui/badge'
 import { ReactNode, useCallback, useEffect, useState } from 'react'
 import {
   Activity,
@@ -38,19 +42,19 @@ export default function HostReport() {
     <div className="space-y-6" data-no-translate>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-black">{text.title}</h1>
-          <p className="mt-1 text-sm text-gray-500">{text.subtitle}</p>
+          <h1 className="text-2xl font-bold text-foreground">{text.title}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{text.subtitle}</p>
         </div>
-        <button onClick={fetchReport} disabled={loading} className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+        <Button variant="outline" size="sm" onClick={fetchReport} disabled={loading} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           {text.refresh}
-        </button>
+        </Button>
       </div>
 
       {loading && !report ? (
-        <div className="rounded-lg border border-gray-200 bg-white py-14 text-center text-sm text-gray-400">{text.loading}</div>
+        <Card className="py-14 text-center text-sm text-muted-foreground">{text.loading}</Card>
       ) : !report ? (
-        <div className="rounded-lg border border-gray-200 bg-white py-14 text-center text-sm text-gray-400">{text.emptyReport}</div>
+        <Card className="py-14 text-center text-sm text-muted-foreground">{text.emptyReport}</Card>
       ) : (
         <div className="space-y-5">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -144,18 +148,18 @@ export default function HostReport() {
           <ProbeSection title={text.environmentSupport}>
             <div className="grid gap-2 md:grid-cols-2">
               {report.environment.map(item => (
-                <div key={item.key} className="flex items-start gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                <Card key={item.key} className="flex items-start gap-2 px-3 py-2">
                   {item.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" /> : <XCircle className={`mt-0.5 h-4 w-4 shrink-0 ${item.required ? 'text-red-600' : 'text-amber-600'}`} />}
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-gray-800">
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-foreground">
                       <span>{translateDynamic(item.label, language)}</span>
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] ${item.required ? 'bg-gray-100 text-gray-600' : 'bg-blue-50 text-blue-700'}`}>
+                      <Badge variant={item.required ? 'secondary' : 'outline'} className="text-[10px]">
                         {item.required ? text.required : text.optional}
-                      </span>
+                      </Badge>
                     </div>
-                    <div className="mt-1 break-all font-mono text-[11px] text-gray-500">{translateDynamic(item.detail || '-', language)}</div>
+                    <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{translateDynamic(item.detail || '-', language)}</div>
                   </div>
-                </div>
+                </Card>
               ))}
             </div>
           </ProbeSection>
@@ -167,14 +171,14 @@ export default function HostReport() {
 
 function ProbeMetric({ icon, label, value, sub }: { icon: ReactNode; label: string; value: string; sub: string }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3 py-3">
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-gray-500">
+    <Card className="px-3 py-3">
+      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
         {icon}
         {label}
       </div>
-      <div className="line-clamp-2 break-words text-sm font-semibold text-gray-900" title={value}>{value}</div>
-      <div className="mt-1 truncate text-xs text-gray-500" title={sub}>{sub}</div>
-    </div>
+      <div className="line-clamp-2 break-words text-sm font-semibold text-foreground" title={value}>{value}</div>
+      <div className="mt-1 truncate text-xs text-muted-foreground" title={sub}>{sub}</div>
+    </Card>
   )
 }
 
@@ -328,7 +332,7 @@ const hostReportText = {
 function ProbeSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
-      <h2 className="mb-2 text-sm font-semibold text-black">{title}</h2>
+      <h2 className="mb-2 text-sm font-semibold text-foreground">{title}</h2>
       {children}
     </section>
   )
@@ -336,44 +340,44 @@ function ProbeSection({ title, children }: { title: string; children: ReactNode 
 
 function ProbeRows({ rows }: { rows: Array<[string, string]> }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+    <Card className="overflow-hidden">
       {rows.map(([label, value]) => (
-        <div key={label} className="grid gap-2 border-b border-gray-100 px-3 py-2 text-xs last:border-b-0 md:grid-cols-[160px_1fr]">
-          <div className="font-medium text-gray-500">{label}</div>
-          <div className="whitespace-pre-wrap break-words font-mono text-gray-800">{value || '-'}</div>
+        <div key={label} className="grid gap-2 border-b border-border px-3 py-2 text-xs last:border-b-0 md:grid-cols-[160px_1fr]">
+          <div className="font-medium text-muted-foreground">{label}</div>
+          <div className="whitespace-pre-wrap break-words font-mono text-foreground">{value || '-'}</div>
         </div>
       ))}
-    </div>
+    </Card>
   )
 }
 
 function ProbeTable({ title, headers, rows, empty }: { title: string; headers: string[]; rows: string[][]; empty: string }) {
   return (
     <section>
-      <h2 className="mb-2 text-sm font-semibold text-black">{title}</h2>
+      <h2 className="mb-2 text-sm font-semibold text-foreground">{title}</h2>
       {rows.length === 0 ? (
-        <div className="rounded-lg border border-gray-200 bg-white px-3 py-3 text-xs text-gray-400">{empty}</div>
+        <Card className="px-3 py-3 text-xs text-muted-foreground">{empty}</Card>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                {headers.map(header => <th key={header} className="px-3 py-2 font-medium">{header}</th>)}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
+        <Card className="overflow-x-auto">
+          <Table className="w-full text-xs">
+            <TableHeader>
+              <TableRow className="text-left">
+                {headers.map(header => <TableHead key={header} className="px-3 py-2 font-medium">{header}</TableHead>)}
+              </TableRow>
+            </TableHeader>
+            <TableBody >
               {rows.map((row, rowIndex) => (
-                <tr key={rowIndex} className="align-top">
+                <TableRow key={rowIndex} className="align-top">
                   {row.map((cell, cellIndex) => (
-                    <td key={cellIndex} className="max-w-[280px] whitespace-pre-wrap break-words px-3 py-2 text-gray-700">
+                    <TableCell key={cellIndex} className="max-w-[280px] whitespace-pre-wrap break-words px-3 py-2">
                       {cell || '-'}
-                    </td>
+                    </TableCell>
                   ))}
-                </tr>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       )}
     </section>
   )

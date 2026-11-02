@@ -1,3 +1,10 @@
+import { Label } from '../components/ui/label'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
+import { Card } from '../components/ui/card'
+import { Badge } from '../components/ui/badge'
+import { Modal } from '../components/ui/modal'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Globe2, Network, Pencil, Plus, RefreshCw, Router, Save, Search, Server, Trash2, X } from 'lucide-react'
 import { useNavigate } from 'react-router'
@@ -249,7 +256,7 @@ export default function Routing() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-black" />
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
       </div>
     )
   }
@@ -267,17 +274,17 @@ export default function Routing() {
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-black">{text.pageTitle}</h1>
-          <p className="mt-1 text-sm text-gray-500">{text.pageSubtitle}</p>
+          <h1 className="text-xl font-semibold text-foreground">{text.pageTitle}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{text.pageSubtitle}</p>
         </div>
-        <button
+        <Button variant="outline" size="sm"
           onClick={() => { setRefreshing(true); fetchData() }}
           disabled={refreshing}
-          className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-3 py-2 text-sm"
         >
           <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
           {text.refresh}
-        </button>
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
@@ -294,9 +301,9 @@ export default function Routing() {
             nat4Networks ? `LXC ${nat4Networks.lxc.subnet} · KVM ${nat4Networks.kvm.subnet}` : '',
           ].filter(Boolean).join(' · ')}
           action={
-            <button onClick={startEditNAT4} className="rounded p-1.5 text-gray-500 hover:bg-gray-100 hover:text-black" title={text.editNAT4Range}>
+            <Button variant="ghost" size="icon" onClick={startEditNAT4} className="h-8 w-8" title={text.editNAT4Range}>
               <Pencil className="h-4 w-4" />
-            </button>
+            </Button>
           }
         />
         <CapacityCard title={text.publicIPv4} watermark="IPv4" remaining={routing?.ipv4.remaining || '0'} total={routing?.ipv4.total || '0'} used={routing?.ipv4.used || 0} label={formatPoolCount(publicIPv4s.length, language)} usedLabel={text.used} />
@@ -314,13 +321,13 @@ export default function Routing() {
               <LabeledNumberInput label={text.rangeEnd} value={nat4Draft.end} onChange={(value) => setNAT4Draft((draft) => ({ ...draft, end: value }))} min={1} max={65535} />
             </div>
             <div className="flex items-center justify-end gap-2">
-              <button onClick={() => setEditingNAT4(false)} disabled={savingNAT4} className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+              <Button variant="outline" size="sm" onClick={() => setEditingNAT4(false)} disabled={savingNAT4} className="px-3 py-1.5 text-xs">
                 {text.cancel}
-              </button>
-              <button onClick={saveNAT4Range} disabled={savingNAT4} className="inline-flex items-center gap-1.5 rounded-md bg-black px-3 py-1.5 text-xs text-white hover:bg-gray-800 disabled:opacity-50">
+              </Button>
+              <Button size="sm" onClick={saveNAT4Range} disabled={savingNAT4} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
                 <Save className="h-3.5 w-3.5" />
                 {savingNAT4 ? text.saving : text.save}
-              </button>
+              </Button>
             </div>
           </div>
         </RouteModal>
@@ -330,58 +337,58 @@ export default function Routing() {
         title={text.publicIPv4Pool}
         subtitle={formatIPv4PoolSubtitle(publicIPv4s.length, ipv4Assignments.length, language)}
         action={
-          <button onClick={startEditIPv4} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+          <Button variant="outline" size="sm" onClick={startEditIPv4} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
             <Plus className="h-3.5 w-3.5" />
             {text.editPool}
-          </button>
+          </Button>
         }
       >
         {publicIPv4s.length === 0 ? (
           <EmptyState text={text.noPublicIPv4Pool} icon={<Globe2 className="h-7 w-7" />} />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-sm">
-              <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium">IPv4</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.gateway}</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.interface}</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.mask}</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.assignedTo}</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.status}</th>
-                  <th className="px-4 py-3 text-right font-medium">{text.action}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
+            <Table className="w-full min-w-[980px] text-sm">
+              <TableHeader className="text-xs">
+                <TableRow>
+                  <TableHead className="px-4 py-3 text-left font-medium">IPv4</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.gateway}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.interface}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.mask}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.assignedTo}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.status}</TableHead>
+                  <TableHead className="px-4 py-3 text-right font-medium">{text.action}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody >
                 {publicIPv4s.map((ip) => {
                   const assigned = assignedIPv4.get(ip.address)
                   return (
-                    <tr key={`${ip.interface}-${ip.address}`} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-xs text-gray-700">{ip.address}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{ip.gateway || '-'}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{ip.interface || '-'}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{ip.subnet_mask || (ip.prefix_len ? subnetMaskFromPrefixLen(ip.prefix_len) : '-')}</td>
-                      <td className="px-4 py-3">
+                    <TableRow key={`${ip.interface}-${ip.address}`} >
+                      <TableCell className="px-4 py-3 font-mono text-xs">{ip.address}</TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-xs">{ip.gateway || '-'}</TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-xs">{ip.interface || '-'}</TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-xs">{ip.subnet_mask || (ip.prefix_len ? subnetMaskFromPrefixLen(ip.prefix_len) : '-')}</TableCell>
+                      <TableCell className="px-4 py-3">
                         {assigned ? (
-                          <button onClick={() => navigate(`/container/${assigned.container_id}`)} className="font-medium text-black hover:underline">
+                          <Button variant="link" size="sm" onClick={() => navigate(`/container/${assigned.container_id}`)} className="h-auto p-0 font-medium">
                             {assigned.container_name}
-                          </button>
+                          </Button>
                         ) : (
-                          <span className="text-gray-400">{text.available}</span>
+                          <span className="text-muted-foreground">{text.available}</span>
                         )}
-                      </td>
-                      <td className="px-4 py-3">{assigned ? <StatusBadge status={assigned.status} language={language} /> : <span className="text-xs text-gray-400">{text.free}</span>}</td>
-                      <td className="px-4 py-3 text-right">
-                        <button onClick={() => startEditIPv4Address(ip)} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+                      </TableCell>
+                      <TableCell className="px-4 py-3">{assigned ? <StatusBadge status={assigned.status} language={language} /> : <span className="text-xs text-muted-foreground">{text.free}</span>}</TableCell>
+                      <TableCell className="px-4 py-3 text-right">
+                        <Button variant="outline" size="sm" onClick={() => startEditIPv4Address(ip)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs">
                           <Pencil className="h-3.5 w-3.5" />
                           {text.edit}
-                        </button>
-                      </td>
-                    </tr>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
                   )
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </Panel>
@@ -390,70 +397,70 @@ export default function Routing() {
         <RouteModal title={ipv4EditMode === 'pool' ? text.editIPv4Pool : text.editIPv4} onClose={closeEditIPv4} wide>
           <div className="space-y-3">
             {ipv4EditMode === 'address' && (
-              <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+              <Card className="px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="text-xs font-medium uppercase text-gray-400">{text.container}</div>
-                    <div className="mt-1 text-sm text-gray-700">{editingIPv4Assignment?.container_name || text.available}</div>
+                    <div className="text-xs font-medium uppercase text-muted-foreground">{text.container}</div>
+                    <div className="mt-1 text-sm text-foreground">{editingIPv4Assignment?.container_name || text.available}</div>
                   </div>
                   {editingIPv4Assignment && (
-                    <button onClick={() => navigate(`/container/${editingIPv4Assignment.container_id}`)} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-white">
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/container/${editingIPv4Assignment.container_id}`)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
                       <Server className="h-3.5 w-3.5" />
                       {text.openContainer}
-                    </button>
+                    </Button>
                   )}
                 </div>
-              </div>
+              </Card>
             )}
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] text-sm">
-                <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium">{text.ipv4CIDR}</th>
-                    <th className="px-3 py-2 text-left font-medium">{text.gateway}</th>
-                    <th className="px-3 py-2 text-left font-medium">{text.interface}</th>
-                    <th className="px-3 py-2 text-left font-medium">{text.mask}</th>
-                    {ipv4EditMode === 'pool' && <th className="px-3 py-2 text-right font-medium">{text.action}</th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
+              <Table className="w-full min-w-[860px] text-sm">
+                <TableHeader className="text-xs">
+                  <TableRow>
+                    <TableHead className="px-3 py-2 text-left font-medium">{text.ipv4CIDR}</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">{text.gateway}</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">{text.interface}</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">{text.mask}</TableHead>
+                    {ipv4EditMode === 'pool' && <TableHead className="px-3 py-2 text-right font-medium">{text.action}</TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody >
                   {ipv4Draft.map((item, index) => (
-                    <tr key={item._id}>
-                      <td className="px-3 py-2"><input value={item.address || ''} onChange={(e) => updateIPv4Draft(index, { address: e.target.value })} placeholder={text.ipv4CIDR} className={smallInputClass} /></td>
-                      <td className="px-3 py-2"><input value={item.gateway || ''} onChange={(e) => updateIPv4Draft(index, { gateway: e.target.value })} placeholder={defaultIPv4Gateway || text.gateway} className={smallInputClass} /></td>
-                      <td className="px-3 py-2"><input value={item.interface || ''} onChange={(e) => updateIPv4Draft(index, { interface: e.target.value })} placeholder={defaultIPv4Interface} className={smallInputClass} /></td>
-                      <td className="px-3 py-2 font-mono text-xs text-gray-500">{item.subnet_mask || (item.prefix_len ? subnetMaskFromPrefixLen(item.prefix_len) : text.auto)}</td>
+                    <TableRow key={item._id}>
+                      <TableCell className="px-3 py-2"><Input value={item.address || ''} onChange={(e) => updateIPv4Draft(index, { address: e.target.value })} placeholder={text.ipv4CIDR} className={smallInputClass} /></TableCell>
+                      <TableCell className="px-3 py-2"><Input value={item.gateway || ''} onChange={(e) => updateIPv4Draft(index, { gateway: e.target.value })} placeholder={defaultIPv4Gateway || text.gateway} className={smallInputClass} /></TableCell>
+                      <TableCell className="px-3 py-2"><Input value={item.interface || ''} onChange={(e) => updateIPv4Draft(index, { interface: e.target.value })} placeholder={defaultIPv4Interface} className={smallInputClass} /></TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs">{item.subnet_mask || (item.prefix_len ? subnetMaskFromPrefixLen(item.prefix_len) : text.auto)}</TableCell>
                       {ipv4EditMode === 'pool' && (
-                        <td className="px-3 py-2 text-right">
-                          <button onClick={() => setIPv4Draft((items) => items.filter((_, i) => i !== index))} className="inline-flex items-center justify-center rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600">
+                        <TableCell className="px-3 py-2 text-right">
+                          <Button variant="destructive" size="icon" onClick={() => setIPv4Draft((items) => items.filter((_, i) => i !== index))} className="h-8 w-8 inline-flex items-center justify-center">
                             <Trash2 className="h-4 w-4" />
-                          </button>
-                        </td>
+                          </Button>
+                        </TableCell>
                       )}
-                    </tr>
+                    </TableRow>
                   ))}
                   {ipv4Draft.length === 0 && <EmptyRow colSpan={ipv4EditMode === 'pool' ? 5 : 4} text={text.noIPv4InPool} />}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3">
               {ipv4EditMode === 'pool' ? (
-                <button onClick={addIPv4Row} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+                <Button variant="outline" size="sm" onClick={addIPv4Row} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
                   <Plus className="h-3.5 w-3.5" />
                   {text.addIPv4}
-                </button>
+                </Button>
               ) : (
                 <span />
               )}
               <div className="flex items-center gap-2">
-                <button onClick={closeEditIPv4} disabled={savingIPv4} className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+                <Button variant="outline" size="sm" onClick={closeEditIPv4} disabled={savingIPv4} className="px-3 py-1.5 text-xs">
                   {text.cancel}
-                </button>
-                <button onClick={saveIPv4Pool} disabled={savingIPv4} className="inline-flex items-center gap-1.5 rounded-md bg-black px-3 py-1.5 text-xs text-white hover:bg-gray-800 disabled:opacity-50">
+                </Button>
+                <Button size="sm" onClick={saveIPv4Pool} disabled={savingIPv4} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
                   <Save className="h-3.5 w-3.5" />
                   {savingIPv4 ? text.saving : text.save}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -464,38 +471,38 @@ export default function Routing() {
         title={text.detectedIPv6Prefixes}
         subtitle={formatPrefixCount(ipv6Prefixes.length, language)}
         action={
-          <button onClick={startEditIPv6} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+          <Button variant="outline" size="sm" onClick={startEditIPv6} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
             <Pencil className="h-3.5 w-3.5" />
             {text.editPrefixes}
-          </button>
+          </Button>
         }
       >
         {ipv6Prefixes.length === 0 ? (
           <EmptyState text={text.noIPv6Prefixes} icon={<Router className="h-7 w-7" />} />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
-              <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium">{text.prefix}</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.hostAddress}</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.interface}</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.gateway}</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.source}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
+            <Table className="w-full min-w-[760px] text-sm">
+              <TableHeader className="text-xs">
+                <TableRow>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.prefix}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.hostAddress}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.interface}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.gateway}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.source}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody >
                 {ipv6Prefixes.map((prefix) => (
-                  <tr key={`${prefix.interface}-${prefix.prefix}`} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono text-xs text-gray-700">{prefix.prefix || `${prefix.address}/${prefix.prefix_len}`}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{prefix.address || '-'}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{prefix.interface || '-'}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{prefix.gateway || '-'}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{formatSource(prefix.source, language)}</td>
-                  </tr>
+                  <TableRow key={`${prefix.interface}-${prefix.prefix}`} >
+                    <TableCell className="px-4 py-3 font-mono text-xs">{prefix.prefix || `${prefix.address}/${prefix.prefix_len}`}</TableCell>
+                    <TableCell className="px-4 py-3 font-mono text-xs">{prefix.address || '-'}</TableCell>
+                    <TableCell className="px-4 py-3 font-mono text-xs">{prefix.interface || '-'}</TableCell>
+                    <TableCell className="px-4 py-3 font-mono text-xs">{prefix.gateway || '-'}</TableCell>
+                    <TableCell className="px-4 py-3 text-xs">{formatSource(prefix.source, language)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </Panel>
@@ -504,47 +511,47 @@ export default function Routing() {
         <RouteModal title={text.editIPv6Prefixes} onClose={() => setEditingIPv6(false)} wide>
           <div className="space-y-3">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] text-sm">
-                <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium">{text.prefix}</th>
-                    <th className="px-3 py-2 text-left font-medium">{text.hostAddress}</th>
-                    <th className="px-3 py-2 text-left font-medium">{text.interface}</th>
-                    <th className="px-3 py-2 text-left font-medium">{text.gateway}</th>
-                    <th className="px-3 py-2 text-right font-medium">{text.action}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
+              <Table className="w-full min-w-[860px] text-sm">
+                <TableHeader className="text-xs">
+                  <TableRow>
+                    <TableHead className="px-3 py-2 text-left font-medium">{text.prefix}</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">{text.hostAddress}</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">{text.interface}</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">{text.gateway}</TableHead>
+                    <TableHead className="px-3 py-2 text-right font-medium">{text.action}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody >
                   {ipv6Draft.map((item, index) => (
-                    <tr key={item._id}>
-                      <td className="px-3 py-2"><input value={item.prefix || ''} onChange={(e) => updateIPv6Draft(index, { prefix: e.target.value })} placeholder="2001:db8:100::/64" className={smallInputClass} /></td>
-                      <td className="px-3 py-2"><input value={item.address || ''} onChange={(e) => updateIPv6Draft(index, { address: e.target.value })} placeholder="2001:db8:100::1" className={smallInputClass} /></td>
-                      <td className="px-3 py-2"><input value={item.interface || ''} onChange={(e) => updateIPv6Draft(index, { interface: e.target.value })} placeholder={defaultIPv6Interface} className={smallInputClass} /></td>
-                      <td className="px-3 py-2"><input value={item.gateway || ''} onChange={(e) => updateIPv6Draft(index, { gateway: e.target.value })} placeholder={text.gateway} className={smallInputClass} /></td>
-                      <td className="px-3 py-2 text-right">
-                        <button onClick={() => setIPv6Draft((items) => items.filter((_, i) => i !== index))} className="inline-flex items-center justify-center rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600">
+                    <TableRow key={item._id}>
+                      <TableCell className="px-3 py-2"><Input value={item.prefix || ''} onChange={(e) => updateIPv6Draft(index, { prefix: e.target.value })} placeholder="2001:db8:100::/64" className={smallInputClass} /></TableCell>
+                      <TableCell className="px-3 py-2"><Input value={item.address || ''} onChange={(e) => updateIPv6Draft(index, { address: e.target.value })} placeholder="2001:db8:100::1" className={smallInputClass} /></TableCell>
+                      <TableCell className="px-3 py-2"><Input value={item.interface || ''} onChange={(e) => updateIPv6Draft(index, { interface: e.target.value })} placeholder={defaultIPv6Interface} className={smallInputClass} /></TableCell>
+                      <TableCell className="px-3 py-2"><Input value={item.gateway || ''} onChange={(e) => updateIPv6Draft(index, { gateway: e.target.value })} placeholder={text.gateway} className={smallInputClass} /></TableCell>
+                      <TableCell className="px-3 py-2 text-right">
+                        <Button variant="destructive" size="icon" onClick={() => setIPv6Draft((items) => items.filter((_, i) => i !== index))} className="h-8 w-8 inline-flex items-center justify-center">
                           <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
                   ))}
                   {ipv6Draft.length === 0 && <EmptyRow colSpan={5} text={text.noIPv6Prefixes} />}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <button onClick={addIPv6Row} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+              <Button variant="outline" size="sm" onClick={addIPv6Row} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
                 <Plus className="h-3.5 w-3.5" />
                 {text.addIPv6Prefix}
-              </button>
+              </Button>
               <div className="flex items-center gap-2">
-                <button onClick={() => setEditingIPv6(false)} disabled={savingIPv6} className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+                <Button variant="outline" size="sm" onClick={() => setEditingIPv6(false)} disabled={savingIPv6} className="px-3 py-1.5 text-xs">
                   {text.cancel}
-                </button>
-                <button onClick={saveIPv6Prefixes} disabled={savingIPv6} className="inline-flex items-center gap-1.5 rounded-md bg-black px-3 py-1.5 text-xs text-white hover:bg-gray-800 disabled:opacity-50">
+                </Button>
+                <Button size="sm" onClick={saveIPv6Prefixes} disabled={savingIPv6} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
                   <Save className="h-3.5 w-3.5" />
                   {savingIPv6 ? text.saving : text.save}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -556,39 +563,39 @@ export default function Routing() {
           <EmptyState text={text.noLANDHCPAssignments} icon={<Network className="h-7 w-7" />} />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-sm">
-              <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium">{text.container}</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.runtimeName}</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.guestIPv4}</th>
-                  <th className="px-4 py-3 text-left font-medium">模式</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.gateway}</th>
-                  <th className="px-4 py-3 text-left font-medium">MAC</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.interface}</th>
-                  <th className="px-4 py-3 text-left font-medium">{text.status}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
+            <Table className="w-full min-w-[980px] text-sm">
+              <TableHeader className="text-xs">
+                <TableRow>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.container}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.runtimeName}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.guestIPv4}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">模式</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.gateway}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">MAC</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.interface}</TableHead>
+                  <TableHead className="px-4 py-3 text-left font-medium">{text.status}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody >
                 {lanDHCPAssignments.map((item: LANDHCPRoute) => (
-                  <tr key={`${item.container_id}-${item.interface}-${item.mac_address || item.address}`} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <button onClick={() => navigate(`/container/${item.container_id}`)} className="inline-flex items-center gap-2 text-left font-medium text-black hover:underline">
-                        <Server className="h-4 w-4 text-gray-400" />
+                  <TableRow key={`${item.container_id}-${item.interface}-${item.mac_address || item.address}`} >
+                    <TableCell className="px-4 py-3">
+                      <Button variant="link" size="sm" onClick={() => navigate(`/container/${item.container_id}`)} className="h-auto p-0 inline-flex items-center gap-2 text-left font-medium">
+                        <Server className="h-4 w-4 text-muted-foreground" />
                         {item.container_name}
-                      </button>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{item.lxc_name}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-700">{item.address ? `${item.address}${item.prefix_len ? `/${item.prefix_len}` : ''}` : '-'}</td>
-                    <td className="px-4 py-3 text-xs text-gray-600">{item.mode === 'static' ? '手动' : 'DHCP'}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{item.gateway || '-'}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{item.mac_address || '-'}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{item.interface || '-'}</td>
-                    <td className="px-4 py-3"><StatusBadge status={item.status} language={language} /></td>
-                  </tr>
+                      </Button>
+                    </TableCell>
+                    <TableCell className="px-4 py-3 font-mono text-xs">{item.lxc_name}</TableCell>
+                    <TableCell className="px-4 py-3 font-mono text-xs">{item.address ? `${item.address}${item.prefix_len ? `/${item.prefix_len}` : ''}` : '-'}</TableCell>
+                    <TableCell className="px-4 py-3 text-xs">{item.mode === 'static' ? '手动' : 'DHCP'}</TableCell>
+                    <TableCell className="px-4 py-3 font-mono text-xs">{item.gateway || '-'}</TableCell>
+                    <TableCell className="px-4 py-3 font-mono text-xs">{item.mac_address || '-'}</TableCell>
+                    <TableCell className="px-4 py-3 font-mono text-xs">{item.interface || '-'}</TableCell>
+                    <TableCell className="px-4 py-3"><StatusBadge status={item.status} language={language} /></TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </Panel>
@@ -599,39 +606,39 @@ export default function Routing() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[940px] text-sm">
-                <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">{text.container}</th>
-                    <th className="px-4 py-3 text-left font-medium">{text.runtimeName}</th>
-                    <th className="px-4 py-3 text-left font-medium">{text.guestIPv4}</th>
-                    <th className="px-4 py-3 text-left font-medium">{text.hostIPv4}</th>
-                    <th className="px-4 py-3 text-left font-medium">{text.hostPort}</th>
-                    <th className="px-4 py-3 text-left font-medium">{text.guestPort}</th>
-                    <th className="px-4 py-3 text-left font-medium">{text.protocol}</th>
-                    <th className="px-4 py-3 text-left font-medium">{text.status}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
+              <Table className="w-full min-w-[940px] text-sm">
+                <TableHeader className="text-xs">
+                  <TableRow>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.container}</TableHead>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.runtimeName}</TableHead>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.guestIPv4}</TableHead>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.hostIPv4}</TableHead>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.hostPort}</TableHead>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.guestPort}</TableHead>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.protocol}</TableHead>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.status}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody >
                   {pagedNat4Mappings.map((mapping, index) => (
-                    <tr key={`${mapping.container_id}-${mapping.host_ip}-${mapping.host_port}-${mapping.protocol}-${index}`} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <button onClick={() => navigate(`/container/${mapping.container_id}`)} className="inline-flex items-center gap-2 text-left font-medium text-black hover:underline">
-                          <Server className="h-4 w-4 text-gray-400" />
+                    <TableRow key={`${mapping.container_id}-${mapping.host_ip}-${mapping.host_port}-${mapping.protocol}-${index}`} >
+                      <TableCell className="px-4 py-3">
+                        <Button variant="link" size="sm" onClick={() => navigate(`/container/${mapping.container_id}`)} className="h-auto p-0 inline-flex items-center gap-2 text-left font-medium">
+                          <Server className="h-4 w-4 text-muted-foreground" />
                           {mapping.container_name}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{mapping.lxc_name}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{mapping.ip || '-'}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-700">{mapping.host_ip || text.allIPv4}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-700">{mapping.host_port}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-700">{mapping.container_port}</td>
-                      <td className="px-4 py-3 uppercase text-gray-600">{mapping.protocol || '-'}</td>
-                      <td className="px-4 py-3"><StatusBadge status={mapping.status} language={language} /></td>
-                    </tr>
+                        </Button>
+                      </TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-xs">{mapping.lxc_name}</TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-xs">{mapping.ip || '-'}</TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-xs">{mapping.host_ip || text.allIPv4}</TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-xs">{mapping.host_port}</TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-xs">{mapping.container_port}</TableCell>
+                      <TableCell className="px-4 py-3 uppercase">{mapping.protocol || '-'}</TableCell>
+                      <TableCell className="px-4 py-3"><StatusBadge status={mapping.status} language={language} /></TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
             <Pagination page={currentNat4Page} totalPages={nat4TotalPages} totalItems={filteredNat4.length} pageSize={pageSize} onPageChange={setNat4Page} language={language} />
           </>
@@ -644,35 +651,35 @@ export default function Routing() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] text-sm">
-                <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">{text.container}</th>
-                    <th className="px-4 py-3 text-left font-medium">{text.runtimeName}</th>
-                    <th className="px-4 py-3 text-left font-medium">IPv6</th>
-                    <th className="px-4 py-3 text-left font-medium">{text.prefix}</th>
-                    <th className="px-4 py-3 text-left font-medium">{text.interface}</th>
-                    <th className="px-4 py-3 text-left font-medium">{text.status}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
+              <Table className="w-full min-w-[820px] text-sm">
+                <TableHeader className="text-xs">
+                  <TableRow>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.container}</TableHead>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.runtimeName}</TableHead>
+                    <TableHead className="px-4 py-3 text-left font-medium">IPv6</TableHead>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.prefix}</TableHead>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.interface}</TableHead>
+                    <TableHead className="px-4 py-3 text-left font-medium">{text.status}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody >
                   {pagedIPv6Assignments.map((item) => (
-                    <tr key={`${item.container_id}-${item.address}`} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <button onClick={() => navigate(`/container/${item.container_id}`)} className="inline-flex items-center gap-2 text-left font-medium text-black hover:underline">
-                          <Server className="h-4 w-4 text-gray-400" />
+                    <TableRow key={`${item.container_id}-${item.address}`} >
+                      <TableCell className="px-4 py-3">
+                        <Button variant="link" size="sm" onClick={() => navigate(`/container/${item.container_id}`)} className="h-auto p-0 inline-flex items-center gap-2 text-left font-medium">
+                          <Server className="h-4 w-4 text-muted-foreground" />
                           {item.container_name}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{item.lxc_name}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-700">{item.address}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600">/{item.prefix_len || '-'}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{item.interface || '-'}</td>
-                      <td className="px-4 py-3"><StatusBadge status={item.status} language={language} /></td>
-                    </tr>
+                        </Button>
+                      </TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-xs">{item.lxc_name}</TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-xs">{item.address}</TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-xs">/{item.prefix_len || '-'}</TableCell>
+                      <TableCell className="px-4 py-3 font-mono text-xs">{item.interface || '-'}</TableCell>
+                      <TableCell className="px-4 py-3"><StatusBadge status={item.status} language={language} /></TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
             <Pagination page={currentIPv6Page} totalPages={ipv6TotalPages} totalItems={filteredIPv6.length} pageSize={pageSize} onPageChange={setIPv6Page} language={language} />
           </>
@@ -684,52 +691,42 @@ export default function Routing() {
 
 function Panel({ title, subtitle, action, children }: { title: string; subtitle?: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-      <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
         <div>
-          <div className="text-sm font-medium text-black">{title}</div>
-          {subtitle && <div className="mt-1 text-xs text-gray-500">{subtitle}</div>}
+          <div className="text-sm font-medium text-foreground">{title}</div>
+          {subtitle && <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>}
         </div>
         {action}
       </div>
       {children}
-    </div>
+    </Card>
   )
 }
 
 function RouteModal({ title, onClose, wide, children }: { title: string; onClose: () => void; wide?: boolean; children: ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className={`flex max-h-[88vh] w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl ${wide ? 'max-w-5xl' : 'max-w-xl'}`}>
-        <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
-          <div className="text-base font-semibold text-black">{title}</div>
-          <button onClick={onClose} className="rounded p-1 text-gray-500 hover:bg-gray-100">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-        <div className="overflow-y-auto p-4">
-          {children}
-        </div>
-      </div>
-    </div>
+    <Modal title={title} onClose={onClose} size={wide ? '5xl' : 'xl'} className="max-h-[88vh]" bodyClassName="p-4">
+      {children}
+    </Modal>
   )
 }
 
 function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
   return (
     <div className="relative w-48">
-      <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-      <input
+      <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+      <Input
         type="text"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-md border border-gray-300 bg-white py-1.5 pl-8 pr-7 text-xs text-black focus:outline-none focus:ring-1 focus:ring-black"
+        className="h-8 w-full pl-8 pr-7 text-xs"
       />
       {value && (
-        <button onClick={() => onChange('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+        <Button variant="ghost" size="icon" onClick={() => onChange('')} className="h-8 w-8 absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2" aria-label={placeholder}>
           <X className="h-3 w-3" />
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -748,16 +745,16 @@ function Pagination({ page, totalPages, totalItems, pageSize, onPageChange, lang
   const start = (page - 1) * pageSize + 1
   const end = Math.min(page * pageSize, totalItems)
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-gray-200 px-4 py-3 text-sm">
-      <div className="text-xs text-gray-500">{formatShowingRange(start, end, totalItems, language)}</div>
+    <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm">
+      <div className="text-xs text-muted-foreground">{formatShowingRange(start, end, totalItems, language)}</div>
       <div className="flex items-center gap-2">
-        <button onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1} className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+        <Button variant="outline" size="sm" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1} className="px-3 py-1.5 text-xs">
           {text.previous}
-        </button>
-        <span className="min-w-16 text-center text-xs text-gray-500">{page} / {totalPages}</span>
-        <button onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages} className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+        </Button>
+        <span className="min-w-16 text-center text-xs text-muted-foreground">{page} / {totalPages}</span>
+        <Button variant="outline" size="sm" onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages} className="px-3 py-1.5 text-xs">
           {text.next}
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -775,26 +772,26 @@ function CapacityCard({ title, watermark, remaining, total, used, label, usedLab
   action?: ReactNode
 }) {
   return (
-    <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-white p-4">
+    <Card className="relative overflow-hidden p-4">
       <div className="pointer-events-none absolute bottom-1 right-3 select-none bg-gradient-to-br from-black via-gray-600 to-gray-300 bg-clip-text text-[44px] font-black italic tracking-wide text-transparent opacity-25 -skew-x-12">
         {watermark}
       </div>
       <div className="relative z-10">
         <div className="flex items-start justify-between gap-3">
           <div>
-          <div className="text-sm font-medium text-gray-700">{title}</div>
+          <div className="text-sm font-medium text-foreground">{title}</div>
           <div className="mt-2 flex items-end gap-2">
-            <span className="text-2xl font-semibold text-black">{remaining}</span>
-            <span className="pb-1 text-sm text-gray-400">/ {total}</span>
+            <span className="text-2xl font-semibold text-foreground">{remaining}</span>
+            <span className="pb-1 text-sm text-muted-foreground">/ {total}</span>
           </div>
           </div>
           {action}
         </div>
       </div>
-      <div className="relative z-10 mt-3 text-xs text-gray-500">{label}</div>
-      <div className="relative z-10 mt-1 text-xs text-gray-400">{usedLabel} {used}</div>
-      {detail && <div className="relative z-10 mt-1 font-mono text-xs text-gray-400">{detail}</div>}
-    </div>
+      <div className="relative z-10 mt-3 text-xs text-muted-foreground">{label}</div>
+      <div className="relative z-10 mt-1 text-xs text-muted-foreground">{usedLabel} {used}</div>
+      {detail && <div className="relative z-10 mt-1 font-mono text-xs text-muted-foreground">{detail}</div>}
+    </Card>
   )
 }
 
@@ -806,43 +803,43 @@ function LabeledNumberInput({ label, value, onChange, min, max }: {
   max: number
 }) {
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-gray-500">{label}</span>
-      <input
+    <Label className="block">
+      <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>
+      <Input
         type="number"
         min={min}
         max={max}
         value={value || ''}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-1 focus:ring-black"
+        className="w-full text-sm"
       />
-    </label>
+    </Label>
   )
 }
 
 function EmptyState({ icon, text }: { icon: ReactNode; text: string }) {
   return (
     <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
-      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-gray-100 text-gray-500">{icon}</div>
-      <div className="text-sm font-medium text-gray-700">{text}</div>
+      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-muted text-muted-foreground">{icon}</div>
+      <div className="text-sm font-medium text-foreground">{text}</div>
     </div>
   )
 }
 
 function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {
   return (
-    <tr>
-      <td colSpan={colSpan} className="px-3 py-8 text-center text-sm text-gray-400">{text}</td>
-    </tr>
+    <TableRow>
+      <TableCell colSpan={colSpan} className="px-3 py-8 text-center text-sm">{text}</TableCell>
+    </TableRow>
   )
 }
 
 function StatusBadge({ status, language }: { status: string; language: Language }) {
   const running = status === 'running'
   return (
-    <span className={`rounded px-2 py-1 text-xs ${running ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+    <Badge variant={running ? 'default' : 'secondary'}>
       {formatContainerStatus(status, language)}
-    </span>
+    </Badge>
   )
 }
 
@@ -1105,4 +1102,4 @@ function formatSource(source: string | undefined, language: Language) {
   return source
 }
 
-const smallInputClass = 'w-full rounded border border-gray-300 px-2 py-1.5 font-mono text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-black'
+const smallInputClass = 'h-8 w-full font-mono text-xs'

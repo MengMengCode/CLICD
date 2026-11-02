@@ -1,3 +1,6 @@
+import { Badge } from './ui/badge'
+import { Card } from './ui/card'
+import { Button } from './ui/button'
 import { useEffect, useRef, useState } from 'react'
 import { Monitor, RefreshCw, Send, X } from 'lucide-react'
 import RFBModule from '@novnc/novnc/lib/rfb'
@@ -163,38 +166,38 @@ export default function WebVNCViewer({ containerName, onClose }: WebVNCViewerPro
   }, [containerName])
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-white">
-      <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2.5">
+    <Card className="flex h-full flex-col overflow-hidden">
+      <div className="flex shrink-0 items-center justify-between border-b border-border bg-muted px-4 py-2.5">
         <div className="flex items-center gap-2">
-          <Monitor className="h-4 w-4 text-gray-600" />
-          <span className="text-sm font-medium text-black">WebVNC - {containerName}</span>
-          {status === 'connected' && <span className="rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-700">已连接</span>}
-          {status === 'connecting' && <span className="rounded bg-yellow-100 px-1.5 py-0.5 text-xs text-yellow-700">连接中...</span>}
-          {status === 'disconnected' && <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">已断开</span>}
-          {status === 'error' && <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-700">连接失败</span>}
+          <Monitor className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium text-foreground">WebVNC - {containerName}</span>
+          {status === 'connected' && <Badge variant="secondary" className="px-1.5 py-0.5 text-xs">已连接</Badge>}
+          {status === 'connecting' && <Badge variant="secondary" className="px-1.5 py-0.5 text-xs">连接中...</Badge>}
+          {status === 'disconnected' && <Badge variant="secondary" className="px-1.5 py-0.5 text-xs">已断开</Badge>}
+          {status === 'error' && <Badge variant="destructive" className="px-1.5 py-0.5 text-xs">连接失败</Badge>}
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={() => rfbRef.current?.sendCtrlAltDel()} className="inline-flex items-center gap-1 rounded px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200" title="发送 Ctrl+Alt+Del">
+          <Button variant="ghost" onClick={() => rfbRef.current?.sendCtrlAltDel()} className="h-auto inline-flex items-center gap-1 px-2 py-1.5 text-xs" title="发送 Ctrl+Alt+Del">
             <Send className="h-3.5 w-3.5" />
             Ctrl+Alt+Del
-          </button>
-          <button onClick={connect} className="rounded p-1.5 text-xs text-gray-500 hover:bg-gray-200" title="重新连接">
+          </Button>
+          <Button variant="ghost" onClick={connect} className="h-auto p-1.5 text-xs" title="重新连接">
             <RefreshCw className="h-3.5 w-3.5" />
-          </button>
-          <button onClick={onClose} className="rounded p-1.5 text-gray-500 hover:bg-gray-200" title="关闭">
+          </Button>
+          <Button variant="ghost" onClick={onClose} className="h-auto p-1.5" title="关闭">
             <X className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
       </div>
 
       <div className="relative min-h-0 flex-1 overflow-hidden bg-black">
         <div ref={screenRef} className="h-full w-full [&>div]:h-full [&>div]:w-full [&_canvas]:block" />
         {(status === 'connecting' || status === 'error' || (status === 'disconnected' && errorMsg)) && (
-          <div className={`absolute inset-x-0 bottom-0 border-t px-4 py-2 text-sm ${status === 'error' ? 'border-red-900 bg-red-950 text-red-100' : 'border-gray-800 bg-gray-950 text-gray-200'}`}>
+          <div className={`absolute inset-x-0 bottom-0 border-t px-4 py-2 text-sm  ${status === "error" ? "border-red-900 bg-red-950 text-red-100" : "border-border bg-gray-950 text-muted-foreground"}`}>
             {status === 'connecting' ? '正在连接 KVM VNC 控制台...' : (errorMsg || 'WebVNC 已断开')}
           </div>
         )}
       </div>
-    </div>
+    </Card>
   )
 }

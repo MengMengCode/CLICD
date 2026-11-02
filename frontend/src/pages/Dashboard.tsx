@@ -1,3 +1,4 @@
+import { Card } from '../components/ui/card'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Cpu, HardDrive, MemoryStick, Network, Server } from 'lucide-react'
 import RingStats from '../components/RingStats'
@@ -72,7 +73,7 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       </div>
     )
   }
@@ -134,8 +135,8 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-black">控制面板</h1>
-        <p className="text-sm text-gray-500 mt-1">宿主机资源状态与容器概览</p>
+        <h1 className="text-2xl font-bold text-foreground">控制面板</h1>
+        <p className="text-sm text-muted-foreground mt-1">宿主机资源状态与容器概览</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -178,14 +179,14 @@ function SummaryCard({
   muted?: boolean
 }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-5">
-      <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+    <Card className="p-5">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
         {icon}
         {dot && <span className={`w-2 h-2 rounded-full ${dot}`}></span>}
         {title}
       </div>
-      <div className={`text-3xl font-bold ${muted ? 'text-gray-600' : 'text-black'}`}>{value}</div>
-    </div>
+      <div className={`text-3xl font-bold ${muted ? 'text-muted-foreground' : 'text-foreground'}`}>{value}</div>
+    </Card>
   )
 }
 

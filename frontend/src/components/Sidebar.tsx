@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react'
+import { Button } from './ui/button'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
+import { cn } from '../lib/utils'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import {
   ChevronLeft,
@@ -56,6 +59,16 @@ function LanguageIcon({ className = '' }: { className?: string }) {
   )
 }
 
+function SidebarHint({ collapsed, label, children }: { collapsed: boolean; label: string; children: ReactNode }) {
+  if (!collapsed) return children
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const navigate = useNavigate()
   const location = useLocation()
@@ -67,268 +80,106 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   useEffect(() => {
     getVersion()
       .then(res => {
-        if (res.data?.data?.version) {
-          setVersion(res.data.data.version)
-        }
+        if (res.data?.data?.version) setVersion(res.data.data.version)
       })
       .catch(() => {})
   }, [])
 
-  const isContainerPage =
-    location.pathname.startsWith('/containers') ||
-    location.pathname.startsWith('/container')
-
-  const isImagesPage = location.pathname.startsWith('/images')
-
-  const isSnapshotsPage = location.pathname.startsWith('/snapshots')
-  const isRoutingPage = location.pathname.startsWith('/routing')
-  const isStoragePage = location.pathname.startsWith('/storage')
-  const isAuditLogsPage = location.pathname.startsWith('/audit-logs')
-  const isApiIntegrationPage = location.pathname.startsWith('/api-integration')
-  const isHostReportPage = location.pathname.startsWith('/host-report')
-  const isSettingsPage = location.pathname.startsWith('/settings')
+  const navItems = [
+    { path: '/', label: '控制面板', icon: LayoutDashboard, active: location.pathname === '/', admin: true },
+    { path: '/containers', label: '容器管理', icon: Server, active: location.pathname.startsWith('/container'), admin: false },
+    { path: '/images', label: '镜像管理', icon: Package, active: location.pathname.startsWith('/images'), admin: true },
+    { path: '/snapshots', label: '快照管理', icon: Camera, active: location.pathname.startsWith('/snapshots'), admin: true },
+    { path: '/routing', label: '路由管理', icon: Route, active: location.pathname.startsWith('/routing'), admin: true },
+    { path: '/storage', label: '存储管理', icon: HardDrive, active: location.pathname.startsWith('/storage'), admin: true },
+    { path: '/audit-logs', label: '操作日志', icon: ScrollText, active: location.pathname.startsWith('/audit-logs'), admin: true },
+    { path: '/sub-users', label: '子用户管理', icon: UserCog, active: location.pathname.startsWith('/sub-users'), admin: true },
+    { path: '/api-integration', label: 'API 集成', icon: Code2, active: location.pathname.startsWith('/api-integration'), admin: true },
+    { path: '/host-report', label: '宿主机信息', icon: Cpu, active: location.pathname.startsWith('/host-report'), admin: true },
+    { path: '/settings', label: '面板设置', icon: UserCog, active: location.pathname.startsWith('/settings'), admin: true },
+  ]
+  const themeLabel = t(theme === 'dark' ? '切换亮色模式' : '切换暗黑模式')
 
   return (
-    <aside
-      className={`fixed left-0 top-0 h-full bg-white border-r border-gray-200 flex flex-col transition-all duration-300 z-30 dark:bg-gray-900 dark:border-gray-700 ${
-        collapsed ? 'w-16' : 'w-60'
-      }`}
-    >
-      <div className="flex items-center justify-between h-14 px-4 border-b border-gray-200 dark:border-gray-700">
-        {!collapsed && (
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 flex items-center justify-center">
+    <TooltipProvider delayDuration={150}>
+      <aside className={cn('fixed left-0 top-0 z-30 flex h-full flex-col border-r bg-card text-card-foreground transition-all duration-300', collapsed ? 'w-16' : 'w-60')}>
+        <div className={cn('flex h-14 shrink-0 items-center justify-between border-b', collapsed ? 'px-1' : 'px-4')}>
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center">
               <AppIcon className="w-5 h-5" />
             </div>
-            <span className="font-bold text-black text-sm dark:text-white">CLICD</span>
+            {!collapsed && <span className="text-sm font-bold">CLICD</span>}
           </div>
-        )}
-        {collapsed && (
-          <div className="w-7 h-7 flex items-center justify-center mx-auto">
-            <AppIcon className="w-5 h-5" />
-          </div>
-        )}
-        <button
-          onClick={onToggle}
-          className="p-1 rounded hover:bg-gray-100 text-gray-500 dark:hover:bg-gray-800 dark:text-gray-400"
-          title={t('切换侧边栏')}
-        >
-          {collapsed ? (
-            <ChevronRight className="w-4 h-4" />
-          ) : (
-            <ChevronLeft className="w-4 h-4" />
-          )}
-        </button>
-      </div>
-
-      <nav className="flex-1 py-4 px-2 space-y-1">
-        {!isSubUser && (
-          <button
-            onClick={() => navigate('/')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors ${
-              location.pathname === '/'
-                ? 'bg-black text-white dark:bg-white dark:text-black'
-                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
-            }`}
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            {!collapsed && <span>控制面板</span>}
-          </button>
-        )}
-
-        <button
-          onClick={() => navigate('/containers')}
-          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors ${
-            isContainerPage
-              ? 'bg-black text-white dark:bg-white dark:text-black'
-              : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
-          }`}
-        >
-          <Server className="w-4 h-4" />
-          {!collapsed && <span>容器管理</span>}
-        </button>
-
-        {!isSubUser && (
-          <button
-            onClick={() => navigate('/images')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors ${
-              isImagesPage
-                ? 'bg-black text-white dark:bg-white dark:text-black'
-                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
-            }`}
-          >
-            <Package className="w-4 h-4" />
-            {!collapsed && <span>镜像管理</span>}
-          </button>
-        )}
-
-        {!isSubUser && (
-          <>
-            <button
-              onClick={() => navigate('/snapshots')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors ${
-                isSnapshotsPage
-                  ? 'bg-black text-white dark:bg-white dark:text-black'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
-              }`}
-            >
-              <Camera className="w-4 h-4" />
-              {!collapsed && <span>快照管理</span>}
-            </button>
-
-            <button
-              onClick={() => navigate('/routing')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors ${
-                isRoutingPage
-                  ? 'bg-black text-white dark:bg-white dark:text-black'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
-              }`}
-            >
-              <Route className="w-4 h-4" />
-              {!collapsed && <span>路由管理</span>}
-            </button>
-
-            <button
-              onClick={() => navigate('/storage')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors ${
-                isStoragePage
-                  ? 'bg-black text-white dark:bg-white dark:text-black'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
-              }`}
-            >
-              <HardDrive className="w-4 h-4" />
-              {!collapsed && <span>存储管理</span>}
-            </button>
-
-            <button
-              onClick={() => navigate('/audit-logs')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors ${
-                isAuditLogsPage
-                  ? 'bg-black text-white dark:bg-white dark:text-black'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
-              }`}
-            >
-              <ScrollText className="w-4 h-4" />
-              {!collapsed && <span>操作日志</span>}
-            </button>
-
-            <button
-              onClick={() => navigate('/sub-users')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors ${
-                location.pathname.startsWith('/sub-users')
-                  ? 'bg-black text-white dark:bg-white dark:text-black'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
-              }`}
-            >
-              <UserCog className="w-4 h-4" />
-              {!collapsed && <span>子用户管理</span>}
-            </button>
-
-            <button
-              onClick={() => navigate('/api-integration')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors ${
-                isApiIntegrationPage
-                  ? 'bg-black text-white dark:bg-white dark:text-black'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
-              }`}
-            >
-              <Code2 className="w-4 h-4" />
-              {!collapsed && <span>API 集成</span>}
-            </button>
-
-            <button
-              onClick={() => navigate('/host-report')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors ${
-                isHostReportPage
-                  ? 'bg-black text-white dark:bg-white dark:text-black'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
-              }`}
-            >
-              <Cpu className="w-4 h-4" />
-              {!collapsed && <span>宿主机信息</span>}
-            </button>
-
-            <button
-              onClick={() => navigate('/settings')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors ${
-                isSettingsPage
-                  ? 'bg-black text-white dark:bg-white dark:text-black'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
-              }`}
-            >
-              <UserCog className="w-4 h-4" />
-              {!collapsed && <span>面板设置</span>}
-            </button>
-          </>
-        )}
-      </nav>
-
-      <div className="border-t border-gray-200 dark:border-gray-700 p-2 space-y-1">
-        {/* Theme Toggle */}
-        <div className={collapsed ? 'space-y-1' : 'flex items-center gap-1'}>
-          <button
-            onClick={toggleTheme}
-            className={`${collapsed ? 'w-full justify-center' : 'flex-1'} flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-gray-600 hover:bg-gray-100 transition-colors dark:text-gray-400 dark:hover:bg-gray-800`}
-            title={t(theme === 'dark' ? '切换亮色模式' : '切换暗黑模式')}
-          >
-            {theme === 'dark' ? (
-              <Sun className="w-4 h-4" />
-            ) : (
-              <Moon className="w-4 h-4" />
-            )}
-            {!collapsed && <span>{theme === 'dark' ? '亮色模式' : '暗黑模式'}</span>}
-          </button>
-
-          <button
-            onClick={() => { void toggleLanguage() }}
-            className={`${collapsed ? 'w-full justify-center' : 'flex-1 justify-center'} flex items-center gap-2 rounded-md px-3 py-2.5 text-sm text-gray-600 hover:bg-gray-100 transition-colors dark:text-gray-400 dark:hover:bg-gray-800`}
-            title="Language"
-          >
-            <LanguageIcon className="h-4 w-4 shrink-0" />
-            {!collapsed && <span>Language</span>}
-          </button>
+          <SidebarHint collapsed={collapsed} label={t('切换侧边栏')}>
+            <Button variant="ghost" size="icon" onClick={onToggle} className="h-6 w-6 shrink-0" aria-label={t('切换侧边栏')}>
+              {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </Button>
+          </SidebarHint>
         </div>
 
-        {/* Version */}
-        {version && (
-          <div className={`px-3 py-2 text-xs text-gray-400 dark:text-gray-500 ${collapsed ? 'text-center' : ''}`}>
-            {collapsed ? (
-              <a
-                href="https://github.com/MengMengCode/CLICD"
-                target="_blank"
-                rel="noreferrer"
-                title={`CLICD v${version}`}
-                className="inline-flex items-center justify-center rounded text-gray-400 transition-colors hover:text-gray-900 dark:text-gray-500 dark:hover:text-white"
-              >
-                <GitHubIcon className="h-4 w-4" />
-              </a>
-            ) : (
-              <div className="flex min-w-0 items-center gap-2">
-                <a
-                  href="https://github.com/MengMengCode/CLICD"
-                  target="_blank"
-                  rel="noreferrer"
-                  title="CLICD"
-                  className="inline-flex min-w-0 items-center gap-1 rounded text-gray-500 transition-colors hover:text-gray-950 dark:text-gray-400 dark:hover:text-white"
-                >
-                  <GitHubIcon className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">CLICD</span>
-                </a>
-                <span className="shrink-0">v{version}</span>
-              </div>
-            )}
-          </div>
-        )}
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 py-4" aria-label={t('主导航')}>
+          {navItems.filter(item => !item.admin || !isSubUser).map(item => (
+            <SidebarHint key={item.path} collapsed={collapsed} label={t(item.label)}>
+              <Button variant={item.active ? 'default' : 'ghost'} onClick={() => navigate(item.path)} aria-label={t(item.label)} aria-current={item.active ? 'page' : undefined}
+                className={cn('h-auto w-full gap-3 px-3 py-2.5 text-sm', collapsed ? 'justify-center' : 'justify-start')}>
+                <item.icon className="w-4 h-4" />
+                {!collapsed && <span>{item.label}</span>}
+              </Button>
+            </SidebarHint>
+          ))}
+        </nav>
 
-        {/* Logout */}
-        <button
-          onClick={logout}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-gray-600 hover:bg-gray-100 transition-colors dark:text-gray-400 dark:hover:bg-gray-800"
-        >
-          <LogOut className="w-4 h-4" />
-          {!collapsed && <span>退出登录</span>}
-        </button>
-      </div>
-    </aside>
+        <div className="shrink-0 space-y-1 border-t p-2">
+          <div className={collapsed ? 'space-y-1' : 'flex items-center gap-1'}>
+            <SidebarHint collapsed={collapsed} label={themeLabel}>
+              <Button variant="ghost" onClick={toggleTheme} aria-label={themeLabel}
+                className={cn('h-auto gap-3 px-3 py-2.5 text-sm', collapsed ? 'w-full justify-center' : 'min-w-0 flex-1 justify-start')}>
+                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                {!collapsed && <span>{theme === 'dark' ? '亮色模式' : '暗黑模式'}</span>}
+              </Button>
+            </SidebarHint>
+            <SidebarHint collapsed={collapsed} label="Language">
+              <Button variant="ghost" onClick={() => { void toggleLanguage() }} aria-label="Language"
+                className={cn('h-auto justify-center gap-2 px-3 py-2.5 text-sm', collapsed ? 'w-full' : 'min-w-0 flex-1')}>
+                <LanguageIcon className="h-4 w-4 shrink-0" />
+                {!collapsed && <span>Language</span>}
+              </Button>
+            </SidebarHint>
+          </div>
+
+          {version && (
+            <div className={cn('px-3 py-2 text-xs text-muted-foreground', collapsed && 'text-center')}>
+              {collapsed ? (
+                <SidebarHint collapsed label={`CLICD v${version}`}>
+                  <Button asChild variant="link" className="h-auto p-0">
+                    <a href="https://github.com/MengMengCode/CLICD" target="_blank" rel="noreferrer" aria-label={`CLICD v${version}`}>
+                      <GitHubIcon className="h-4 w-4" />
+                    </a>
+                  </Button>
+                </SidebarHint>
+              ) : (
+                <div className="flex min-w-0 items-center gap-2">
+                  <Button asChild variant="link" className="h-auto min-w-0 gap-1 p-0 text-xs">
+                    <a href="https://github.com/MengMengCode/CLICD" target="_blank" rel="noreferrer" aria-label="CLICD">
+                      <GitHubIcon className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">CLICD</span>
+                    </a>
+                  </Button>
+                  <span className="shrink-0">v{version}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <SidebarHint collapsed={collapsed} label={t('退出登录')}>
+            <Button variant="ghost" onClick={logout} aria-label={t('退出登录')}
+              className={cn('h-auto w-full gap-3 px-3 py-2.5 text-sm', collapsed ? 'justify-center' : 'justify-start')}>
+              <LogOut className="w-4 h-4" />
+              {!collapsed && <span>退出登录</span>}
+            </Button>
+          </SidebarHint>
+        </div>
+      </aside>
+    </TooltipProvider>
   )
 }

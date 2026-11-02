@@ -8,7 +8,7 @@ export default function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   return (
-    <div className="min-h-screen bg-gray-50 flex dark:bg-gray-950">
+    <div className="min-h-screen bg-muted/40 text-foreground flex">
       <AutoTranslate />
       <BrowserDialogTranslator />
       <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />

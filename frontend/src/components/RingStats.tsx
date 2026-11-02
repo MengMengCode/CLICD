@@ -1,5 +1,5 @@
+import { Card } from './ui/card'
 import type { ReactNode } from 'react'
-import { useTheme } from '../contexts/ThemeContext'
 
 interface RingStatProps {
   value: number
@@ -11,16 +11,13 @@ interface RingStatProps {
 }
 
 export function RingStat({ value, max = 100, label, subLabel, size = 120, strokeWidth = 8 }: RingStatProps) {
-  const { theme } = useTheme()
-  const isDark = theme === 'dark'
-
   const radius = (size - strokeWidth) / 2
   const circumference = radius * 2 * Math.PI
   const percentage = max === Infinity ? Math.max(value, 0) : Math.min(Math.max(value / max * 100, 0), 100)
   const strokeDashoffset = circumference - (Math.min(percentage, 100) / 100) * circumference
 
-  const bgStroke = isDark ? '#374151' : '#f3f4f6'
-  const progressStroke = isDark ? '#f9fafb' : '#000000'
+  const bgStroke = 'hsl(var(--muted))'
+  const progressStroke = 'hsl(var(--foreground))'
 
   return (
     <div className="flex flex-col items-center">
@@ -51,12 +48,12 @@ export function RingStat({ value, max = 100, label, subLabel, size = 120, stroke
         </svg>
         {/* Center value */}
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-2xl font-bold text-black dark:text-white">{percentage.toFixed(percentage < 1 ? 2 : 1)}%</span>
+          <span className="text-2xl font-bold text-foreground">{percentage.toFixed(percentage < 1 ? 2 : 1)}%</span>
         </div>
       </div>
       <div className="mt-2 text-center">
-        <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{label}</div>
-        {subLabel && <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{subLabel}</div>}
+        <div className="text-sm font-medium text-foreground">{label}</div>
+        {subLabel && <div className="text-xs text-muted-foreground mt-0.5">{subLabel}</div>}
       </div>
     </div>
   )
@@ -101,8 +98,8 @@ export default function RingStats({
   const hasSwap = swapTotal > 0
 
   return (
-    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
-      <h2 className="text-sm font-semibold text-black dark:text-white mb-4">状态</h2>
+    <Card className="p-5">
+      <h2 className="text-sm font-semibold text-foreground mb-4">状态</h2>
       <div className={`grid ${hasSwap ? 'grid-cols-5' : 'grid-cols-4'} gap-3`}>
         <RingStat
           value={cpuPercent}
@@ -132,6 +129,6 @@ export default function RingStats({
           subLabel={`${formatGB(diskUsed)} / ${formatGB(diskTotal)}`}
         />
       </div>
-    </div>
+    </Card>
   )
 }

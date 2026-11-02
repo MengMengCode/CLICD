@@ -1,3 +1,14 @@
+import { Label } from '../components/ui/label'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import { Textarea } from '../components/ui/textarea'
+import { NativeSelect } from '../components/ui/native-select'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
+import { Card } from '../components/ui/card'
+import { Badge } from '../components/ui/badge'
+import { Modal } from '../components/ui/modal'
+import { Progress } from '../components/ui/progress'
+import { Alert, AlertDescription } from '../components/ui/alert'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import {
@@ -171,7 +182,7 @@ export default function ImageManagement() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       </div>
     )
   }
@@ -180,45 +191,45 @@ export default function ImageManagement() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-black">镜像管理</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-bold text-foreground">镜像管理</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             管理 LXC / KVM 系统镜像，下载后的镜像才能用于创建容器/虚拟机。
             已下载 {downloadedCount}/{images.length}
           </p>
         </div>
-        <button
+        <Button variant="outline" size="sm"
           onClick={() => { fetchImages(); fetchStorage() }}
-          className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors text-xs font-medium"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
         >
           <RefreshCw className="w-3.5 h-3.5" />
           刷新
-        </button>
+        </Button>
       </div>
 
       {error && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+        <Alert variant="destructive">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          {error}
-        </div>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {storageLoading && (
-        <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+        <Alert>
           <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-          正在检查存储配置...
-        </div>
+          <AlertDescription>正在检查存储配置...</AlertDescription>
+        </Alert>
       )}
 
       {!storageLoading && !imageStorageReady && (
-        <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            尚未开启镜像缓存存储，无法下载新镜像。
-          </div>
-          <button onClick={() => navigate('/storage')} className="shrink-0 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-amber-100">
-            去开启
-          </button>
-        </div>
+        <Alert>
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <AlertDescription className="flex items-center justify-between gap-4">
+            <span>尚未开启镜像缓存存储，无法下载新镜像。</span>
+            <Button variant="outline" size="sm" onClick={() => navigate('/storage')} className="shrink-0 px-3 py-1.5 text-xs font-medium">
+              去开启
+            </Button>
+          </AlertDescription>
+        </Alert>
       )}
 
       <ImageTable
@@ -235,16 +246,16 @@ export default function ImageManagement() {
         storageReady={imageStorageReady}
         storageLoading={storageLoading}
         headerAction={(
-          <button
+          <Button size="sm"
             type="button"
             onClick={() => setCustomModalOpen('lxc')}
             disabled={storageLoading || !imageStorageReady}
             title={storageLoading ? t('正在检查存储配置...') : imageStorageReady ? t('下载第三方 LXC 镜像') : t('请先在存储管理中开启镜像缓存存储')}
-            className="inline-flex items-center gap-1.5 rounded-md bg-black px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-gray-200"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
           >
             <Plus className="h-3.5 w-3.5" />
             {t('第三方镜像')}
-          </button>
+          </Button>
         )}
       />
 
@@ -263,16 +274,16 @@ export default function ImageManagement() {
           storageReady={imageStorageReady}
           storageLoading={storageLoading}
           headerAction={(
-            <button
+            <Button size="sm"
               type="button"
               onClick={() => setCustomModalOpen('kvm')}
               disabled={storageLoading || !imageStorageReady}
               title={storageLoading ? t('正在检查存储配置...') : imageStorageReady ? t('下载第三方 KVM 镜像') : t('请先在存储管理中开启镜像缓存存储')}
-              className="inline-flex items-center gap-1.5 rounded-md bg-black px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-gray-200"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
             >
               <Plus className="h-3.5 w-3.5" />
               {t('第三方镜像')}
-            </button>
+            </Button>
           )}
         />
       )}
@@ -317,14 +328,6 @@ function CustomKVMImageModal({
   const [formError, setFormError] = useState('')
   const windows = virtualization === 'kvm' && form.provisioner !== 'linux-cloud-init'
 
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !submitting) onClose()
-    }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [onClose, submitting])
-
   const updateProvisioner = (provisioner: 'linux-cloud-init' | 'windows-10' | 'windows-11') => {
     setForm((current) => ({
       ...current,
@@ -363,103 +366,95 @@ function CustomKVMImageModal({
     }
   }
 
-  const inputClass = 'mt-1.5 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-black outline-none focus:border-black focus:ring-2 focus:ring-black/10 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:focus:border-white dark:focus:ring-white/10'
+  const inputClass = 'mt-1.5 w-full'
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 p-4 dark:bg-black/75">
-      <div className="w-full max-w-2xl overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
-        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
-          <div>
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">{t(virtualization === 'lxc' ? '下载第三方 LXC 镜像' : '下载第三方 KVM 镜像')}</h3>
-            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-              {t(virtualization === 'lxc' ? '支持 tar、tar.gz、tar.xz、tar.zst 格式的 Linux rootfs' : '镜像格式必须与所选无人值守安装模板匹配')}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} disabled={submitting} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-black disabled:opacity-50 dark:hover:bg-gray-800 dark:hover:text-white" title={t('关闭')}>
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
+    <Modal
+      title={t(virtualization === 'lxc' ? '下载第三方 LXC 镜像' : '下载第三方 KVM 镜像')}
+      description={t(virtualization === 'lxc' ? '支持 tar、tar.gz、tar.xz、tar.zst 格式的 Linux rootfs' : '镜像格式必须与所选无人值守安装模板匹配')}
+      onClose={onClose}
+      size="2xl"
+      dismissible={!submitting}
+      bodyClassName="p-0"
+      footer={(
+        <>
+          <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>{t('取消')}</Button>
+          <Button type="button" onClick={submit} disabled={submitting}>
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+            {submitting ? t('正在添加...') : t('添加并下载')}
+          </Button>
+        </>
+      )}
+    >
         <div className="max-h-[72vh] space-y-5 overflow-y-auto px-5 py-4">
           {virtualization === 'kvm' && <div>
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-200">{t('无人值守安装模板')}</label>
+            <Label className="text-sm font-medium text-foreground">{t('无人值守安装模板')}</Label>
             <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
               {([
                 ['linux-cloud-init', 'Linux cloud-init', 'QCOW2 / IMG'],
                 ['windows-10', 'Windows 10', '安装 ISO'],
                 ['windows-11', 'Windows 11', '安装 ISO'],
               ] as const).map(([value, label, hint]) => (
-                <button
+                <Button
                   key={value}
                   type="button"
                   onClick={() => updateProvisioner(value)}
                   disabled={arch !== 'amd64' && value !== 'linux-cloud-init'}
-                  className={`rounded-md border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                    form.provisioner === value
-                      ? 'border-black bg-gray-50 dark:border-white dark:bg-gray-800'
-                      : 'border-gray-200 hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500'
-                  }`}
+                  variant={form.provisioner === value ? 'secondary' : 'outline'}
+                  className="h-auto flex-col items-start gap-0 px-3 py-2 text-left"
                 >
-                  <span className="block text-sm font-medium text-gray-900 dark:text-white">{label}</span>
-                  <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{t(hint)}</span>
-                </button>
+                  <span className="block text-sm font-medium text-foreground">{label}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{t(hint)}</span>
+                </Button>
               ))}
             </div>
           </div>}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className="text-sm text-gray-700 dark:text-gray-200">
+            <Label className="text-sm text-foreground">
               {t('镜像名称')}
-              <input className={inputClass} value={form.name} maxLength={100} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder={virtualization === 'lxc' ? 'Alpine Custom Rootfs' : windows ? 'Windows 11 Custom' : 'Ubuntu Custom Cloud'} />
-            </label>
-            <label className="text-sm text-gray-700 dark:text-gray-200">
+              <Input className={inputClass} value={form.name} maxLength={100} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder={virtualization === 'lxc' ? 'Alpine Custom Rootfs' : windows ? 'Windows 11 Custom' : 'Ubuntu Custom Cloud'} />
+            </Label>
+            <Label className="text-sm text-foreground">
               {t('架构')}
-              <select className={inputClass} value={form.arch} disabled>
+              <NativeSelect wrapperClassName="mt-1.5 w-full" className="w-full" value={form.arch} disabled>
                 <option value={arch}>{arch}</option>
-              </select>
-            </label>
-            <label className="text-sm text-gray-700 dark:text-gray-200">
+              </NativeSelect>
+            </Label>
+            <Label className="text-sm text-foreground">
               {t('发行版')}
-              <input className={inputClass} value={form.distro} disabled={windows} maxLength={64} onChange={(event) => setForm({ ...form, distro: event.target.value })} placeholder="ubuntu" />
-            </label>
-            <label className="text-sm text-gray-700 dark:text-gray-200">
+              <Input className={inputClass} value={form.distro} disabled={windows} maxLength={64} onChange={(event) => setForm({ ...form, distro: event.target.value })} placeholder="ubuntu" />
+            </Label>
+            <Label className="text-sm text-foreground">
               {t('版本 / 代号')}
-              <input className={inputClass} value={form.release} disabled={windows} maxLength={64} onChange={(event) => setForm({ ...form, release: event.target.value })} placeholder="noble" />
-            </label>
+              <Input className={inputClass} value={form.release} disabled={windows} maxLength={64} onChange={(event) => setForm({ ...form, release: event.target.value })} placeholder="noble" />
+            </Label>
           </div>
 
-          <label className="block text-sm text-gray-700 dark:text-gray-200">
+          <Label className="block text-sm text-foreground">
             {t('备注')}
-            <textarea className={`${inputClass} min-h-20 resize-y`} value={form.description} maxLength={500} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder={t('镜像来源、版本或用途')} />
-          </label>
+            <Textarea className={`${inputClass} min-h-20 resize-y`} value={form.description} maxLength={500} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder={t('镜像来源、版本或用途')} />
+          </Label>
 
-          <label className="block text-sm text-gray-700 dark:text-gray-200">
+          <Label className="block text-sm text-foreground">
             {t('镜像下载地址')}
-            <input className={`${inputClass} font-mono text-xs`} value={form.url} onChange={(event) => setForm({ ...form, url: event.target.value })} placeholder={virtualization === 'lxc' ? 'https://example.com/rootfs.tar.xz' : windows ? 'https://example.com/windows.iso' : 'https://example.com/image.qcow2'} />
-          </label>
+            <Input className={`${inputClass} font-mono text-xs`} value={form.url} onChange={(event) => setForm({ ...form, url: event.target.value })} placeholder={virtualization === 'lxc' ? 'https://example.com/rootfs.tar.xz' : windows ? 'https://example.com/windows.iso' : 'https://example.com/image.qcow2'} />
+          </Label>
 
-          <label className="block text-sm text-gray-700 dark:text-gray-200">
-            SHA-256 <span className="text-xs text-gray-400">({t('可选')})</span>
-            <input className={`${inputClass} font-mono text-xs`} value={form.sha256 || ''} maxLength={64} onChange={(event) => setForm({ ...form, sha256: event.target.value })} placeholder={t('用于校验下载文件完整性')} />
-          </label>
+          <Label className="block text-sm text-foreground">
+            SHA-256 <span className="text-xs text-muted-foreground">({t('可选')})</span>
+            <Input className={`${inputClass} font-mono text-xs`} value={form.sha256 || ''} maxLength={64} onChange={(event) => setForm({ ...form, sha256: event.target.value })} placeholder={t('用于校验下载文件完整性')} />
+          </Label>
 
           {formError && (
-            <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+            <Alert variant="destructive">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              {formError}
-            </div>
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
           )}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-gray-200 bg-gray-50 px-5 py-3 dark:border-gray-700 dark:bg-gray-800">
-          <button type="button" onClick={onClose} disabled={submitting} className="rounded-md px-4 py-2 text-sm text-gray-700 hover:bg-gray-200 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700">{t('取消')}</button>
-          <button type="button" onClick={submit} disabled={submitting} className="inline-flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm text-white hover:bg-gray-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-gray-200">
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
-            {submitting ? t('正在添加...') : t('添加并下载')}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -496,76 +491,76 @@ function ImageTable({
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100">{title}</h2>
-          <span className="text-xs text-gray-400">
+          <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+          <span className="text-xs text-muted-foreground">
             已下载 {downloadedCount}/{totalCount}
           </span>
         </div>
         {headerAction}
       </div>
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="text-left px-4 py-3 text-[11px] font-medium text-gray-500 uppercase whitespace-nowrap">
+          <Table className="w-full">
+            <TableHeader>
+              <TableRow >
+                <TableHead className="text-left px-4 py-3 text-[11px] font-medium uppercase whitespace-nowrap">
                   系统镜像
-                </th>
-                <th className="text-left px-4 py-3 text-[11px] font-medium text-gray-500 uppercase whitespace-nowrap">
+                </TableHead>
+                <TableHead className="text-left px-4 py-3 text-[11px] font-medium uppercase whitespace-nowrap">
                   发行版
-                </th>
-                <th className="text-left px-4 py-3 text-[11px] font-medium text-gray-500 uppercase whitespace-nowrap">
+                </TableHead>
+                <TableHead className="text-left px-4 py-3 text-[11px] font-medium uppercase whitespace-nowrap">
                   架构
-                </th>
-                <th className="text-left px-4 py-3 text-[11px] font-medium text-gray-500 uppercase whitespace-nowrap">
+                </TableHead>
+                <TableHead className="text-left px-4 py-3 text-[11px] font-medium uppercase whitespace-nowrap">
                   大小
-                </th>
-                <th className="text-left px-4 py-3 text-[11px] font-medium text-gray-500 uppercase whitespace-nowrap">
+                </TableHead>
+                <TableHead className="text-left px-4 py-3 text-[11px] font-medium uppercase whitespace-nowrap">
                   状态
-                </th>
-                <th className="text-right px-4 py-3 text-[11px] font-medium text-gray-500 uppercase whitespace-nowrap">
+                </TableHead>
+                <TableHead className="text-right px-4 py-3 text-[11px] font-medium uppercase whitespace-nowrap">
                   操作
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody >
               {images.map((img) => {
                 const isBusy = actionLoading === img.id
                 return (
-                  <tr key={img.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3">
+                  <TableRow key={img.id} >
+                    <TableCell className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <span className="w-8 h-8 flex items-center justify-center flex-shrink-0">
                           {getTemplateIcon(img.id, img.distro, img.custom)}
                         </span>
                         <div>
-                          <span className="font-medium text-gray-900 text-sm dark:text-gray-100">{img.name}</span>
-                          {img.custom && <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-300">第三方</span>}
-                          <p className="text-[11px] text-gray-400">{img.description}</p>
+                          <span className="font-medium text-foreground text-sm">{img.name}</span>
+                          {img.custom && <Badge variant="secondary" className="ml-2 text-[10px]">第三方</Badge>}
+                          <p className="text-[11px] text-muted-foreground">{img.description}</p>
 
                         </div>
                       </div>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-600 font-mono">
+                    </TableCell>
+                    <TableCell className="px-4 py-3 text-xs font-mono">
                       {img.distro} {img.release}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 font-mono">
+                    </TableCell>
+                    <TableCell className="px-4 py-3 text-xs font-mono">
                       {img.arch}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-600 tabular-nums">
+                    </TableCell>
+                    <TableCell className="px-4 py-3 text-xs tabular-nums">
                       {formatSize(img.size_bytes)}
-                    </td>
-                    <td className="px-4 py-3">
+                    </TableCell>
+                    <TableCell className="px-4 py-3">
                       <StatusBadge img={img} />
-                    </td>
-                    <td className="px-4 py-3">
+                    </TableCell>
+                    <TableCell className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
                         {!img.downloaded && !img.downloading && (
-                          <button
+                          <Button size="sm"
                             onClick={() => onDownload(img.id)}
                             disabled={isBusy || storageLoading || !storageReady}
                             title={storageLoading ? '正在检查存储配置...' : storageReady ? '下载镜像' : '请先在存储管理中开启镜像缓存存储'}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-md hover:bg-gray-800 transition-colors text-xs font-medium disabled:opacity-50"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
                           >
                             {isBusy ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -573,65 +568,63 @@ function ImageTable({
                               <Download className="w-3.5 h-3.5" />
                             )}
                             {isBusy ? '下载中...' : '下载'}
-                          </button>
+                          </Button>
                         )}
 
                         {img.downloading && (
-                          <button
+                          <Button variant="destructive" size="sm"
                             onClick={() => onCancelDownload(img.id)}
                             disabled={isBusy}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition-colors text-xs font-medium disabled:opacity-50"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
                             title="取消下载并清理临时文件"
                           >
                             {isBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
                             {isBusy ? '取消中...' : '取消'}
-                          </button>
+                          </Button>
                         )}
 
                         {img.downloaded && !img.downloading && (
                           <>
-                            <button
+                            <Button
                               onClick={() => onToggle(img.id, img.enabled)}
                               disabled={isBusy || storageLoading || !storageReady}
                               title={storageLoading ? '正在检查存储配置...' : storageReady ? (img.enabled ? '禁用镜像' : '启用镜像') : '请先在存储管理中开启镜像缓存存储'}
-                              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors disabled:opacity-50 ${
-                                img.enabled
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
-                                  : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100'
-                              }`}
+                              variant={img.enabled ? 'secondary' : 'outline'}
+                              size="sm"
+                              className="gap-1 px-2.5 py-1.5 text-xs"
                             >
                               {img.enabled ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />}
                               {img.enabled ? '启用' : '禁用'}
-                            </button>
-                            <button
+                            </Button>
+                            <Button variant="destructive" size="icon"
                               onClick={() => onDelete(img.id)}
                               disabled={isBusy}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition-colors text-xs font-medium disabled:opacity-50"
+                              className="h-8 w-8 inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium"
                               title="删除镜像缓存"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            </Button>
                           </>
                         )}
                         {img.custom && !img.downloading && (
-                          <button
+                          <Button variant="destructive" size="icon"
                             onClick={() => onRemoveCustom(img.id)}
                             disabled={isBusy}
-                            className="inline-flex items-center rounded-md border border-gray-200 p-1.5 text-gray-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:border-gray-700 dark:text-gray-400 dark:hover:border-red-900 dark:hover:bg-red-950 dark:hover:text-red-300"
+                            className="h-8 w-8 inline-flex items-center"
                             title="移除第三方镜像源和缓存"
                           >
                             <Unlink className="h-3.5 w-3.5" />
-                          </button>
+                          </Button>
                         )}
                       </div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 )
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
-      </div>
+      </Card>
     </div>
   )
 }
@@ -643,56 +636,53 @@ function StatusBadge({ img }: { img: ImageInfo }) {
     const showProgress = !isQueued && img.stage === 'downloading' && (progress > 0 || img.downloaded_bytes > 0)
     return (
       <div className="inline-flex flex-col gap-1">
-        <span
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700"
+        <Badge
+          variant="secondary"
+          className="gap-1 text-[11px]"
           title={downloadStatusTitle(img)}
         >
           <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
           {downloadStatusLabel(img)}
-        </span>
+        </Badge>
         {showProgress && (
-          <span className="block h-1 w-24 overflow-hidden rounded-full bg-amber-100">
-            <span
-              className={`block h-full rounded-full bg-amber-500 transition-all ${progress <= 0 ? 'animate-pulse' : ''}`}
-              style={{ width: progress > 0 ? `${progress}%` : '35%' }}
-            />
-          </span>
+          <Progress value={progress > 0 ? progress : 35} className={`h-1 w-24 ${progress <= 0 ? 'animate-pulse' : ''}`} />
         )}
       </div>
     )
   }
   if (img.error) {
     return (
-      <span
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-600"
+      <Badge
+        variant="destructive"
+        className="gap-1 text-[11px]"
         title={img.error}
       >
         <AlertCircle className="w-3 h-3" />
         下载失败
-      </span>
+      </Badge>
     )
   }
   if (img.downloaded && img.enabled) {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700">
+      <Badge className="gap-1 text-[11px]">
         <CheckCircle2 className="w-3 h-3" />
         可用
-      </span>
+      </Badge>
     )
   }
   if (img.downloaded && !img.enabled) {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-500">
+      <Badge variant="secondary" className="gap-1 text-[11px]">
         <XCircle className="w-3 h-3" />
         已禁用
-      </span>
+      </Badge>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-600">
+    <Badge variant="outline" className="gap-1 text-[11px]">
       <XCircle className="w-3 h-3" />
       未下载
-    </span>
+    </Badge>
   )
 }
 

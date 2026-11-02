@@ -1,5 +1,13 @@
+import { Modal } from '../components/ui/modal'
+import { Card } from '../components/ui/card'
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '../components/ui/table'
+import { Button } from '../components/ui/button'
+import { Label } from '../components/ui/label'
+import { Checkbox } from '../components/ui/checkbox'
+import { Badge } from '../components/ui/badge'
+import { NativeSelect } from '../components/ui/native-select'
 import { useCallback, useEffect, useState } from 'react'
-import { Copy, HardDrive, KeyRound, LogIn, RefreshCw, Save, ScrollText, UserCog, X } from 'lucide-react'
+import { Copy, HardDrive, KeyRound, LogIn, RefreshCw, Save, ScrollText, UserCog } from 'lucide-react'
 import { useDialog } from '../components/Dialog'
 import { useLanguage } from '../contexts/LanguageContext'
 import api, { AuditLog, ImageInfo, LoginLog, getImages, updateSubUserImages } from '../services/api'
@@ -167,7 +175,7 @@ export default function SubUserManagement() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-black" />
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
       </div>
     )
   }
@@ -175,163 +183,157 @@ export default function SubUserManagement() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold text-black dark:text-white">{t('子用户管理')}</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+        <h1 className="text-xl font-semibold text-foreground">{t('子用户管理')}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           {t('容器分配的子用户列表，共')} {users.length} {t('个')}
         </p>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+      <Card className="overflow-hidden">
         {users.length === 0 ? (
           <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
-            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
-              <UserCog className="h-7 w-7 text-gray-400" />
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-muted">
+              <UserCog className="h-7 w-7 text-muted-foreground" />
             </div>
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">暂无子用户</div>
+            <div className="text-sm font-medium text-foreground">暂无子用户</div>
           </div>
         ) : (
-          <table className="w-full min-w-[820px] text-sm">
-            <thead className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium w-12">#</th>
-                <th className="px-4 py-3 text-left font-medium">容器名称</th>
-                <th className="px-4 py-3 text-left font-medium">UUID</th>
-                <th className="px-4 py-3 text-left font-medium">最后登录</th>
-                <th className="px-4 py-3 text-center font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+          <Table className="w-full min-w-[820px] text-sm">
+            <TableHeader className="border-b border-border bg-muted text-xs text-muted-foreground">
+              <TableRow>
+                <TableHead className="h-auto px-4 py-3 text-left font-medium w-12">#</TableHead>
+                <TableHead className="h-auto px-4 py-3 text-left font-medium">容器名称</TableHead>
+                <TableHead className="h-auto px-4 py-3 text-left font-medium">UUID</TableHead>
+                <TableHead className="h-auto px-4 py-3 text-left font-medium">最后登录</TableHead>
+                <TableHead className="h-auto px-4 py-3 text-center font-medium">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className="divide-y divide-border">
               {users.map((user, index) => (
-                <tr key={user.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                  <td className="px-4 py-3 text-gray-400 dark:text-gray-500">{index + 1}</td>
-                  <td className="px-4 py-3 font-medium text-black dark:text-white">{user.container_name || '-'}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">{user.container_uuid || '-'}</td>
-                  <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
+                <TableRow key={user.id} className="hover:bg-muted/50">
+                  <TableCell className="px-4 py-3 text-muted-foreground">{index + 1}</TableCell>
+                  <TableCell className="px-4 py-3 font-medium text-foreground">{user.container_name || '-'}</TableCell>
+                  <TableCell className="px-4 py-3 font-mono text-xs text-muted-foreground">{user.container_uuid || '-'}</TableCell>
+                  <TableCell className="px-4 py-3 text-muted-foreground">
                     {user.last_login ? (
                       <div>
                         <div className="text-xs">{user.last_login}</div>
-                        <div className="text-xs text-gray-400 dark:text-gray-500">{user.last_login_ip}</div>
+                        <div className="text-xs text-muted-foreground">{user.last_login_ip}</div>
                       </div>
                     ) : (
-                      <span className="text-gray-400">从未登录</span>
+                      <span className="text-muted-foreground">从未登录</span>
                     )}
-                  </td>
-                  <td className="px-4 py-3">
+                  </TableCell>
+                  <TableCell className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
-                      <button
+                      <Button variant="ghost"
                         onClick={() => setPasswordUser(user)}
-                        className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-xs text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors"
+                        className="h-auto inline-flex items-center gap-1 px-2 py-1.5 text-xs"
                         title="查看密码"
                       >
                         <KeyRound className="w-3.5 h-3.5" />
                         查看密码
-                      </button>
-                      <button
+                      </Button>
+                      <Button variant="ghost"
                         onClick={() => showAuditLogs(user)}
-                        className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                        className="h-auto inline-flex items-center gap-1 px-2 py-1.5 text-xs"
                         title="查看操作日志"
                       >
                         <ScrollText className="w-3.5 h-3.5" />
                         操作日志
-                      </button>
-                      <button
+                      </Button>
+                      <Button variant="ghost"
                         onClick={() => showLoginLogs(user)}
-                        className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-xs text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 transition-colors"
+                        className="h-auto inline-flex items-center gap-1 px-2 py-1.5 text-xs"
                         title="查看登录日志"
                       >
                         <LogIn className="w-3.5 h-3.5" />
                         登录日志
-                      </button>
-                      <button
+                      </Button>
+                      <Button variant="ghost"
                         onClick={() => openImageLimit(user)}
-                        className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-xs text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors"
+                        className="h-auto inline-flex items-center gap-1 px-2 py-1.5 text-xs"
                         title="可用镜像"
                       >
                         <HardDrive className="w-3.5 h-3.5" />
                         可用镜像
-                      </button>
+                      </Button>
                     </div>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-      </div>
+      </Card>
 
       {passwordUser && (
-        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 shadow-xl w-full max-w-lg overflow-hidden">
-            <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="text-sm font-semibold text-black dark:text-white">查看密码</h3>
-              <div className="flex items-center gap-2">
-                <button
+        <Modal size="lg" onClose={() => setPasswordUser(null)} title="查看密码" extra={<Button variant="ghost"
                   onClick={() => rotatePassword(passwordUser)}
                   disabled={rotatingPassword}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-amber-700 bg-amber-50 hover:bg-amber-100 dark:text-amber-300 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 disabled:opacity-50"
+                  className="h-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs"
                   title="轮换密码"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${rotatingPassword ? 'animate-spin' : ''}`} />
                   {rotatingPassword ? '轮换中...' : '轮换密码'}
-                </button>
-                <button onClick={() => setPasswordUser(null)} className="p-1 text-gray-400 hover:text-black dark:hover:text-white rounded">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-            <div className="p-5">
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-sm space-y-3">
+                </Button>} flush>
+<div className="p-5">
+              <div className="bg-muted rounded-lg p-4 text-sm space-y-3">
                 <div className="flex items-start justify-between gap-3">
-                  <span className="shrink-0 text-gray-500 dark:text-gray-400">用户</span>
-                  <span className="min-w-0 text-right font-medium text-black dark:text-white break-all">{passwordUser.username}</span>
+                  <span className="shrink-0 text-muted-foreground">用户</span>
+                  <span className="min-w-0 text-right font-medium text-foreground break-all">{passwordUser.username}</span>
                 </div>
                 <div className="flex items-start justify-between gap-3">
-                  <span className="shrink-0 text-gray-500 dark:text-gray-400">地址</span>
+                  <span className="shrink-0 text-muted-foreground">地址</span>
                   <div className="flex min-w-0 items-center gap-1">
-                    <span className="font-mono text-xs text-black dark:text-white break-all">{managementUrl(passwordUser)}</span>
-                    <button onClick={() => copyText(managementUrl(passwordUser))} className="shrink-0 p-0.5 text-gray-400 hover:text-black dark:hover:text-white rounded" title="复制">
+                    <span className="font-mono text-xs text-foreground break-all">{managementUrl(passwordUser)}</span>
+                    <Button variant="ghost" onClick={() => copyText(managementUrl(passwordUser))} className="h-auto shrink-0 p-0.5" title="复制">
                       <Copy className="w-3 h-3" />
-                    </button>
+                    </Button>
                   </div>
                 </div>
                 <div className="flex items-start justify-between gap-3">
-                  <span className="shrink-0 text-gray-500 dark:text-gray-400">密码</span>
+                  <span className="shrink-0 text-muted-foreground">密码</span>
                   <div className="flex min-w-0 items-center gap-1">
-                    <span className="font-mono text-xs text-black dark:text-white break-all">
+                    <span className="font-mono text-xs text-foreground break-all">
                       {passwordUser.password || '未保存，请轮换生成新密码'}
                     </span>
                     {passwordUser.password && (
-                      <button onClick={() => copyText(passwordUser.password || '')} className="shrink-0 p-0.5 text-gray-400 hover:text-black dark:hover:text-white rounded" title="复制">
+                      <Button variant="ghost" onClick={() => copyText(passwordUser.password || '')} className="h-auto shrink-0 p-0.5" title="复制">
                         <Copy className="w-3 h-3" />
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
+</Modal>
       )}
 
       {imageUser && (
-        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-200 dark:border-gray-700">
-              <div>
-                <h3 className="text-sm font-semibold text-black dark:text-white">可用镜像</h3>
-                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{imageUser.username} · 默认勾选当前系统，取消后将禁止重装该系统</p>
+        <Modal size="2xl" onClose={() => setImageUser(null)} title="可用镜像" description={<>{imageUser.username} · 默认勾选当前系统，取消后将禁止重装该系统</>} flush footer={<div className="flex w-full items-center justify-between gap-3">
+              <span className="text-xs text-muted-foreground">已选择 {selectedImageIDs.length} 个镜像</span>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" onClick={() => setImageUser(null)} className="h-auto px-3 py-2 text-sm">
+                  取消
+                </Button>
+                <Button variant="default"
+                  onClick={saveImageLimit}
+                  disabled={savingImages || imagesLoading}
+                  className="h-auto inline-flex items-center gap-1.5 px-3 py-2 text-sm"
+                >
+                  <Save className="h-4 w-4" />
+                  {savingImages ? '保存中...' : '保存'}
+                </Button>
               </div>
-              <button onClick={() => setImageUser(null)} className="p-1 text-gray-400 hover:text-black dark:hover:text-white rounded">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-5">
+            </div>}>
+<div className="flex-1 overflow-y-auto p-5">
               {imagesLoading ? (
                 <div className="flex items-center justify-center py-12">
-                  <div className="h-7 w-7 animate-spin rounded-full border-b-2 border-black" />
+                  <div className="h-7 w-7 animate-spin rounded-full border-b-2 border-primary" />
                 </div>
               ) : images.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500">
+                <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
                   暂无已下载并启用的镜像
                 </div>
               ) : (
@@ -340,156 +342,130 @@ export default function SubUserManagement() {
                     const checked = selectedImageIDs.includes(image.id)
                     const current = (imageUser.current_image_ids || []).includes(image.id)
                     return (
-                      <label
+                      <Label
                         key={image.id}
-                        className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 text-sm transition-colors ${checked ? 'border-black bg-gray-50 dark:border-white dark:bg-gray-800' : 'border-gray-200 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'}`}
+                        className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 text-sm leading-normal ${checked ? 'border-primary bg-accent' : 'border-input hover:bg-accent'}`}
                       >
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={checked}
-                          onChange={() => toggleImageID(image.id)}
-                          className="mt-1 h-4 w-4 rounded border-gray-300 text-black focus:ring-black"
+                          onCheckedChange={() => toggleImageID(image.id)}
+                          className="mt-1 h-4 w-4"
                         />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium text-black dark:text-white">{image.name}{current ? '（当前系统）' : ''}</span>
-                          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                          <span className="block truncate font-medium text-foreground">{image.name}{current ? '（当前系统）' : ''}</span>
+                          <span className="mt-1 block text-xs text-muted-foreground">
                             {image.type.toUpperCase()} · {image.arch} · {image.distro} {image.release}
                           </span>
                         </span>
-                      </label>
+                      </Label>
                     )
                   })}
                 </div>
               )}
             </div>
-            <div className="flex items-center justify-between gap-3 border-t border-gray-200 dark:border-gray-700 px-5 py-3">
-              <span className="text-xs text-gray-500 dark:text-gray-400">已选择 {selectedImageIDs.length} 个镜像</span>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setImageUser(null)} className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 rounded-md">
-                  取消
-                </button>
-                <button
-                  onClick={saveImageLimit}
-                  disabled={savingImages || imagesLoading}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-sm bg-black text-white rounded-md hover:bg-gray-800 disabled:opacity-50"
-                >
-                  <Save className="h-4 w-4" />
-                  {savingImages ? '保存中...' : '保存'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+</Modal>
       )}
 
       {/* Log Modal */}
       {(auditLogs || loginLogs) && (
-        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 shadow-xl w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="text-sm font-semibold text-black dark:text-white">{modalTitle}</h3>
-              <button onClick={closeModal} className="p-1 text-gray-400 hover:text-black dark:hover:text-white rounded">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="overflow-auto flex-1">
-              {auditLogs && (
-                <table className="w-full text-sm">
-                  <thead className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-2 text-left">操作时间</th>
-                      <th className="px-4 py-2 text-left">操作</th>
-                      <th className="px-4 py-2 text-left">IP</th>
-                      <th className="px-4 py-2 text-left">UA</th>
-                      <th className="px-4 py-2 text-center">结果</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                    {auditLogs.length === 0 ? (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">暂无操作日志</td></tr>
-                    ) : currentAuditLogs?.map((log, i) => (
-                      <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                        <td className="px-4 py-2 text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">{log.time}</td>
-                        <td className="px-4 py-2 text-xs text-gray-700 dark:text-gray-300">{log.action}</td>
-                        <td className="px-4 py-2 text-xs font-mono text-gray-500 dark:text-gray-400">{log.ip || '-'}</td>
-                        <td className="px-4 py-2 text-xs text-gray-500 dark:text-gray-400 max-w-[200px] truncate" title={log.user_agent}>{log.user_agent || '-'}</td>
-                        <td className="px-4 py-2 text-center">
-                          {log.success !== undefined ? (
-                            log.success ? (
-                              <span className="inline-flex px-2 py-0.5 rounded text-xs bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400">成功</span>
-                            ) : (
-                              <span className="inline-flex px-2 py-0.5 rounded text-xs bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400" title={log.error}>{log.error ? '失败' : '失败'}</span>
-                            )
-                          ) : (
-                            <span className="text-gray-400">-</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-              {loginLogs && (
-                <table className="w-full text-sm">
-                  <thead className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-2 text-left">登录时间</th>
-                      <th className="px-4 py-2 text-left">登录 IP</th>
-                      <th className="px-4 py-2 text-left">UA</th>
-                      <th className="px-4 py-2 text-center">结果</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                    {loginLogs.length === 0 ? (
-                      <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">暂无登录日志</td></tr>
-                    ) : currentLoginLogs?.map((log, i) => (
-                      <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                        <td className="px-4 py-2 text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">{log.time}</td>
-                        <td className="px-4 py-2 text-xs font-mono text-gray-500 dark:text-gray-400">{log.ip}</td>
-                        <td className="px-4 py-2 text-xs text-gray-500 dark:text-gray-400 max-w-[250px] truncate" title={log.user_agent}>{log.user_agent}</td>
-                        <td className="px-4 py-2 text-center">
-                          {log.success ? (
-                            <span className="inline-flex px-2 py-0.5 rounded text-xs bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400">成功</span>
-                          ) : (
-                            <span className="inline-flex px-2 py-0.5 rounded text-xs bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400">失败</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-            {currentLogTotal > 0 && (
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 dark:border-gray-700 px-5 py-3">
-                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+        <Modal size="3xl" onClose={closeModal} title={modalTitle} flush footer={currentLogTotal > 0 && (
+              <div className="flex w-full flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span>
                     显示 {logStart + 1}-{Math.min(logStart + logPageSize, currentLogTotal)} / {currentLogTotal}
                   </span>
-                  <select
+                  <NativeSelect
                     value={logPageSize}
                     onChange={(event) => {
                       setLogPageSize(Number(event.target.value))
                       setLogPage(1)
                     }}
-                    className="h-7 rounded border border-gray-300 bg-white px-2 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+                    className="h-7 pl-2 pr-8 text-xs"
+                    aria-label="每页日志数量"
                   >
                     <option value={10}>10 / 页</option>
                     <option value={20}>20 / 页</option>
                     <option value={50}>50 / 页</option>
-                  </select>
+                  </NativeSelect>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => setLogPage(1)} disabled={currentLogPage === 1} className="rounded border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">首页</button>
-                  <button onClick={() => setLogPage((page) => Math.max(1, page - 1))} disabled={currentLogPage === 1} className="rounded border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">上一页</button>
-                  <span className="px-2 text-xs text-gray-500 dark:text-gray-400">{currentLogPage} / {logTotalPages}</span>
-                  <button onClick={() => setLogPage((page) => Math.min(logTotalPages, page + 1))} disabled={currentLogPage === logTotalPages} className="rounded border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">下一页</button>
-                  <button onClick={() => setLogPage(logTotalPages)} disabled={currentLogPage === logTotalPages} className="rounded border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">末页</button>
+                  <Button variant="outline" onClick={() => setLogPage(1)} disabled={currentLogPage === 1} className="h-auto px-2.5 py-1.5 text-xs">首页</Button>
+                  <Button variant="outline" onClick={() => setLogPage((page) => Math.max(1, page - 1))} disabled={currentLogPage === 1} className="h-auto px-2.5 py-1.5 text-xs">上一页</Button>
+                  <span className="px-2 text-xs text-muted-foreground">{currentLogPage} / {logTotalPages}</span>
+                  <Button variant="outline" onClick={() => setLogPage((page) => Math.min(logTotalPages, page + 1))} disabled={currentLogPage === logTotalPages} className="h-auto px-2.5 py-1.5 text-xs">下一页</Button>
+                  <Button variant="outline" onClick={() => setLogPage(logTotalPages)} disabled={currentLogPage === logTotalPages} className="h-auto px-2.5 py-1.5 text-xs">末页</Button>
                 </div>
               </div>
-            )}
-          </div>
-        </div>
+            )}>
+<div className="overflow-auto flex-1">
+              {auditLogs && (
+                <Table className="w-full text-sm">
+                  <TableHeader className="border-b border-border bg-muted text-xs text-muted-foreground sticky top-0">
+                    <TableRow>
+                      <TableHead className="h-auto px-4 py-2 text-left">操作时间</TableHead>
+                      <TableHead className="h-auto px-4 py-2 text-left">操作</TableHead>
+                      <TableHead className="h-auto px-4 py-2 text-left">IP</TableHead>
+                      <TableHead className="h-auto px-4 py-2 text-left">UA</TableHead>
+                      <TableHead className="h-auto px-4 py-2 text-center">结果</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody className="divide-y divide-border">
+                    {auditLogs.length === 0 ? (
+                      <TableRow><TableCell colSpan={5} className="px-4 py-8 text-center text-muted-foreground">暂无操作日志</TableCell></TableRow>
+                    ) : currentAuditLogs?.map((log, i) => (
+                      <TableRow key={i} className="hover:bg-muted/50">
+                        <TableCell className="px-4 py-2 text-xs text-muted-foreground whitespace-nowrap">{log.time}</TableCell>
+                        <TableCell className="px-4 py-2 text-xs text-foreground">{log.action}</TableCell>
+                        <TableCell className="px-4 py-2 text-xs font-mono text-muted-foreground">{log.ip || '-'}</TableCell>
+                        <TableCell className="px-4 py-2 text-xs text-muted-foreground max-w-[200px] truncate" title={log.user_agent}>{log.user_agent || '-'}</TableCell>
+                        <TableCell className="px-4 py-2 text-center">
+                          {log.success !== undefined ? (
+                            log.success ? (
+                              <Badge variant="secondary" className="inline-flex px-2 py-0.5 text-xs">成功</Badge>
+                            ) : (
+                              <Badge variant="destructive" className="inline-flex px-2 py-0.5 text-xs" title={log.error}>{log.error ? '失败' : '失败'}</Badge>
+                            )
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              {loginLogs && (
+                <Table className="w-full text-sm">
+                  <TableHeader className="border-b border-border bg-muted text-xs text-muted-foreground sticky top-0">
+                    <TableRow>
+                      <TableHead className="h-auto px-4 py-2 text-left">登录时间</TableHead>
+                      <TableHead className="h-auto px-4 py-2 text-left">登录 IP</TableHead>
+                      <TableHead className="h-auto px-4 py-2 text-left">UA</TableHead>
+                      <TableHead className="h-auto px-4 py-2 text-center">结果</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody className="divide-y divide-border">
+                    {loginLogs.length === 0 ? (
+                      <TableRow><TableCell colSpan={4} className="px-4 py-8 text-center text-muted-foreground">暂无登录日志</TableCell></TableRow>
+                    ) : currentLoginLogs?.map((log, i) => (
+                      <TableRow key={i} className="hover:bg-muted/50">
+                        <TableCell className="px-4 py-2 text-xs text-muted-foreground whitespace-nowrap">{log.time}</TableCell>
+                        <TableCell className="px-4 py-2 text-xs font-mono text-muted-foreground">{log.ip}</TableCell>
+                        <TableCell className="px-4 py-2 text-xs text-muted-foreground max-w-[250px] truncate" title={log.user_agent}>{log.user_agent}</TableCell>
+                        <TableCell className="px-4 py-2 text-center">
+                          {log.success ? (
+                            <Badge variant="secondary" className="inline-flex px-2 py-0.5 text-xs">成功</Badge>
+                          ) : (
+                            <Badge variant="destructive" className="inline-flex px-2 py-0.5 text-xs">失败</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+</Modal>
       )}
     </div>
   )

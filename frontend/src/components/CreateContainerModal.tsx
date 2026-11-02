@@ -1,3 +1,14 @@
+import { Alert } from './ui/alert'
+import { Modal } from './ui/modal'
+import { RadioGroup, RadioGroupItem } from './ui/radio-group'
+import { Badge } from './ui/badge'
+import { Card } from './ui/card'
+import { Button } from './ui/button'
+import { Input } from './ui/input'
+import { NativeSelect } from './ui/native-select'
+import { Label } from './ui/label'
+import { Checkbox } from './ui/checkbox'
+import { Textarea } from './ui/textarea'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, CalendarClock, Check, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { useNavigate } from 'react-router'
@@ -407,38 +418,26 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-black">创建新容器</h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded text-gray-500" title="关闭">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <nav aria-label={t('创建步骤')} className="border-b border-gray-200 px-5 py-3">
+    <Modal dismissible={!loading} open={isOpen} onClose={onClose} title={t('创建新容器')} size="5xl" flush className="max-h-[92vh]" bodyClassName="flex min-h-0 flex-col overflow-hidden">
+        <nav aria-label={t('创建步骤')} className="border-b border-border px-5 py-3">
           <ol className="grid grid-cols-4 gap-2">
             {wizardSteps.map((label, index) => {
               const completed = index < currentStep
               const active = index === currentStep
               return (
                 <li key={label} className="min-w-0">
-                  <button
+                  <Button variant={active ? 'secondary' : 'ghost'}
                     type="button"
-                    disabled={index > currentStep}
+                    disabled={loading || index > currentStep}
                     onClick={() => setCurrentStep(index)}
                     aria-current={active ? 'step' : undefined}
-                    className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors disabled:cursor-default ${
-                      active ? 'bg-gray-100 text-black' : completed ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-400'
-                    }`}
+                    className="h-auto w-full justify-start gap-2 px-2 py-1.5 text-left"
                   >
-                    <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold ${
-                      active || completed ? 'border-black bg-black text-white' : 'border-gray-300 bg-white'
-                    }`}>
+                    <Badge variant={active || completed ? 'default' : 'outline'} className="h-6 w-6 shrink-0 justify-center p-0 text-xs">
                       {completed ? <Check className="h-3.5 w-3.5" /> : index + 1}
-                    </span>
+                    </Badge>
                     <span className="min-w-0 truncate text-xs font-medium sm:text-sm">{label}</span>
-                  </button>
+                  </Button>
                 </li>
               )
             })}
@@ -451,11 +450,12 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
             <>
           <div className="grid grid-cols-2 gap-3">
             <Field label="容器名称">
-              <input
+              <Input
                 type="text"
                 value={form.name}
+                aria-invalid={!!nameError}
                 onChange={(event) => handleNameChange(event.target.value)}
-                className={`${inputClass} ${nameError ? 'border-red-400 focus:ring-red-400 focus:border-red-400' : ''}`}
+                className={`  ${inputClass}    h-auto`}
                 placeholder="my-container"
                 required
               />
@@ -465,18 +465,18 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
               <NumberInput value={batchCount} min={1} max={50} onChange={(value) => setBatchCount(Math.max(1, value || 1))} />
             </Field>
           </div>
-          {batchCount > 1 && <p className="text-xs text-gray-400">将创建 {batchCount} 个容器：{form.name}-{batchStartIndex} 至 {form.name}-{batchStartIndex + batchCount - 1}</p>}
+          {batchCount > 1 && <p className="text-xs text-muted-foreground">将创建 {batchCount} 个容器：{form.name}-{batchStartIndex} 至 {form.name}-{batchStartIndex + batchCount - 1}</p>}
 
           <Field label="虚拟化架构">
             <div className="grid grid-cols-2 gap-2">
-              <button
+              <Button variant={form.virtualization === 'lxc' ? 'default' : 'outline'}
                 type="button"
                 onClick={() => setForm((prev) => applyTemplateDefaults({ ...prev, virtualization: 'lxc', template_id: '', storage_pool_id: '', allowed_image_ids: [], image_limit_configured: false }))}
-                className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${form.virtualization === 'lxc' ? 'border-black bg-black text-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                className="h-auto px-3 py-2 text-sm font-medium"
               >
                 LXC 容器
-              </button>
-              <button
+              </Button>
+              <Button variant={form.virtualization === 'kvm' ? 'default' : 'outline'}
                 type="button"
                 disabled={!kvmAvailable}
                 title={kvmAvailable ? '' : '当前宿主机不支持 KVM'}
@@ -485,10 +485,10 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                     setForm((prev) => applyTemplateDefaults({ ...prev, virtualization: 'kvm', template_id: '', storage_pool_id: '', allowed_image_ids: [], image_limit_configured: false }))
                   }
                 }}
-                className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-400 ${form.virtualization === 'kvm' ? 'border-black bg-black text-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                className="h-auto px-3 py-2 text-sm font-medium"
               >
                 KVM 虚拟机
-              </button>
+              </Button>
             </div>
           </Field>
             </>
@@ -498,11 +498,11 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
             <>
           <Field label="系统模板">
             {templates.length === 0 ? (
-              <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              <Alert variant="default" className="text-sm px-3 py-2">
                 暂无可用的{form.virtualization === 'kvm' ? ' KVM' : ' LXC'}系统镜像，请先在「镜像管理」中下载镜像模板。
-              </div>
+              </Alert>
             ) : (
-            <select
+            <NativeSelect wrapperClassName="w-full"
               value={form.template_id}
               onChange={(event) => {
                 const templateID = event.target.value
@@ -510,7 +510,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                 if (templateID) allowed.add(templateID)
                 setForm(applyTemplateDefaults({ ...form, template_id: templateID, allowed_image_ids: Array.from(allowed), image_limit_configured: true }))
               }}
-              className={inputClass}
+              className={`${inputClass} h-auto pr-9`}
             >
               <option value="">{t('请选择镜像')}</option>
               {templates.map((template) => (
@@ -518,7 +518,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                   {template.name}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             )}
 
           </Field>
@@ -528,15 +528,15 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
           {currentStep === 0 && (
           <Field label="存储磁盘">
             {storageLoading ? (
-              <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+              <Card className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
                 <RefreshCw className="h-4 w-4 animate-spin" />
                 正在检查存储配置...
-              </div>
+              </Card>
             ) : storagePools.length > 0 ? (
-              <select
+              <NativeSelect wrapperClassName="w-full"
                 value={form.storage_pool_id || ''}
                 onChange={(event) => setForm({ ...form, storage_pool_id: event.target.value })}
-                className={inputClass}
+                className={`${inputClass} h-auto pr-9`}
               >
                 <option value="">自动选择（默认盘优先，空间不足自动切换）</option>
                 {storagePools.map((pool) => (
@@ -544,137 +544,133 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                     {pool.name} · {pool.mount_point || pool.path}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             ) : (
-              <div className="flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <Alert variant="default" className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                 <span>尚未开启{form.virtualization === 'kvm' ? ' KVM 磁盘' : ' LXC 容器'}存储，当前无法创建。</span>
-                <button
+                <Button variant="outline"
                   type="button"
                   onClick={() => { onClose(); navigate('/storage') }}
-                  className="shrink-0 rounded-md border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                  className="h-auto shrink-0 px-2.5 py-1.5 text-xs font-medium"
                 >
                   去开启
-                </button>
-              </div>
+                </Button>
+              </Alert>
             )}
           </Field>
           )}
 
           {currentStep === 1 && templates.length > 0 && (
             <Field label="子用户可用镜像">
-              <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-                <div className="mb-2 text-xs text-gray-500">默认勾选当前系统；取消后，子用户也不能重装该系统。</div>
+              <Card className="p-3">
+                <div className="mb-2 text-xs text-muted-foreground">默认勾选当前系统；取消后，子用户也不能重装该系统。</div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {templates.map((template) => {
                     const checked = (form.allowed_image_ids || []).includes(template.id)
                     const current = template.id === form.template_id
                     return (
-                      <label key={template.id} className={`flex cursor-pointer items-start gap-2 rounded border px-2.5 py-2 text-xs ${checked ? 'border-black bg-white' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
-                        <input
-                          type="checkbox"
+                      <Card key={template.id} className="px-2.5 py-2"><Label className="flex cursor-pointer items-start gap-2 text-xs">
+                        <Checkbox
+
                           checked={checked}
-                          onChange={() => {
+                          onCheckedChange={() => {
                             const currentIDs = form.allowed_image_ids || []
                             const next = checked ? currentIDs.filter((id) => id !== template.id) : [...currentIDs, template.id]
                             setForm({ ...form, allowed_image_ids: next, image_limit_configured: true })
                           }}
-                          className="mt-0.5 h-4 w-4 rounded border-gray-300 text-black focus:ring-black"
+                          className="mt-0.5 h-4 w-4"
                         />
                         <span className="min-w-0">
-                          <span className="block truncate font-medium text-gray-800">{template.name}{current ? '（当前系统）' : ''}</span>
-                          <span className="block text-gray-500">{template.arch} · {template.distro} {template.release}</span>
+                          <span className="block truncate font-medium text-foreground">{template.name}{current ? '（当前系统）' : ''}</span>
+                          <span className="block text-muted-foreground">{template.arch} · {template.distro} {template.release}</span>
                         </span>
-                      </label>
+                      </Label></Card>
                     )
                   })}
                 </div>
-              </div>
+              </Card>
             </Field>
           )}
 
           {currentStep === 0 && linuxTemplate && (
-            <div className="rounded-md border border-gray-200 bg-white px-3 py-3 text-sm">
-              <div className="mb-2 font-medium text-gray-800">登录方式</div>
+            <Card className="px-3 py-3 text-sm">
+              <div className="mb-2 font-medium text-foreground">登录方式</div>
               <div className="grid grid-cols-3 gap-2">
                 {([
                   ['auto_password', '自动生成密码'],
                   ['password', '自定义密码'],
                   ['key', 'SSH Key'],
                 ] as Array<[SSHAuthMode, string]>).map(([mode, label]) => (
-                  <button
+                  <Button variant={sshAuthMode === mode ? 'default' : 'outline'}
                     key={mode}
                     type="button"
                     onClick={() => setForm({ ...form, ssh_auth_mode: mode })}
-                    className={`rounded-md border px-3 py-2 text-xs font-medium transition-colors ${sshAuthMode === mode ? 'border-black bg-black text-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                    className="h-auto px-3 py-2 text-xs font-medium"
                   >
                     {label}
-                  </button>
+                  </Button>
                 ))}
               </div>
               {sshAuthMode === 'password' && (
                 <div className="mt-3 flex gap-2">
-                  <input
+                  <Input
                     type="text"
                     value={form.ssh_password || ''}
                     onChange={(event) => setForm({ ...form, ssh_password: event.target.value })}
-                    className={inputClass}
+                    className={`${inputClass} h-auto`}
                     placeholder="RootPass123"
                   />
-                  <button
+                  <Button variant="outline"
                     type="button"
                     onClick={() => setForm({ ...form, ssh_password: generateSSHPassword() })}
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center p-0"
                     title="生成密码"
                   >
                     <RefreshCw className="h-4 w-4" />
-                  </button>
+                  </Button>
                 </div>
               )}
               {sshAuthMode === 'key' && (
-                <textarea
+                <Textarea
                   value={form.ssh_public_key || ''}
                   onChange={(event) => setForm({ ...form, ssh_public_key: event.target.value })}
-                  className={`${inputClass} mt-3 min-h-20 resize-y font-mono text-xs`}
+                  className={`  ${inputClass}  mt-3 min-h-20 resize-y font-mono text-xs`}
                   placeholder="ssh-ed25519 AAAA..."
                 />
               )}
-            </div>
+            </Card>
           )}
 
           {currentStep === 2 && (
           <div className="grid gap-3 lg:grid-cols-2">
-          <div className={`rounded-md border px-3 py-2 text-sm ${ipv4Available ? 'border-gray-200 bg-white' : 'border-gray-200 bg-gray-50 text-gray-400'}`}>
-            <label className="flex items-start gap-3">
-              <input
-                type="checkbox"
+          <Card className="px-3 py-2 text-sm">
+            <Label className="flex items-start gap-3">
+              <Checkbox
+
                 checked={!!form.assign_ipv4}
                 disabled={!ipv4Available}
-                onChange={(event) => setForm({
+                onCheckedChange={(nextChecked) => setForm({
                   ...form,
-                  assign_ipv4: event.target.checked,
-                  public_ipv4s: event.target.checked ? form.public_ipv4s : [],
-                  ...(event.target.checked ? { assign_nat: false, port_mapping_count: 0, extra_ports: [], nat_port_mappings: [], management_port: 0, lan_ipv4_mode: '', lan_interface: '' } : {}),
+                  assign_ipv4: (nextChecked === true),
+                  public_ipv4s: (nextChecked === true) ? form.public_ipv4s : [],
+                  ...((nextChecked === true) ? { assign_nat: false, port_mapping_count: 0, extra_ports: [], nat_port_mappings: [], management_port: 0, lan_ipv4_mode: '', lan_interface: '' } : {}),
                 })}
                 className="mt-1"
               />
               <span className="min-w-0">
-                <span className="block font-medium text-gray-800">{networkText.publicIPv4}</span>
-                <span className="block text-xs text-gray-500">
+                <span className="block font-medium text-foreground">{networkText.publicIPv4}</span>
+                <span className="block text-xs text-muted-foreground">
                   {ipv4Available ? formatAllocatableIPv4Count(publicIPv4s.length, language) : networkText.noAllocatableIPv4}
                 </span>
               </span>
-            </label>
+            </Label>
             {form.assign_ipv4 && (
-              <div className="mt-3 space-y-3 pl-6">
+              <RadioGroup value={manualIPv4s.length === 0 ? 'auto' : 'manual'} onValueChange={(value) => setForm({ ...form, public_ipv4s: value === 'auto' ? [] : (publicIPv4s[0]?.address ? [publicIPv4s[0].address] : []), ...(value === 'manual' ? { ipv4_count: 1 } : {}) })} className="mt-3 gap-3 pl-6">
                 <div className="grid grid-cols-2 gap-3">
-                  <label className="flex items-center gap-2 text-xs text-gray-600">
-                    <input
-                      type="radio"
-                      checked={manualIPv4s.length === 0}
-                      onChange={() => setForm({ ...form, public_ipv4s: [] })}
-                    />
+                  <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <RadioGroupItem value="auto" />
                     Auto assign
-                  </label>
+                  </Label>
                   <Field label="IPv4 count">
                     <NumberInput
                       value={form.ipv4_count || 1}
@@ -685,49 +681,45 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                   </Field>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="flex items-center gap-2 text-xs text-gray-600">
-                    <input
-                      type="radio"
-                      checked={manualIPv4s.length > 0}
-                      onChange={() => setForm({ ...form, public_ipv4s: publicIPv4s[0]?.address ? [publicIPv4s[0].address] : [], ipv4_count: 1 })}
-                    />
+                  <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <RadioGroupItem value="manual" />
                     Manual select
-                  </label>
+                  </Label>
                   {manualIPv4s.length > 0 && (
                     <div className="grid gap-1.5 sm:grid-cols-2">
                       {publicIPv4s.map((ip) => (
-                        <label key={`${ip.interface}-${ip.address}`} className="flex min-w-0 items-center gap-2 rounded border border-gray-200 px-2 py-1.5 text-xs text-gray-700">
-                          <input
-                            type="checkbox"
+                        <Card key={`${ip.interface}-${ip.address}`}><Label className="flex min-w-0 items-center gap-2 px-2 py-1.5 text-xs text-foreground">
+                          <Checkbox
+
                             checked={manualIPv4s.includes(ip.address)}
-                            onChange={(event) => {
-                              const next = event.target.checked
+                            onCheckedChange={(nextChecked) => {
+                              const next = (nextChecked === true)
                                 ? [...manualIPv4s, ip.address]
                                 : manualIPv4s.filter((value) => value !== ip.address)
                               setForm({ ...form, public_ipv4s: next, ipv4_count: Math.max(1, next.length || 1) })
                             }}
                           />
                           <span className="truncate font-mono">{ip.address}</span>
-                          <span className="shrink-0 text-gray-400">{ip.interface}</span>
-                          {ip.gateway && <span className="shrink-0 text-gray-400">gw {ip.gateway}</span>}
-                        </label>
+                          <span className="shrink-0 text-muted-foreground">{ip.interface}</span>
+                          {ip.gateway && <span className="shrink-0 text-muted-foreground">gw {ip.gateway}</span>}
+                        </Label></Card>
                       ))}
                     </div>
                   )}
                 </div>
-              </div>
+              </RadioGroup>
             )}
-          </div>
+          </Card>
 
-          <div className={`rounded-md border px-3 py-2 text-sm ${form.virtualization === 'lxc' && lanInterfaces.length > 0 ? 'border-gray-200 bg-white' : 'border-gray-200 bg-gray-50 text-gray-400'}`}>
+          <Card className="px-3 py-2 text-sm">
             <div className="flex items-start justify-between gap-3">
-              <label className="flex min-w-0 flex-1 items-start gap-3">
-                <input
-                  type="checkbox"
+              <Label className="flex min-w-0 flex-1 items-start gap-3">
+                <Checkbox
+
                   checked={lanIPv4Enabled}
                   disabled={form.virtualization !== 'lxc' || lanInterfaces.length === 0}
-                  onChange={(event) => {
-                    const checked = event.target.checked
+                  onCheckedChange={(nextChecked) => {
+                    const checked = (nextChecked === true)
                     setForm({
                       ...form,
                       lan_ipv4_mode: checked ? 'dhcp' : '',
@@ -745,65 +737,65 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                   className="mt-1"
                 />
                 <span className="min-w-0">
-                  <span className="block font-medium text-gray-800">局域网 DHCP</span>
-                  <span className="block text-xs text-gray-500">
+                  <span className="block font-medium text-foreground">局域网 DHCP</span>
+                  <span className="block text-xs text-muted-foreground">
                     {lanInterfaces.length > 0 ? 'macvlan 独立局域网 IP' : '未检测到可用上联网卡'}
                   </span>
                 </span>
-              </label>
+              </Label>
               {lanIPv4Enabled && (
-                <select
+                <NativeSelect wrapperClassName="w-fit"
                   value={form.lan_interface || defaultLANInterface}
                   onChange={(event) => setForm({ ...form, lan_interface: event.target.value })}
-                  className="h-9 w-32 shrink-0 rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-black"
+                  className="h-9 w-32 shrink-0 px-2 text-xs pr-9"
                 >
                   {lanInterfaces.map((item) => (
                     <option key={item.name} value={item.name}>{item.name}</option>
                   ))}
-                </select>
+                </NativeSelect>
               )}
             </div>
             {lanIPv4Enabled && (
               <div className="mt-3 space-y-3 pl-6">
                 <div className="grid grid-cols-2 gap-2">
-                  <button
+                  <Button variant={form.lan_ipv4_mode === 'dhcp' ? 'default' : 'outline'}
                     type="button"
                     onClick={() => setForm({ ...form, lan_ipv4_mode: 'dhcp' })}
-                    className={`rounded-md border px-3 py-2 text-xs font-medium ${form.lan_ipv4_mode === 'dhcp' ? 'border-black bg-black text-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                    className="h-auto px-3 py-2 text-xs font-medium"
                   >
                     DHCP 自动获取
-                  </button>
-                  <button
+                  </Button>
+                  <Button variant={lanStaticEnabled ? 'default' : 'outline'}
                     type="button"
                     onClick={() => setForm({ ...form, lan_ipv4_mode: 'static' })}
-                    className={`rounded-md border px-3 py-2 text-xs font-medium ${lanStaticEnabled ? 'border-black bg-black text-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                    className="h-auto px-3 py-2 text-xs font-medium"
                   >
                     手动配置
-                  </button>
+                  </Button>
                 </div>
                 {lanStaticEnabled && (
                   <div className="grid gap-3 sm:grid-cols-3">
                     <Field label="IPv4 地址">
-                      <input
+                      <Input
                         value={form.lan_ipv4_address || ''}
                         onChange={(event) => setForm({ ...form, lan_ipv4_address: event.target.value })}
-                        className={inputClass}
+                        className={`${inputClass} h-auto`}
                         placeholder="192.168.2.250"
                       />
                     </Field>
                     <Field label="子网掩码">
-                      <input
+                      <Input
                         value={subnetMaskFromPrefixLen(form.lan_ipv4_prefix_len || 24)}
                         onChange={(event) => setForm({ ...form, lan_ipv4_prefix_len: prefixLenFromSubnetMask(event.target.value) || 24 })}
-                        className={inputClass}
+                        className={`${inputClass} h-auto`}
                         placeholder="255.255.255.0"
                       />
                     </Field>
                     <Field label="网关">
-                      <input
+                      <Input
                         value={form.lan_ipv4_gateway || ''}
                         onChange={(event) => setForm({ ...form, lan_ipv4_gateway: event.target.value })}
-                        className={inputClass}
+                        className={`${inputClass} h-auto`}
                         placeholder="192.168.2.202"
                       />
                     </Field>
@@ -811,32 +803,32 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                 )}
               </div>
             )}
-          </div>
+          </Card>
 
-          {ipv6NATAvailable && <div className="space-y-3 rounded-md border border-gray-200 bg-white px-3 py-3 text-sm">
-            <div><span className="font-medium text-gray-800">IPv6 NAT</span><p className="mt-1 text-xs text-gray-500">{language === 'en' ? `A private IPv6 address will be assigned automatically; outbound traffic shares ${ipv6NATStatus.host_address}.` : `将自动分配内网 IPv6，出网共享宿主机 ${ipv6NATStatus.host_address}。`}</p></div>
-            <label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={form.ipv6_nat_sync_ipv4 !== false} onChange={event => setForm({ ...form, ipv6_nat_sync_ipv4: event.target.checked })} />{language === 'en' ? 'Sync IPv4 port mappings to IPv6' : '将 IPv4 端口映射同步到 IPv6'}</label>
+          {ipv6NATAvailable && <Card className="space-y-3 px-3 py-3 text-sm">
+            <div><span className="font-medium text-foreground">IPv6 NAT</span><p className="mt-1 text-xs text-muted-foreground">{language === 'en' ? `A private IPv6 address will be assigned automatically; outbound traffic shares ${ipv6NATStatus.host_address}.` : `将自动分配内网 IPv6，出网共享宿主机 ${ipv6NATStatus.host_address}。`}</p></div>
+            <Label className="flex items-center gap-2 text-xs text-foreground"><Checkbox  checked={form.ipv6_nat_sync_ipv4 !== false} onCheckedChange={nextChecked => setForm({ ...form, ipv6_nat_sync_ipv4: (nextChecked === true) })} />{language === 'en' ? 'Sync IPv4 port mappings to IPv6' : '将 IPv4 端口映射同步到 IPv6'}</Label>
             <Field label={language === 'en' ? 'IPv6 port quota (0 = inherit IPv4 quota)' : 'IPv6 端口配额（0 = 继承 IPv4 配额）'}><NumberInput value={form.ipv6_port_mapping_count || 0} min={0} max={64} onChange={value => setForm({ ...form, ipv6_port_mapping_count: Math.min(64, Math.max(0, Math.round(value || 0))) })} /></Field>
-            {form.ipv6_nat_sync_ipv4 === false && <p className="text-xs text-gray-500">{language === 'en' ? 'Add independent IPv6 mappings from the container details after creation.' : '创建完成后，可在容器详情中添加独立 IPv6 端口映射。'}</p>}
-          </div>}
+            {form.ipv6_nat_sync_ipv4 === false && <p className="text-xs text-muted-foreground">{language === 'en' ? 'Add independent IPv6 mappings from the container details after creation.' : '创建完成后，可在容器详情中添加独立 IPv6 端口映射。'}</p>}
+          </Card>}
 
-          <div className={`rounded-md border px-3 py-2 text-sm ${ipv6Available ? 'border-gray-200 bg-white' : 'border-gray-200 bg-gray-50 text-gray-400'}`}>
+          <Card className="px-3 py-2 text-sm">
             <div className="flex items-start justify-between gap-3">
-              <label className="flex min-w-0 flex-1 items-start gap-3">
-                <input
-                  type="checkbox"
+              <Label className="flex min-w-0 flex-1 items-start gap-3">
+                <Checkbox
+
                   checked={!!form.assign_ipv6}
                   disabled={!ipv6Available}
-                  onChange={(event) => setForm({ ...form, assign_ipv6: event.target.checked })}
+                  onCheckedChange={(nextChecked) => setForm({ ...form, assign_ipv6: (nextChecked === true) })}
                   className="mt-1"
                 />
                 <span className="min-w-0">
-              <span className="block font-medium text-gray-800">{networkText.publicIPv6}</span>
-              <span className="block text-xs text-gray-500 truncate">
+              <span className="block font-medium text-foreground">{networkText.publicIPv6}</span>
+              <span className="block text-xs text-muted-foreground truncate">
                     {ipv6Available ? `${networkText.use} ${ipv6Prefix}` : formatIPv6StatusReason(ipv6Status?.reason, language, networkText.checkingIPv6Prefix)}
               </span>
                 </span>
-              </label>
+              </Label>
               {form.assign_ipv6 && (
                 <span className="block w-24 shrink-0">
                   <NumberInput
@@ -850,47 +842,39 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
             </div>
             {form.assign_ipv6 && (
               <div className="mt-3 space-y-3 pl-6">
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="flex items-center gap-2 text-xs text-gray-600">
-                    <input
-                      type="radio"
-                      checked={(form.ipv6_addresses || []).length === 0}
-                      onChange={() => setForm({ ...form, ipv6_addresses: [] })}
-                    />
+                <RadioGroup value={(form.ipv6_addresses || []).length === 0 ? 'auto' : 'manual'} onValueChange={(value) => setForm({ ...form, ipv6_addresses: value === 'auto' ? [] : [''], ...(value === 'manual' ? { ipv6_count: 1 } : {}) })} className="grid grid-cols-2 gap-3">
+                  <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <RadioGroupItem value="auto" />
                     Random assign
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-gray-600">
-                    <input
-                      type="radio"
-                      checked={(form.ipv6_addresses || []).length > 0}
-                      onChange={() => setForm({ ...form, ipv6_addresses: [''], ipv6_count: 1 })}
-                    />
+                  </Label>
+                  <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <RadioGroupItem value="manual" />
                     Custom assign
-                  </label>
-                </div>
+                  </Label>
+                </RadioGroup>
                 {(form.ipv6_addresses || []).length > 0 && (
-                  <textarea
+                  <Textarea
                     value={(form.ipv6_addresses || []).join('\n')}
                     onChange={(event) => {
                       const next = splitAddressLines(event.target.value)
                       setForm({ ...form, ipv6_addresses: next.length ? next : [''], ipv6_count: Math.max(1, next.length || 1) })
                     }}
-                    className={`${inputClass} min-h-20 font-mono text-xs`}
+                    className={`  ${inputClass}  min-h-20 font-mono text-xs`}
                     placeholder="2001:db8:100::100"
                   />
                 )}
               </div>
             )}
-          </div>
+          </Card>
 
-          <div className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm">
+          <Card className="px-3 py-2 text-sm">
             <div className="flex items-start justify-between gap-3">
-              <label className="flex min-w-0 flex-1 items-start gap-3">
-                <input
-                  type="checkbox"
+              <Label className="flex min-w-0 flex-1 items-start gap-3">
+                <Checkbox
+
                   checked={natEnabled}
-                  onChange={(event) => {
-                    const checked = event.target.checked
+                  onCheckedChange={(nextChecked) => {
+                    const checked = (nextChecked === true)
                     setForm({
                       ...form,
                       assign_nat: checked,
@@ -904,8 +888,8 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                   className="mt-1"
                 />
                 <span className="min-w-0">
-                  <span className="block font-medium text-gray-800">{networkText.publicNAT}</span>
-                  <span className="block text-xs text-gray-500">
+                  <span className="block font-medium text-foreground">{networkText.publicNAT}</span>
+                  <span className="block text-xs text-muted-foreground">
                     {natEnabled ? formatNATPortCount(natPortCount, language) : networkText.noNATPorts}
                     {natEnabled && routingInfo && (
                       <span className="mt-0.5 block font-mono">
@@ -919,7 +903,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                     )}
                   </span>
                 </span>
-              </label>
+              </Label>
               {natEnabled && customNATMappings.length === 0 && (
                 <span className="block w-24 shrink-0">
                   <NumberInput
@@ -935,13 +919,13 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
               <div className="mt-2 space-y-2 pl-6">
                 <div className="space-y-1">
                   <div className="grid grid-cols-[minmax(0,1fr)_20px_minmax(0,1fr)_56px] items-end gap-2">
-                    <label className="min-w-0 text-[11px] text-gray-500">
+                    <Label className="min-w-0 text-[11px] text-muted-foreground">
                       <span className="mb-1 block">
                         {language === 'en'
                           ? `${isWindowsTemplate(form.template_id) ? 'RDP' : 'SSH'} public source port`
                           : `${isWindowsTemplate(form.template_id) ? 'RDP' : 'SSH'} 公网源端口`}
                       </span>
-                      <input
+                      <Input
                         type="number"
                         min={1}
                         max={65535}
@@ -951,54 +935,47 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                           management_port: Number(event.target.value) || 0,
                           assign_nat: true,
                         })}
-                        className={`${inputClass} min-w-0 font-mono text-xs`}
+                        className={`  ${inputClass}  min-w-0 font-mono text-xs h-auto`}
                         placeholder={language === 'en' ? 'Auto' : '自动'}
                       />
-                    </label>
-                    <ArrowRight className="mb-3 h-4 w-4 text-gray-400" />
-                    <label className="min-w-0 text-[11px] text-gray-500">
+                    </Label>
+                    <ArrowRight className="mb-3 h-4 w-4 text-muted-foreground" />
+                    <Label className="min-w-0 text-[11px] text-muted-foreground">
                       <span className="mb-1 block">{language === 'en' ? 'Container target port' : '容器目标端口'}</span>
-                      <input
+                      <Input
                         type="number"
                         readOnly
                         value={isWindowsTemplate(form.template_id) ? 3389 : 22}
-                        className={`${inputClass} min-w-0 bg-gray-50 font-mono text-xs text-gray-500`}
+                        className={`  ${inputClass}  min-w-0 font-mono text-xs h-auto`}
                       />
-                    </label>
-                    <span className="mb-1 inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-gray-50 text-xs text-gray-600">
+                    </Label>
+                    <Badge variant="secondary" className="mb-1 inline-flex h-9 items-center justify-center text-xs">
                       TCP
-                    </span>
+                    </Badge>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="flex items-center gap-2 text-xs text-gray-600">
-                    <input
-                      type="radio"
-                      checked={customNATMappings.length === 0}
-                      onChange={() => setForm({ ...form, extra_ports: [], nat_port_mappings: [], port_mapping_count: Math.max(2, form.port_mapping_count || 2) })}
-                    />
+                <RadioGroup value={customNATMappings.length === 0 ? 'auto' : 'manual'} onValueChange={(value) => {
+                  if (value === 'auto') {
+                    setForm({ ...form, extra_ports: [], nat_port_mappings: [], port_mapping_count: Math.max(2, form.port_mapping_count || 2) })
+                    return
+                  }
+                  const suggestedPort = autoPortMappings[0]?.host_port || natAllocationPreview.managementPort
+                  if (!suggestedPort) return
+                  const next = customNATMappings.length > 0 ? customNATMappings : [{ host_port: suggestedPort, container_port: suggestedPort, protocol: 'tcp', description: `Port-${suggestedPort}` }]
+                  setForm({ ...form, extra_ports: [], nat_port_mappings: next, port_mapping_count: next.length + 1, assign_nat: true })
+                }} className="grid grid-cols-2 gap-2">
+                  <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <RadioGroupItem value="auto" />
                     {language === 'en' ? 'Auto ports' : '自动端口'}
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-gray-600">
-                    <input
-                      type="radio"
-                      checked={customNATMappings.length > 0}
-                      disabled={!routingInfo}
-                      onChange={() => {
-                        const suggestedPort = autoPortMappings[0]?.host_port || natAllocationPreview.managementPort
-                        if (!suggestedPort) return
-                        const next = customNATMappings.length > 0
-                          ? customNATMappings
-                          : [{ host_port: suggestedPort, container_port: suggestedPort, protocol: 'tcp', description: `Port-${suggestedPort}` }]
-                        setForm({ ...form, extra_ports: [], nat_port_mappings: next, port_mapping_count: next.length + 1, assign_nat: true })
-                      }}
-                    />
+                  </Label>
+                  <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <RadioGroupItem value="manual" disabled={!routingInfo} />
                     {language === 'en' ? 'Custom mappings' : '自定义映射'}
-                  </label>
-                </div>
+                  </Label>
+                </RadioGroup>
                 {customNATMappings.length > 0 && (
                   <div className="space-y-2">
-                    <div className="grid grid-cols-[minmax(0,1fr)_20px_minmax(0,1fr)_72px_32px] items-center gap-2 px-1 text-[11px] text-gray-500">
+                    <div className="grid grid-cols-[minmax(0,1fr)_20px_minmax(0,1fr)_72px_32px] items-center gap-2 px-1 text-[11px] text-muted-foreground">
                       <span>{language === 'en' ? 'Public source port' : '源端口（公网）'}</span>
                       <span />
                       <span>{language === 'en' ? 'Container target port' : '目标端口（容器）'}</span>
@@ -1007,7 +984,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                     </div>
                     {customNATMappings.map((mapping, index) => (
                       <div key={index} className="grid grid-cols-[minmax(0,1fr)_20px_minmax(0,1fr)_72px_32px] items-center gap-2">
-                        <input
+                        <Input
                           type="number"
                           min={1}
                           max={65535}
@@ -1018,11 +995,11 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                               : item)
                             setForm({ ...form, extra_ports: [], nat_port_mappings: next, port_mapping_count: next.length + 1 })
                           }}
-                          className={`${inputClass} min-w-0 font-mono text-xs`}
+                          className={`  ${inputClass}  min-w-0 font-mono text-xs h-auto`}
                           placeholder="30080"
                         />
-                        <ArrowRight className="h-4 w-4 text-gray-400" />
-                        <input
+                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                        <Input
                           type="number"
                           min={1}
                           max={65535}
@@ -1034,10 +1011,10 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                               : item)
                             setForm({ ...form, extra_ports: [], nat_port_mappings: next, port_mapping_count: next.length + 1 })
                           }}
-                          className={`${inputClass} min-w-0 font-mono text-xs`}
+                          className={`  ${inputClass}  min-w-0 font-mono text-xs h-auto`}
                           placeholder="80"
                         />
-                        <select
+                        <NativeSelect wrapperClassName="w-fit"
                           value={mapping.protocol || 'tcp'}
                           onChange={(event) => {
                             const next = customNATMappings.map((item, itemIndex) => itemIndex === index
@@ -1045,26 +1022,26 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                               : item)
                             setForm({ ...form, nat_port_mappings: next })
                           }}
-                          className="h-10 rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-700"
+                          className="h-10 px-2 text-xs pr-9"
                         >
                           <option value="tcp">TCP</option>
                           <option value="udp">UDP</option>
-                        </select>
-                        <button
+                        </NativeSelect>
+                        <Button variant="destructive"
                           type="button"
                           disabled={customNATMappings.length <= 1}
                           onClick={() => {
                             const next = customNATMappings.filter((_, itemIndex) => itemIndex !== index)
                             setForm({ ...form, nat_port_mappings: next, port_mapping_count: next.length + 1 })
                           }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
+                          className="inline-flex h-8 w-8 items-center justify-center p-0"
                           title={language === 'en' ? 'Remove mapping' : '删除映射'}
                         >
                           <Trash2 className="h-4 w-4" />
-                        </button>
+                        </Button>
                       </div>
                     ))}
-                    <button
+                    <Button variant="outline"
                       type="button"
                       disabled={customNATMappings.length >= 63}
                       onClick={() => {
@@ -1079,13 +1056,13 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                         }]
                         setForm({ ...form, nat_port_mappings: next, port_mapping_count: next.length + 1 })
                       }}
-                      className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                      className="h-auto inline-flex items-center gap-1 px-2.5 py-1.5 text-xs"
                     >
                       <Plus className="h-3.5 w-3.5" />
                       {language === 'en' ? 'Add mapping' : '添加映射'}
-                    </button>
+                    </Button>
                     {batchCount > 1 && (
-                      <p className="text-[11px] text-gray-500">
+                      <p className="text-[11px] text-muted-foreground">
                         {language === 'en'
                           ? 'Each later container starts after the previous highest public port; target ports stay unchanged.'
                           : '后续容器从上一台的最高公网端口之后开始，容器内部端口保持不变。'}
@@ -1094,19 +1071,19 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                   </div>
                 )}
                 <div className="flex flex-wrap gap-1.5">
-                  <span className="inline-flex px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-xs font-mono">
+                  <Badge variant="secondary" className="inline-flex px-2 py-1 text-xs font-mono">
                     {isWindowsTemplate(form.template_id) ? 'RDP' : 'SSH'}: {sshPortPreview || '--'} -&gt; {isWindowsTemplate(form.template_id) ? 3389 : 22}
                     {managementPort === 0 ? (language === 'en' ? ' (auto)' : '（自动）') : ''}
-                  </span>
+                  </Badge>
                   {natPreviewMappings.map((mapping, index) => (
-                    <span key={`${mapping.host_port}-${mapping.container_port}-${mapping.protocol}-${index}`} className="inline-flex px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-mono">
+                    <Badge variant="secondary" key={`${mapping.host_port}-${mapping.container_port}-${mapping.protocol}-${index}`} className="inline-flex px-2 py-1 text-xs font-mono">
                       {mapping.host_port} -&gt; {mapping.container_port}/{mapping.protocol.toUpperCase()}
-                    </span>
+                    </Badge>
                   ))}
                 </div>
               </div>
             )}
-          </div>
+          </Card>
           </div>
           )}
 
@@ -1159,20 +1136,20 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
             </Field>
             <div>
               <div className="mb-1.5 flex items-center justify-between gap-2">
-                <label className="text-sm font-medium text-gray-700">月流量</label>
-                <select
+                <Label className="text-sm font-medium text-foreground">月流量</Label>
+                <NativeSelect wrapperClassName="w-fit"
                   value={form.traffic_mode}
                   onChange={(e) => setForm({ ...form, traffic_mode: e.target.value })}
-                  className="h-8 px-2 border border-gray-300 rounded text-xs text-gray-600 bg-white"
+                  className="h-8 px-2 text-xs pr-9"
                 >
                   <option value="total">双向统计</option>
                   <option value="in_out">入/出分离</option>
-                </select>
+                </NativeSelect>
               </div>
               {form.traffic_mode === 'total' ? (
                 <div className="flex items-center gap-2">
                   <NumberInput value={form.monthly_traffic_gb} min={0} onChange={(value) => setForm({ ...form, monthly_traffic_gb: value })} />
-                  <span className="shrink-0 text-xs text-gray-400">GB</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">GB</span>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
@@ -1195,16 +1172,16 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
             </Field>
             <Field label="到期时间">
               <div className="relative">
-                <CalendarClock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
+                <CalendarClock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
                   type="date"
                   value={form.expires_at}
                   onChange={(event) => setForm({ ...form, expires_at: event.target.value })}
                   min={new Date().toISOString().slice(0, 10)}
-                  className={`${inputClass} pl-10`}
+                  className={`  ${inputClass}  pl-10 h-auto`}
                 />
               </div>
-              <p className="mt-1 text-[11px] leading-4 text-gray-400">不选则长期有效</p>
+              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">不选则长期有效</p>
             </Field>
           </div>
           )}
@@ -1212,8 +1189,8 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
           {currentStep === 3 && (
             <div className="space-y-5">
               <section>
-                <h3 className="mb-2 text-sm font-semibold text-gray-900">{t('基础信息')}</h3>
-                <dl className="grid grid-cols-1 border-y border-gray-200 sm:grid-cols-2 lg:grid-cols-4">
+                <h3 className="mb-2 text-sm font-semibold text-foreground">{t('基础信息')}</h3>
+                <dl className="grid grid-cols-1 border-y border-border sm:grid-cols-2 lg:grid-cols-4">
                   <ReviewItem label={t('容器名称')} value={batchCount > 1 ? `${form.name}-${batchStartIndex} … ${form.name}-${batchStartIndex + batchCount - 1}` : form.name} />
                   <ReviewItem label={t('创建数量')} value={String(batchCount)} />
                   <ReviewItem label={t('虚拟化架构')} value={form.virtualization === 'kvm' ? 'KVM' : 'LXC'} />
@@ -1226,8 +1203,8 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
               </section>
 
               <section>
-                <h3 className="mb-2 text-sm font-semibold text-gray-900">{t('镜像与登录')}</h3>
-                <dl className="grid grid-cols-1 border-y border-gray-200 sm:grid-cols-3">
+                <h3 className="mb-2 text-sm font-semibold text-foreground">{t('镜像与登录')}</h3>
+                <dl className="grid grid-cols-1 border-y border-border sm:grid-cols-3">
                   <ReviewItem label={t('系统镜像')} value={selectedTemplate?.name || '-'} />
                   <ReviewItem label={t('登录方式')} value={
                     !linuxTemplate
@@ -1243,17 +1220,17 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                 {selectedAllowedImages.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {selectedAllowedImages.map((template) => (
-                      <span key={template.id} className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700">
+                      <Badge variant="secondary" key={template.id} className="px-2 py-1 text-xs">
                         {template.name}
-                      </span>
+                      </Badge>
                     ))}
                   </div>
                 )}
               </section>
 
               <section>
-                <h3 className="mb-2 text-sm font-semibold text-gray-900">{t('网络配置')}</h3>
-                <dl className="grid grid-cols-1 border-y border-gray-200 sm:grid-cols-2">
+                <h3 className="mb-2 text-sm font-semibold text-foreground">{t('网络配置')}</h3>
+                <dl className="grid grid-cols-1 border-y border-border sm:grid-cols-2">
                   <ReviewItem label={t('主要网络')} value={networkSummary} />
                   <ReviewItem
                     label={networkText.publicIPv6}
@@ -1263,15 +1240,15 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                 </dl>
                 {natEnabled && (
                   <div className="mt-3">
-                    <div className="mb-1.5 text-xs font-medium text-gray-500">{t('端口映射')}</div>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">{t('端口映射')}</div>
                     <div className="flex flex-wrap gap-1.5">
-                      <span className="rounded bg-emerald-50 px-2 py-1 font-mono text-xs text-emerald-700">
+                      <Badge variant="secondary" className="px-2 py-1 font-mono text-xs">
                         {isWindowsTemplate(form.template_id) ? 'RDP' : 'SSH'}: {sshPortPreview || t('自动')} -&gt; {isWindowsTemplate(form.template_id) ? 3389 : 22}/TCP
-                      </span>
+                      </Badge>
                       {natPreviewMappings.map((mapping, index) => (
-                        <span key={`${mapping.host_port}-${mapping.container_port}-${mapping.protocol}-${index}`} className="rounded bg-gray-100 px-2 py-1 font-mono text-xs text-gray-700">
+                        <Badge variant="secondary" key={`${mapping.host_port}-${mapping.container_port}-${mapping.protocol}-${index}`} className="px-2 py-1 font-mono text-xs">
                           {mapping.host_port || t('自动')} -&gt; {mapping.container_port}/{mapping.protocol.toUpperCase()}
-                        </span>
+                        </Badge>
                       ))}
                     </div>
                   </div>
@@ -1282,53 +1259,53 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-gray-200 px-6 py-4">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md transition-colors">
+        <div className="flex items-center justify-between gap-3 border-t border-border px-6 py-4">
+          <Button variant="ghost" onClick={onClose} disabled={loading} className="h-auto px-4 py-2 text-sm">
             {t('取消')}
-          </button>
+          </Button>
           <div className="flex items-center gap-2">
             {currentStep > 0 && (
-              <button
+              <Button variant="outline"
                 type="button"
                 onClick={() => setCurrentStep((step) => Math.max(0, step - 1))}
-                className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-50"
+                disabled={loading}
+                className="h-auto inline-flex items-center gap-2 px-4 py-2 text-sm"
               >
                 <ArrowLeft className="h-4 w-4" />
                 {t('上一步')}
-              </button>
+              </Button>
             )}
             {currentStep < wizardSteps.length - 1 ? (
-              <button
+              <Button variant="default"
                 type="button"
                 onClick={handleNextStep}
                 disabled={currentStep === 0 && storageLoading}
-                className="inline-flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-auto inline-flex items-center gap-2 px-4 py-2 text-sm"
               >
                 {t('下一步')}
                 <ArrowRight className="h-4 w-4" />
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button variant="default"
                 type="button"
                 onClick={handleSubmit}
                 disabled={loading}
-                className="inline-flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-auto inline-flex items-center gap-2 px-4 py-2 text-sm"
               >
                 {loading ? t('创建中...') : t('确认创建')}
-              </button>
+              </Button>
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
 
 function ReviewItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 border-b border-gray-100 px-3 py-2.5 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
-      <dt className="text-xs text-gray-500">{label}</dt>
-      <dd className="mt-1 break-words text-sm font-medium text-gray-800">{value || '-'}</dd>
+    <div className="min-w-0 border-b border-border px-3 py-2.5 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 break-words text-sm font-medium text-foreground">{value || '-'}</dd>
     </div>
   )
 }
@@ -1336,7 +1313,7 @@ function ReviewItem({ label, value }: { label: string; value: string }) {
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>
+      <Label className="block text-sm font-medium text-foreground mb-1.5">{label}</Label>
       {children}
     </div>
   )
@@ -1367,7 +1344,7 @@ function NumberInput({
   }, [focused, value])
 
   return (
-    <input
+    <Input
       type="text"
       inputMode={step && !Number.isInteger(step) ? 'decimal' : 'numeric'}
       value={draft}
@@ -1386,7 +1363,7 @@ function NumberInput({
       data-min={min}
       data-max={max}
       data-step={step}
-      className={`${inputClass} ${invalid ? 'border-red-400 focus:border-red-400 focus:ring-red-400' : ''}`}
+      className={`  ${inputClass}    h-auto`}
     />
   )
 }
@@ -1808,5 +1785,4 @@ function symmetricLimit(a: number, b: number) {
   return Math.min(left, right)
 }
 
-const inputClass =
-  'w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-black bg-white focus:outline-none focus:ring-2 focus:ring-black focus:border-black'
+const inputClass = 'w-full px-3 py-2 text-sm'

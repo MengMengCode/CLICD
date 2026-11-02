@@ -1,3 +1,11 @@
+import { Alert } from './ui/alert'
+import { Card } from './ui/card'
+import { Button } from './ui/button'
+import { Label } from './ui/label'
+import { Switch } from './ui/switch'
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from './ui/table'
+import { Input } from './ui/input'
+import { NativeSelect } from './ui/native-select'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import {
@@ -27,8 +35,8 @@ type Draft = {
   description: string
 }
 
-const inputClass = 'w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-black disabled:bg-gray-100 disabled:text-gray-500'
-const buttonClass = 'inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50'
+const inputClass = 'w-full px-3 py-2 text-sm'
+const buttonClass = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs'
 
 function errorMessage(error: unknown, fallback: string) {
   return (error as { response?: { data?: { message?: string } } })?.response?.data?.message || fallback
@@ -180,92 +188,92 @@ export default function IPv6PortMappings({ containerId, isSubUser, refreshKey, o
   const canSave = canEdit && (draft?.index !== null || canAdd)
 
   return (
-    <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-5" aria-label="IPv6 NAT 端口映射">
+    <Card role="region" className="space-y-4 p-5" aria-label="IPv6 NAT 端口映射">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-black">IPv6 NAT 端口映射</h2>
+        <h2 className="text-sm font-semibold text-foreground">IPv6 NAT 端口映射</h2>
         <div className="flex items-center gap-2">
-          <button type="button" className={buttonClass} onClick={() => { void load() }} disabled={busy} title="刷新 IPv6 NAT 映射">
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />刷新
-          </button>
+          <Button variant="ghost" type="button" className={`h-auto ${buttonClass}`} onClick={() => { void load() }} disabled={busy} title="刷新 IPv6 NAT 映射">
+            <RefreshCw className={`h-3.5 w-3.5  ${loading ? "animate-spin" : ""}`} />刷新
+          </Button>
           {!isSubUser && (
-            <button type="button" className={buttonClass} disabled={!canAdd} onClick={() => {
+            <Button variant="ghost" type="button" className={`h-auto ${buttonClass}`} disabled={!canAdd} onClick={() => {
               setError('')
               setDraft({ index: null, hostPort: '', containerPort: '', protocol: 'tcp', description: '' })
             }}>
               <Plus className="h-3.5 w-3.5" />添加映射
-            </button>
+            </Button>
           )}
         </div>
       </div>
       {loading && !state ? (
-        <p className="text-sm text-gray-500">正在读取 IPv6 NAT 映射...</p>
+        <p className="text-sm text-muted-foreground">正在读取 IPv6 NAT 映射...</p>
       ) : state && (
         <>
-          <div className="flex flex-wrap items-start justify-between gap-3 rounded-md bg-gray-50 p-3 text-xs text-gray-600">
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded-md bg-muted p-3 text-xs text-muted-foreground">
             <div className="space-y-1">
-              <p>模式：<span className="font-medium text-gray-900">{state.sync_ipv4 ? '同步 IPv4 映射（只读）' : '独立 IPv6 NAT 映射'}</span></p>
+              <p>模式：<span className="font-medium text-foreground">{state.sync_ipv4 ? '同步 IPv4 映射（只读）' : '独立 IPv6 NAT 映射'}</span></p>
               <p>端口配额：<span className="font-mono">{state.mappings.length}/{state.limit}</span></p>
               <p className="break-all">宿主机 IPv6：<span className="font-mono">{state.host_ipv6 || '未配置'}</span></p>
               <p className="break-all">容器内网 IPv6（ULA）：<span className="font-mono">{state.guest_ipv6 || '未分配'}</span></p>
             </div>
             {!isSubUser && (
-              <label className="inline-flex cursor-pointer items-center gap-2 text-gray-800">
-                <input type="checkbox" checked={state.sync_ipv4} disabled={busy || !state.enabled} onChange={() => { void toggleSync() }} />
+              <Label className="inline-flex cursor-pointer items-center gap-2 text-foreground">
+                <Switch  checked={state.sync_ipv4} disabled={busy || !state.enabled} onCheckedChange={() => { void toggleSync() }} />
                 同步 IPv4 映射
-              </label>
+              </Label>
             )}
           </div>
           {!state.enabled && <p className="text-xs text-amber-700">宿主机尚未启用 IPv6 NAT，当前无法管理映射，请联系管理员。</p>}
           {state.enabled && !ready && <p className="text-xs text-amber-700">IPv6 NAT 地址尚未就绪，请管理员检查宿主机 IPv6 和容器内网地址。</p>}
           {state.sync_ipv4 ? (
-            <p className="text-xs text-gray-500">映射由 IPv4 配置派生；管理员关闭同步后可独立配置 IPv6 端口。</p>
+            <p className="text-xs text-muted-foreground">映射由 IPv4 配置派生；管理员关闭同步后可独立配置 IPv6 端口。</p>
           ) : isSubUser ? (
-            <p className="text-xs text-gray-500">可修改已分配映射的容器端口；宿主机端口、协议及映射数量由管理员管理。</p>
+            <p className="text-xs text-muted-foreground">可修改已分配映射的容器端口；宿主机端口、协议及映射数量由管理员管理。</p>
           ) : (
-            <p className="text-xs text-gray-500">独立映射不受 IPv4 端口调整影响。{state.limit === 0 ? '当前未分配 IPv6 NAT 端口配额。' : state.mappings.length >= state.limit ? '已达到 IPv6 NAT 端口配额。' : ''}</p>
+            <p className="text-xs text-muted-foreground">独立映射不受 IPv4 端口调整影响。{state.limit === 0 ? '当前未分配 IPv6 NAT 端口配额。' : state.mappings.length >= state.limit ? '已达到 IPv6 NAT 端口配额。' : ''}</p>
           )}
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b border-gray-200 text-gray-500"><tr><th className="px-2 py-2 font-medium">IPv6 访问端点 → 容器端点</th><th className="px-2 py-2 font-medium">协议</th><th className="px-2 py-2 font-medium">描述</th><th className="px-2 py-2 text-right font-medium">操作</th></tr></thead>
-              <tbody className="divide-y divide-gray-100">
+            <Table className="w-full text-left text-xs">
+              <TableHeader className="text-muted-foreground"><TableRow><TableHead className="px-2 py-2 font-medium">IPv6 访问端点 → 容器端点</TableHead><TableHead className="px-2 py-2 font-medium">协议</TableHead><TableHead className="px-2 py-2 font-medium">描述</TableHead><TableHead className="px-2 py-2 text-right font-medium">操作</TableHead></TableRow></TableHeader>
+              <TableBody className="divide-y divide-border">
                 {state.mappings.map((mapping, index) => (
-                  <tr key={`${mapping.host_port}-${mapping.protocol}-${index}`}>
-                    <td className="whitespace-nowrap px-2 py-3 font-mono">{endpoint(mapping.host_ip || state.host_ipv6, mapping.host_port)} → {endpoint(state.guest_ipv6, mapping.container_port)}</td>
-                    <td className="px-2 py-3">{mapping.protocol === 'all' ? 'TCP + UDP' : mapping.protocol.toUpperCase()}</td>
-                    <td className="px-2 py-3">{mapping.description || '-'}</td>
-                    <td className="whitespace-nowrap px-2 py-3 text-right">
-                      {state.sync_ipv4 ? <span className="text-gray-400">同步只读</span> : (
+                  <TableRow key={`${mapping.host_port}-${mapping.protocol}-${index}`}>
+                    <TableCell className="whitespace-nowrap px-2 py-3 font-mono">{endpoint(mapping.host_ip || state.host_ipv6, mapping.host_port)} → {endpoint(state.guest_ipv6, mapping.container_port)}</TableCell>
+                    <TableCell className="px-2 py-3">{mapping.protocol === 'all' ? 'TCP + UDP' : mapping.protocol.toUpperCase()}</TableCell>
+                    <TableCell className="px-2 py-3">{mapping.description || '-'}</TableCell>
+                    <TableCell className="whitespace-nowrap px-2 py-3 text-right">
+                      {state.sync_ipv4 ? <span className="text-muted-foreground">同步只读</span> : (
                         <div className="inline-flex gap-1">
-                          <button type="button" disabled={!canEdit} className={buttonClass} aria-label={`编辑 IPv6 映射 ${mapping.host_port}`} onClick={() => {
+                          <Button variant="ghost" type="button" disabled={!canEdit} className={`h-auto ${buttonClass}`} aria-label={`编辑 IPv6 映射 ${mapping.host_port}`} onClick={() => {
                             setError('')
                             setDraft({ index, hostPort: String(mapping.host_port), containerPort: String(mapping.container_port), protocol: mapping.protocol, description: mapping.description })
-                          }}><Pencil className="h-3.5 w-3.5" />编辑</button>
-                          {!isSubUser && <button type="button" disabled={!canEdit} className={buttonClass} aria-label={`删除 IPv6 映射 ${mapping.host_port}`} onClick={() => { void removeMapping(index) }}><Trash2 className="h-3.5 w-3.5" /></button>}
+                          }}><Pencil className="h-3.5 w-3.5" />编辑</Button>
+                          {!isSubUser && <Button variant="ghost" type="button" disabled={!canEdit} className={`h-auto ${buttonClass}`} aria-label={`删除 IPv6 映射 ${mapping.host_port}`} onClick={() => { void removeMapping(index) }}><Trash2 className="h-3.5 w-3.5" /></Button>}
                         </div>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-                {state.mappings.length === 0 && <tr><td colSpan={4} className="px-2 py-5 text-center text-gray-400">暂无 IPv6 NAT 端口映射</td></tr>}
-              </tbody>
-            </table>
+                {state.mappings.length === 0 && <TableRow><TableCell colSpan={4} className="px-2 py-5 text-center text-muted-foreground">暂无 IPv6 NAT 端口映射</TableCell></TableRow>}
+              </TableBody>
+            </Table>
           </div>
           {draft && (
-            <form onSubmit={(event) => { void saveMapping(event) }} className="space-y-3 rounded-md border border-gray-200 p-4" aria-label={draft.index === null ? '添加 IPv6 映射' : '编辑 IPv6 映射'}>
+            <Card className="p-4"><form onSubmit={(event) => { void saveMapping(event) }} className="space-y-3" aria-label={draft.index === null ? '添加 IPv6 映射' : '编辑 IPv6 映射'}>
               <div className="text-sm font-medium">{draft.index === null ? '添加 IPv6 NAT 映射' : '编辑 IPv6 NAT 映射'}</div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <label className="space-y-1 text-xs text-gray-600"><span>宿主机端口</span><input type="number" min={1} max={65535} required disabled={isSubUser || !canEdit} value={draft.hostPort} onChange={(event) => setDraft({ ...draft, hostPort: event.target.value })} className={inputClass} /></label>
-                <label className="space-y-1 text-xs text-gray-600"><span>容器端口</span><input type="number" min={1} max={65535} required disabled={!canEdit} value={draft.containerPort} onChange={(event) => setDraft({ ...draft, containerPort: event.target.value })} className={inputClass} /></label>
-                <label className="space-y-1 text-xs text-gray-600"><span>协议</span><select disabled={isSubUser || !canEdit} value={draft.protocol} onChange={(event) => setDraft({ ...draft, protocol: event.target.value })} className={inputClass}><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
-                <label className="space-y-1 text-xs text-gray-600"><span>描述</span><input disabled={isSubUser || !canEdit} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} className={inputClass} /></label>
+                <Label className="space-y-1 text-xs text-muted-foreground"><span>宿主机端口</span><Input type="number" min={1} max={65535} required disabled={isSubUser || !canEdit} value={draft.hostPort} onChange={(event) => setDraft({ ...draft, hostPort: event.target.value })} className={`${inputClass} h-auto`} /></Label>
+                <Label className="space-y-1 text-xs text-muted-foreground"><span>容器端口</span><Input type="number" min={1} max={65535} required disabled={!canEdit} value={draft.containerPort} onChange={(event) => setDraft({ ...draft, containerPort: event.target.value })} className={`${inputClass} h-auto`} /></Label>
+                <Label className="space-y-1 text-xs text-muted-foreground"><span>协议</span><NativeSelect wrapperClassName="w-full" disabled={isSubUser || !canEdit} value={draft.protocol} onChange={(event) => setDraft({ ...draft, protocol: event.target.value })} className={`${inputClass} h-auto pr-9`}><option value="tcp">TCP</option><option value="udp">UDP</option></NativeSelect></Label>
+                <Label className="space-y-1 text-xs text-muted-foreground"><span>描述</span><Input disabled={isSubUser || !canEdit} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} className={`${inputClass} h-auto`} /></Label>
               </div>
-              <div className="flex justify-end gap-2"><button type="button" disabled={busy} className={buttonClass} onClick={() => setDraft(null)}>取消</button><button type="submit" disabled={!canSave} className="rounded-md bg-black px-4 py-2 text-xs text-white disabled:opacity-50">{busy ? '保存中...' : '保存映射'}</button></div>
-            </form>
+              <div className="flex justify-end gap-2"><Button variant="ghost" type="button" disabled={busy} className={`h-auto ${buttonClass}`} onClick={() => setDraft(null)}>取消</Button><Button variant="default" type="submit" disabled={!canSave} className="h-auto px-4 py-2 text-xs">{busy ? '保存中...' : '保存映射'}</Button></div>
+            </form></Card>
           )}
         </>
       )}
-      {(error || loadError) && <p role="alert" className="rounded-md bg-red-50 p-3 text-xs text-red-700">{error || loadError}</p>}
-      {notice && <p role="status" className="rounded-md bg-blue-50 p-3 text-xs text-blue-800">{notice}</p>}
-    </section>
+      {(error || loadError) && <Alert variant="destructive" role="alert" className="p-3 text-xs">{error || loadError}</Alert>}
+      {notice && <Alert variant="default" role="status" className="p-3 text-xs">{notice}</Alert>}
+    </Card>
   )
 }

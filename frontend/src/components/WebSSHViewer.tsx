@@ -1,3 +1,6 @@
+import { Badge } from './ui/badge'
+import { Card } from './ui/card'
+import { Button } from './ui/button'
 import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -167,42 +170,42 @@ export default function WebSSHViewer({ containerName, onClose }: WebSSHViewerPro
   }, [containerName])
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden h-full flex flex-col">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50 shrink-0">
+    <Card className="overflow-hidden h-full flex flex-col">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted shrink-0">
         <div className="flex items-center gap-2">
-          <TerminalSquare className="w-4 h-4 text-gray-600" />
-          <span className="text-sm font-medium text-black">WebSSH - {containerName}</span>
+          <TerminalSquare className="w-4 h-4 text-muted-foreground" />
+          <span className="text-sm font-medium text-foreground">WebSSH - {containerName}</span>
           {status === 'connected' && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">已连接</span>
+            <Badge variant="secondary" className="text-xs px-1.5 py-0.5">已连接</Badge>
           )}
           {status === 'connecting' && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700">连接中...</span>
+            <Badge variant="secondary" className="text-xs px-1.5 py-0.5">连接中...</Badge>
           )}
           {status === 'preparing' && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700">SSH preparing...</span>
+            <Badge variant="secondary" className="text-xs px-1.5 py-0.5">SSH preparing...</Badge>
           )}
           {status === 'disconnected' && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">已断开</span>
+            <Badge variant="secondary" className="text-xs px-1.5 py-0.5">已断开</Badge>
           )}
           {status === 'error' && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">连接失败</span>
+            <Badge variant="destructive" className="text-xs px-1.5 py-0.5">连接失败</Badge>
           )}
         </div>
         <div className="flex items-center gap-1">
-          <button
+          <Button variant="ghost"
             onClick={connect}
-            className="p-1.5 hover:bg-gray-200 rounded text-gray-500 text-xs"
+            className="h-auto p-1.5 text-xs"
             title="重新连接"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-          </button>
-          <button
+          </Button>
+          <Button variant="ghost"
             onClick={onClose}
-            className="p-1.5 hover:bg-gray-200 rounded text-gray-500"
+            className="h-auto p-1.5"
             title="关闭"
           >
             <X className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -214,6 +217,6 @@ export default function WebSSHViewer({ containerName, onClose }: WebSSHViewerPro
           </div>
         )}
       </div>
-    </div>
+    </Card>
   )
 }

@@ -1,3 +1,8 @@
+import { Button } from '../components/ui/button'
+import { Card } from '../components/ui/card'
+import { Label } from '../components/ui/label'
+import { Input } from '../components/ui/input'
+import { Alert, AlertDescription } from '../components/ui/alert'
 import { FormEvent, useState } from 'react'
 import { Lock, User } from 'lucide-react'
 import AppIcon from '../components/AppIcon'
@@ -52,48 +57,49 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-muted px-4">
       <AutoTranslate />
       <BrowserDialogTranslator />
-      <button
+      <Button variant="outline"
         type="button"
         onClick={() => { void toggleLanguage() }}
-        className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 shadow-sm hover:bg-gray-50"
+        className="h-auto absolute right-4 top-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
       >
         <LanguageIcon className="h-3.5 w-3.5" />
         {language === 'en' ? '中文' : 'English'}
-      </button>
+      </Button>
       <div className="w-full max-w-md">
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
+        <Card className="p-8">
             <div className="flex flex-col items-center mb-8">
               <div className="w-16 h-16 flex items-center justify-center mb-4">
                 <AppIcon className="w-10 h-10" />
               </div>
-              <h1 className="text-2xl font-bold text-gray-950">CLICD</h1>
-              <p className="text-gray-500 mt-1 text-sm">{isAccessCodeLogin ? '容器管理登录' : 'Container Manager'}</p>
+              <h1 className="text-2xl font-bold text-foreground">CLICD</h1>
+              <p className="text-muted-foreground mt-1 text-sm">{isAccessCodeLogin ? '容器管理登录' : 'Container Manager'}</p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
               {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
-                  {error}
-                </div>
+                <Alert variant="destructive" className="px-4 py-3">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
               )}
 
               {!isAccessCodeLogin && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  <Label htmlFor="login-username" className="block mb-1.5 leading-normal">
                     {t('用户名')}
-                  </label>
+                  </Label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <User className="h-4 w-4 text-gray-400" />
+                      <User className="h-4 w-4 text-muted-foreground" />
                     </div>
-                    <input
+                    <Input
+                      id="login-username"
                       type="text"
                       value={username}
                       onChange={(event) => setUsername(event.target.value)}
-                      className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-md text-black bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-black text-sm"
+                      className="h-auto block w-full pl-10 pr-3 py-2.5 text-sm"
                       placeholder={t('输入用户名')}
                       required
                       autoComplete="username"
@@ -103,18 +109,19 @@ export default function Login() {
               )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              <Label htmlFor="login-password" className="block mb-1.5 leading-normal">
                 {t('密码')}
-              </label>
+              </Label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-4 w-4 text-gray-400" />
+                  <Lock className="h-4 w-4 text-muted-foreground" />
                 </div>
-                <input
+                <Input
+                  id="login-password"
                   type="password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-md text-black bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-black text-sm"
+                  className="h-auto block w-full pl-10 pr-3 py-2.5 text-sm"
                   placeholder={t('输入密码')}
                   required
                   autoComplete="current-password"
@@ -122,17 +129,17 @@ export default function Login() {
               </div>
             </div>
 
-            <button
+            <Button variant="default"
               type="submit"
               disabled={loading}
-              className="w-full bg-black text-white py-2.5 rounded-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+              className="h-auto w-full py-2.5 text-sm font-medium"
             >
               {loading ? t('登录中...') : t('登录')}
-            </button>
+            </Button>
           </form>
-        </div>
+        </Card>
 
-        <p className="text-center text-xs text-gray-400 mt-6">CLICD v1.1.29</p>
+        <p className="text-center text-xs text-muted-foreground mt-6">CLICD v1.1.29</p>
       </div>
     </div>
   )

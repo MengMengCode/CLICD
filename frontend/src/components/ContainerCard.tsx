@@ -1,3 +1,6 @@
+import { useDialog } from './Dialog'
+import { Card } from './ui/card'
+import { Button } from './ui/button'
 import { useNavigate } from 'react-router'
 import {
   Server,
@@ -19,6 +22,7 @@ interface ContainerCardProps {
 
 export default function ContainerCard({ container, onRefresh }: ContainerCardProps) {
   const navigate = useNavigate()
+  const dialog = useDialog()
   const containerIdentifier = container.uuid || container.id
 
   const handleAction = async (action: string) => {
@@ -34,7 +38,7 @@ export default function ContainerCard({ container, onRefresh }: ContainerCardPro
           await restartContainer(containerIdentifier)
           break
         case 'delete':
-          if (window.confirm(`确定要删除容器 ${container.name} 吗？此操作不可撤销。`)) {
+          if (await dialog.confirm('删除容器', `确定要删除容器 ${container.name} 吗？此操作不可撤销。`)) {
             await deleteContainer(containerIdentifier)
           } else {
             return
@@ -44,7 +48,7 @@ export default function ContainerCard({ container, onRefresh }: ContainerCardPro
       onRefresh()
     } catch (err) {
       console.error('Action failed:', err)
-      alert('操作失败')
+      await dialog.alert('操作失败', '请稍后重试')
     }
   }
 
@@ -52,23 +56,23 @@ export default function ContainerCard({ container, onRefresh }: ContainerCardPro
   const statusText = container.status === 'running' ? '运行中' : '已停止'
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-5 hover:shadow-md transition-shadow">
+    <Card className="p-5">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 flex items-center justify-center">
-            <Server className="w-5 h-5 text-gray-700" />
+            <Server className="w-5 h-5 text-foreground" />
           </div>
           <div>
-            <button
+            <Button variant="link"
               onClick={() => navigate(`/container/${encodeURIComponent(String(containerIdentifier))}`)}
-              className="font-semibold text-black hover:underline text-left"
+              className="h-auto font-semibold text-left p-0"
             >
               {container.name}
-            </button>
+            </Button>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${statusColor}`}></span>
-              <span className="text-xs text-gray-500">{statusText}</span>
+              <span className={`w-1.5 h-1.5 rounded-full  ${statusColor}`}></span>
+              <span className="text-xs text-muted-foreground">{statusText}</span>
             </div>
           </div>
         </div>
@@ -76,68 +80,68 @@ export default function ContainerCard({ container, onRefresh }: ContainerCardPro
 
       {/* Specs */}
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="flex items-center gap-2 text-sm text-gray-600">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Cpu className="w-3.5 h-3.5" />
           <span>{container.vcpu} vCPU</span>
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-600">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <MemoryStick className="w-3.5 h-3.5" />
           <span>{container.ram_mb} MB</span>
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-600">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <HardDrive className="w-3.5 h-3.5" />
           <span>{container.disk_gb} GB</span>
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-600">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Globe className="w-3.5 h-3.5" />
           <span>{formatNetworkLimit(container)}</span>
         </div>
       </div>
 
       {container.ip && (
-        <div className="text-xs text-gray-400 mb-3">
+        <div className="text-xs text-muted-foreground mb-3">
           IP: {container.ip}
         </div>
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-1.5 pt-3 border-t border-gray-100">
+      <div className="flex items-center gap-1.5 pt-3 border-t border-border">
         {container.status !== 'running' ? (
-          <button
+          <Button variant="default"
             onClick={() => handleAction('start')}
-            className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded text-xs hover:bg-green-700 transition-colors"
+            className="h-auto flex items-center gap-1 px-3 py-1.5 text-xs"
           >
             <Play className="w-3 h-3" />
             开机
-          </button>
+          </Button>
         ) : (
           <>
-            <button
+            <Button variant="default"
               onClick={() => handleAction('stop')}
-              className="flex items-center gap-1 px-3 py-1.5 bg-yellow-500 text-white rounded text-xs hover:bg-yellow-600 transition-colors"
+              className="h-auto flex items-center gap-1 px-3 py-1.5 text-xs"
             >
               <Square className="w-3 h-3" />
               关机
-            </button>
-            <button
+            </Button>
+            <Button variant="default"
               onClick={() => handleAction('restart')}
-              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 transition-colors"
+              className="h-auto flex items-center gap-1 px-3 py-1.5 text-xs"
             >
               <RotateCcw className="w-3 h-3" />
               重启
-            </button>
+            </Button>
           </>
         )}
         <div className="flex-1" />
-        <button
+        <Button variant="destructive"
           onClick={() => handleAction('delete')}
-          className="flex items-center gap-1 px-3 py-1.5 text-red-600 hover:bg-red-50 rounded text-xs transition-colors"
+          className="h-auto flex items-center gap-1 px-3 py-1.5 text-xs"
         >
           <Trash2 className="w-3 h-3" />
           删除
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   )
 }
 
