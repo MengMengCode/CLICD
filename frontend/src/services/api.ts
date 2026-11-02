@@ -112,6 +112,10 @@ export interface Container {
   ipv6_prefix_len: number
   ipv6_interface: string
   ipv6_addresses?: IPv6Assignment[]
+  ipv6_nat_address?: string
+  ipv6_nat_sync_ipv4?: boolean
+  ipv6_port_mappings?: PortMapping[]
+  ipv6_port_mapping_limit?: number
   vnc_port: number
   ssh_port: number
   ssh_password: string
@@ -169,6 +173,8 @@ export interface CreateContainerRequest {
   nat_port_mappings?: PortMapping[]
   management_port?: number
   port_mapping_count: number
+  ipv6_port_mapping_count?: number
+  ipv6_nat_sync_ipv4?: boolean
   assign_nat?: boolean
   lan_ipv4_mode?: string
   lan_interface?: string
@@ -648,6 +654,45 @@ export const updatePortMapping = (id: ContainerIdentifier, index: number, data: 
 
 export const deletePortMapping = (id: ContainerIdentifier, index: number) =>
   api.delete<APIResponse<PortMapping[]>>(`/containers/${id}/port-mappings/${index}`)
+
+export interface IPv6NATSettings {
+  enabled: boolean
+  subnet: string
+  interface?: string
+}
+
+export interface IPv6NATStatus {
+  settings: IPv6NATSettings
+  available: boolean
+  reason: string
+  bridge: string
+  gateway: string
+  host_address: string
+  interface: string
+}
+
+export interface IPv6PortMappingState {
+  enabled: boolean
+  sync_ipv4: boolean
+  host_ipv6: string
+  guest_ipv6: string
+  limit: number
+  mappings: PortMapping[]
+}
+
+export const getIPv6NATSettings = () => api.get<APIResponse<IPv6NATStatus>>('/ipv6/nat')
+export const updateIPv6NATSettings = (settings: Partial<IPv6NATSettings>) =>
+  api.put<APIResponse<IPv6NATStatus>>('/ipv6/nat', settings, { timeout: 120000 })
+export const getIPv6PortMappings = (id: ContainerIdentifier) =>
+  api.get<APIResponse<IPv6PortMappingState>>(`/containers/${id}/ipv6-port-mappings`)
+export const addIPv6PortMapping = (id: ContainerIdentifier, mapping: PortMapping) =>
+  api.post<APIResponse<PortMapping[]>>(`/containers/${id}/ipv6-port-mappings`, mapping)
+export const updateIPv6PortMapping = (id: ContainerIdentifier, index: number, mapping: PortMapping) =>
+  api.put<APIResponse<PortMapping[]>>(`/containers/${id}/ipv6-port-mappings/${index}`, mapping)
+export const deleteIPv6PortMapping = (id: ContainerIdentifier, index: number) =>
+  api.delete<APIResponse<PortMapping[]>>(`/containers/${id}/ipv6-port-mappings/${index}`)
+export const setIPv6NATSync = (id: ContainerIdentifier, enabled: boolean) =>
+  api.put<APIResponse<IPv6PortMappingState>>(`/containers/${id}/ipv6-nat-sync`, { enabled })
 
 export const getFirewall = (id: ContainerIdentifier) =>
   api.get<APIResponse<{ enabled: boolean; default_action: 'ACCEPT' | 'DROP'; rules: FirewallRule[] }>>(`/containers/${id}/firewall`)

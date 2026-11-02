@@ -81,6 +81,7 @@ import { useLanguage } from '../contexts/LanguageContext'
 import WebSSHViewer from '../components/WebSSHViewer'
 import WebVNCViewer from '../components/WebVNCViewer'
 import { RingStat } from '../components/RingStats'
+import IPv6PortMappings from '../components/IPv6PortMappings'
 import { copyToClipboard } from '../utils/clipboard'
 import ResourceStatsPanel, {
   ChartPoint,
@@ -512,7 +513,7 @@ export default function ContainerDetail() {
 
   const addFirewallRule = () => {
     const hasIPv4Firewall = (container?.public_ipv4s?.length || 0) > 0 || Math.max(container?.port_mapping_limit || 0, container?.port_mappings?.length || 0) > 0
-    const hasIPv6Firewall = !!container?.ipv6 || (container?.ipv6_addresses?.length || 0) > 0
+    const hasIPv6Firewall = !!container?.ipv6 || (container?.ipv6_addresses?.length || 0) > 0 || !!container?.ipv6_nat_address
     setEditingFirewallRule({
       id: '',
       network: hasIPv4Firewall ? 'ipv4' : hasIPv6Firewall ? 'ipv6' : 'ipv4',
@@ -950,10 +951,12 @@ export default function ContainerDetail() {
   const assignedIPv4List = publicIPv4s.map((item) => item.address).filter(Boolean)
   const allocatableIPv4s = mergeIPv4Choices(hostInfo?.network.public_ipv4_addresses || [], publicIPv4s)
   const publicHost = assignedIPv4List[0] || hostInfo?.network.public_ipv4 || PUBLIC_HOST
+  const ipv6NATAddress = container.ipv6_nat_address?.trim() || ''
+  const hasIPv6NAT = !!ipv6NATAddress
   const ipv6List = (container.ipv6_addresses || [])
     .map((item) => item.address)
-    .filter(Boolean)
-  if (ipv6List.length === 0 && container.ipv6) ipv6List.push(container.ipv6)
+    .filter((address) => !!address && address !== ipv6NATAddress)
+  if (ipv6List.length === 0 && container.ipv6 && container.ipv6 !== ipv6NATAddress) ipv6List.push(container.ipv6)
   const maxVCPU = hostInfo?.cpu.cores || 64
   const maxRAMMB = hostInfo?.ram.total_mb ? Number(hostInfo.ram.total_mb) : undefined
   const hasIndependentIPv4 = assignedIPv4List.length > 0
@@ -1018,6 +1021,7 @@ export default function ContainerDetail() {
   const hasNATQuota = mappingLimit > 0
   const canAddMapping = hasNATQuota && mappingCount < mappingLimit && !isSubUserPolicyBlocked
   const hasFirewallIPv4 = hasIndependentIPv4 || hasNATQuota
+  const hasFirewallIPv6 = hasIndependentIPv6 || hasIPv6NAT
   const firewallNetworkOptions: Array<{ value: NonNullable<FirewallRule['network']>; label: string }> = []
   if (hasFirewallIPv4) {
     firewallNetworkOptions.push({
@@ -1025,10 +1029,10 @@ export default function ContainerDetail() {
       label: hasIndependentIPv4 ? 'IPv4（公网 IPv4）' : 'IPv4（NAT）',
     })
   }
-  if (hasIndependentIPv6) {
-    firewallNetworkOptions.push({ value: 'ipv6', label: 'IPv6' })
+  if (hasFirewallIPv6) {
+    firewallNetworkOptions.push({ value: 'ipv6', label: hasIndependentIPv6 ? (hasIPv6NAT ? 'IPv6（公网与 NAT）' : 'IPv6（公网）') : 'IPv6（NAT）' })
   }
-  if (hasFirewallIPv4 && hasIndependentIPv6) {
+  if (hasFirewallIPv4 && hasFirewallIPv6) {
     firewallNetworkOptions.push({ value: 'all', label: '全部网络' })
   }
   const managementUrl = subUser?.access_code
@@ -1299,6 +1303,7 @@ export default function ContainerDetail() {
               </>
             )}
           </PlainRow>
+          {hasIPv6NAT && <PlainRow label="IPv6 NAT（ULA）" value={ipv6NATAddress} mono copyValue={ipv6NATAddress} onCopy={copyText} />}
           <PlainRow label="CPU 累计时间" value={formatCPU(usage?.cpu_usage_usec || 0)} />
           <PlainRow label="创建时间" value={container.created_at} />
           <PlainRow label="到期时间" value={formatExpiration(container.expires_at)}>
@@ -1310,6 +1315,17 @@ export default function ContainerDetail() {
           </PlainRow>
         </Panel>
       </div>
+
+      {(hasIPv6NAT || (container.ipv6_port_mapping_limit || 0) > 0) && (
+        <IPv6PortMappings
+          key={container.id}
+          containerId={container.id}
+          isSubUser={isSubUser}
+          policyBlocked={isSubUserPolicyBlocked}
+          refreshKey={JSON.stringify([ipv6NATAddress, container.ipv6_nat_sync_ipv4, container.ipv6_port_mapping_limit, container.ipv6_port_mappings, container.port_mappings])}
+          onUpdated={fetchContainer}
+        />
+      )}
 
       {/* Container resource ring stats (matching host dashboard style) */}
       {container && (
@@ -1720,16 +1736,14 @@ export default function ContainerDetail() {
 
       {showFirewall && (
         <Modal title="防火墙设置" onClose={() => { setShowFirewall(false); setShowFirewallEditor(false); setEditingFirewallRule(null) }} wide extra={
-          !isSubUser && (
-            <button
-              onClick={addFirewallRule}
-              disabled={firewallNetworkOptions.length === 0}
-              title={firewallNetworkOptions.length === 0 ? '当前容器没有可配置的 NAT、公网 IPv4 或 IPv6' : undefined}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-md text-xs hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Plus className="w-3.5 h-3.5" />添加规则
-            </button>
-          )
+          <button
+            onClick={addFirewallRule}
+            disabled={firewallNetworkOptions.length === 0}
+            title={firewallNetworkOptions.length === 0 ? '当前容器没有可配置的 NAT、公网 IPv4 或 IPv6' : undefined}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-md text-xs hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus className="w-3.5 h-3.5" />添加规则
+          </button>
         }>
           <div className="space-y-5">
             {/* Global toggle */}
@@ -1758,7 +1772,6 @@ export default function ContainerDetail() {
               <select
                 value={firewallDefaultAction}
                 onChange={(e) => setFirewallDefaultAction(e.target.value as 'ACCEPT' | 'DROP')}
-                disabled={isSubUser}
                 className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-black focus:outline-none focus:ring-2 focus:ring-black disabled:opacity-60"
               >
                 <option value="DROP">未匹配拒绝</option>
@@ -1775,6 +1788,7 @@ export default function ContainerDetail() {
                 {hasFirewallIPv4 ? ` IPv4 规则覆盖${hasIndependentIPv4 ? '独立公网 IPv4' : 'IPv4 NAT 端口映射'}。` : ''}
                 {hasNATQuota && !hasIndependentIPv4 ? ' NAT 入站端口按容器内部端口匹配，不是宿主机公网端口。' : ''}
                 {hasIndependentIPv6 ? ' IPv6 规则覆盖该容器已分配的 IPv6 地址。' : ''}
+                {hasIPv6NAT ? ' IPv6 NAT 规则覆盖容器的 ULA 内网地址，入站填写容器内部端口，不是宿主机映射端口。' : ''}
               </div>
             </div>
 
@@ -1797,7 +1811,7 @@ export default function ContainerDetail() {
                     <th className="px-3 py-2 text-left font-medium">来源/目标 IP</th>
                     <th className="px-3 py-2 text-left font-medium">动作</th>
                     <th className="px-3 py-2 text-left font-medium">描述</th>
-                    {!isSubUser && <th className="px-3 py-2 text-right font-medium">操作</th>}
+                    <th className="px-3 py-2 text-right font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -1827,43 +1841,39 @@ export default function ContainerDetail() {
                         </span>
                       </td>
                       <td className="px-3 py-2 text-xs text-gray-600 max-w-32 truncate">{rule.description || '-'}</td>
-                      {!isSubUser && (
-                        <td className="px-3 py-2 text-right">
-                          <div className="inline-flex items-center gap-1">
-                            <button onClick={() => {
-                              const currentNetwork = (rule.network || 'ipv4') as NonNullable<FirewallRule['network']>
-                              const network = firewallNetworkOptions.some((option) => option.value === currentNetwork)
-                                ? currentNetwork
-                                : (firewallNetworkOptions[0]?.value || currentNetwork)
-                              setEditingFirewallRule({ ...rule, network })
-                              setShowFirewallEditor(true)
-                            }} className="p-1.5 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100">
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button onClick={() => deleteFirewallRule(rule.id)} className="p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      )}
+                      <td className="px-3 py-2 text-right">
+                        <div className="inline-flex items-center gap-1">
+                          <button onClick={() => {
+                            const currentNetwork = (rule.network || 'ipv4') as NonNullable<FirewallRule['network']>
+                            const network = firewallNetworkOptions.some((option) => option.value === currentNetwork)
+                              ? currentNetwork
+                              : (firewallNetworkOptions[0]?.value || currentNetwork)
+                            setEditingFirewallRule({ ...rule, network })
+                            setShowFirewallEditor(true)
+                          }} className="p-1.5 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button onClick={() => deleteFirewallRule(rule.id)} className="p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                   {firewallRules.length === 0 && (
-                    <tr><td colSpan={isSubUser ? 8 : 9} className="px-3 py-6 text-center text-xs text-gray-400">暂无防火墙规则</td></tr>
+                    <tr><td colSpan={9} className="px-3 py-6 text-center text-xs text-gray-400">暂无防火墙规则</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
 
             {/* Save button */}
-            {!isSubUser && (
-              <div className="flex justify-end">
-                <button onClick={saveFirewall} disabled={firewallSaving} className="inline-flex items-center gap-1.5 px-4 py-2 bg-black text-white rounded-md text-sm hover:bg-gray-800 disabled:opacity-50">
-                  <Save className="w-3.5 h-3.5" />
-                  {firewallSaving ? '保存中...' : '保存'}
-                </button>
-              </div>
-            )}
+            <div className="flex justify-end">
+              <button onClick={saveFirewall} disabled={firewallSaving} className="inline-flex items-center gap-1.5 px-4 py-2 bg-black text-white rounded-md text-sm hover:bg-gray-800 disabled:opacity-50">
+                <Save className="w-3.5 h-3.5" />
+                {firewallSaving ? '保存中...' : '保存'}
+              </button>
+            </div>
           </div>
         </Modal>
       )}

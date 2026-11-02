@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, CalendarClock, Check, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { useNavigate } from 'react-router'
-import { batchCreate, getIPv6Status, getEnabledImages, getHostInfo, getHostReport, getRoutingInfo, getStorageInfo, CreateContainerRequest, HostInfo, HostProbeReport, IPv6Status, PortMapping, RoutingInfo, StorageInfo, Template } from '../services/api'
+import { batchCreate, getIPv6Status, getIPv6NATSettings, getEnabledImages, getHostInfo, getHostReport, getRoutingInfo, getStorageInfo, CreateContainerRequest, HostInfo, HostProbeReport, IPv6Status, IPv6NATStatus, PortMapping, RoutingInfo, StorageInfo, Template } from '../services/api'
 import { useDialog } from './Dialog'
 import { useLanguage, type Language } from '../contexts/LanguageContext'
 import { generateSSHPassword, sshPasswordError, sshPublicKeyError, type SSHAuthMode } from '../utils/sshAuth'
@@ -36,6 +36,8 @@ const defaultForm: CreateContainerRequest = {
   nat_port_mappings: [],
   management_port: 0,
   port_mapping_count: 2,
+  ipv6_port_mapping_count: 0,
+  ipv6_nat_sync_ipv4: true,
   assign_nat: true,
   lan_ipv4_mode: '',
   lan_interface: '',
@@ -74,6 +76,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
   const [storageLoading, setStorageLoading] = useState(true)
   const [routingInfo, setRoutingInfo] = useState<RoutingInfo | null>(null)
   const [ipv6Status, setIPv6Status] = useState<IPv6Status | null>(null)
+  const [ipv6NATStatus, setIPv6NATStatus] = useState<IPv6NATStatus | null>(null)
   const [nameError, setNameError] = useState('')
 
   useEffect(() => {
@@ -101,6 +104,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
       })
       .catch(console.error)
 
+    getIPv6NATSettings().then(res => setIPv6NATStatus(res.data.data || null)).catch(() => setIPv6NATStatus(null))
     getIPv6Status()
       .then((res) => {
         const status = res.data.data || null
@@ -174,6 +178,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
   }, [isOpen])
 
   const ipv6Available = !!ipv6Status?.available
+  const ipv6NATAvailable = form.virtualization === 'lxc' && !form.lan_ipv4_mode && !!ipv6NATStatus?.settings.enabled && !!ipv6NATStatus.available
   const ipv6Prefixes = ipv6Status?.prefixes || []
   const ipv6Prefix = ipv6Prefixes.length > 1 ? `${ipv6Prefixes.length} prefixes configured` : (ipv6Prefixes[0]?.prefix || '')
   const publicIPv4s = hostInfo?.network.public_ipv4_addresses || []
@@ -290,7 +295,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
     }
 
     if (step === 2) {
-      if (!form.assign_ipv4 && !form.assign_ipv6 && form.assign_nat === false && form.lan_ipv4_mode !== 'dhcp' && form.lan_ipv4_mode !== 'static') {
+      if (!form.assign_ipv4 && !form.assign_ipv6 && !ipv6NATAvailable && form.assign_nat === false && form.lan_ipv4_mode !== 'dhcp' && form.lan_ipv4_mode !== 'static') {
         dialog.alert(t('网络配置有误'), t('请至少启用一种网络连接方式'))
         return false
       }
@@ -325,7 +330,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
       return
     }
 
-    if (!form.assign_ipv4 && !form.assign_ipv6 && form.assign_nat === false && form.lan_ipv4_mode !== 'dhcp' && form.lan_ipv4_mode !== 'static') {
+    if (!form.assign_ipv4 && !form.assign_ipv6 && !ipv6NATAvailable && form.assign_nat === false && form.lan_ipv4_mode !== 'dhcp' && form.lan_ipv4_mode !== 'static') {
       dialog.alert('提示', '请勾选任意一个可用网络')
       return
     }
@@ -808,6 +813,13 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
             )}
           </div>
 
+          {ipv6NATAvailable && <div className="space-y-3 rounded-md border border-gray-200 bg-white px-3 py-3 text-sm">
+            <div><span className="font-medium text-gray-800">IPv6 NAT</span><p className="mt-1 text-xs text-gray-500">{language === 'en' ? `A private IPv6 address will be assigned automatically; outbound traffic shares ${ipv6NATStatus.host_address}.` : `将自动分配内网 IPv6，出网共享宿主机 ${ipv6NATStatus.host_address}。`}</p></div>
+            <label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={form.ipv6_nat_sync_ipv4 !== false} onChange={event => setForm({ ...form, ipv6_nat_sync_ipv4: event.target.checked })} />{language === 'en' ? 'Sync IPv4 port mappings to IPv6' : '将 IPv4 端口映射同步到 IPv6'}</label>
+            <Field label={language === 'en' ? 'IPv6 port quota (0 = inherit IPv4 quota)' : 'IPv6 端口配额（0 = 继承 IPv4 配额）'}><NumberInput value={form.ipv6_port_mapping_count || 0} min={0} max={64} onChange={value => setForm({ ...form, ipv6_port_mapping_count: Math.min(64, Math.max(0, Math.round(value || 0))) })} /></Field>
+            {form.ipv6_nat_sync_ipv4 === false && <p className="text-xs text-gray-500">{language === 'en' ? 'Add independent IPv6 mappings from the container details after creation.' : '创建完成后，可在容器详情中添加独立 IPv6 端口映射。'}</p>}
+          </div>}
+
           <div className={`rounded-md border px-3 py-2 text-sm ${ipv6Available ? 'border-gray-200 bg-white' : 'border-gray-200 bg-gray-50 text-gray-400'}`}>
             <div className="flex items-start justify-between gap-3">
               <label className="flex min-w-0 flex-1 items-start gap-3">
@@ -1247,6 +1259,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                     label={networkText.publicIPv6}
                     value={form.assign_ipv6 ? `${form.ipv6_count || 1} ${t('个地址')}` : t('未启用')}
                   />
+                  {ipv6NATAvailable && <ReviewItem label="IPv6 NAT" value={form.ipv6_nat_sync_ipv4 !== false ? (language === 'en' ? 'Private IPv6 · sync IPv4 ports' : '内网 IPv6 · 同步 IPv4 端口') : (language === 'en' ? 'Private IPv6 · independent ports' : '内网 IPv6 · 独立端口')} />}
                 </dl>
                 {natEnabled && (
                   <div className="mt-3">
@@ -1468,6 +1481,8 @@ function normalizeCreateForm(form: CreateContainerRequest): CreateContainerReque
     disk_gb: normalized.virtualization === 'kvm' ? Math.round(normalized.disk_gb) : normalizeLXCDisk(normalized.disk_gb),
     assign_nat: wantsNAT,
     port_mapping_count: portMappingCount,
+    ipv6_port_mapping_count: normalized.virtualization === 'lxc' && !wantsLANIPv4 ? clampInt(normalized.ipv6_port_mapping_count || 0, 0, 64, 0) : 0,
+    ipv6_nat_sync_ipv4: normalized.virtualization === 'lxc' ? normalized.ipv6_nat_sync_ipv4 !== false : undefined,
     extra_ports: [],
     nat_port_mappings: natPortMappings,
     management_port: managementPort,
