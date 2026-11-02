@@ -20,6 +20,9 @@ var (
 	createNATReservationNextID  uint64
 	createNATReservations       = map[uint64][]config.PortMapping{}
 	queuedCreateNATReservations = map[string][]config.PortMapping{}
+	activeCreateNATOwners       = map[uint64]string{}
+	activeCreateNATMirrorsIPv6  = map[uint64]bool{}
+	queuedCreateNATMirrorsIPv6  = map[string]bool{}
 )
 
 // ApplyPortMappings applies iptables DNAT rules for a container's port mappings
@@ -31,7 +34,21 @@ func (m *Manager) ApplyPortMappings(id int) error {
 	if c == nil {
 		return fmt.Errorf("container not found: %d", id)
 	}
+	snapshot := *c
+	c = &snapshot
+	if err := validateIPv6MappingInventory(c); err != nil {
+		return err
+	}
 	if c.IP == "" {
+		if _, _, _, enabled := nat6PortEndpoint(c); enabled {
+			if err := cleanIPv6PortMappingsLocked(id); err != nil {
+				return err
+			}
+			if err := applyIPv6PortMappingsLocked(c); err != nil {
+				return err
+			}
+			return applyFirewallRulesLocked(id)
+		}
 		return fmt.Errorf("container has no IP")
 	}
 	EnsureAssignedPublicIPv4s(c.PublicIPv4s)
@@ -83,6 +100,9 @@ func (m *Manager) ApplyPortMappings(id int) error {
 	}
 
 	applyIPv4EgressPolicy(c, bridge, subnet, tag)
+	if err := applyIPv6PortMappingsLocked(c); err != nil {
+		return err
+	}
 
 	if err := applyFirewallRulesLocked(id); err != nil {
 		return err
@@ -251,19 +271,29 @@ func primaryPublicIPv4Assignment(c *config.Container) (config.PublicIPv4Assignme
 
 func clicdTag(id int) string { return "c" + strconv.Itoa(id) }
 
+var restorePortMappingOrphans = (*Manager).cleanOrphanedPortMappings
+var restoreContainerPortMappings = (*Manager).ApplyPortMappings
+var restoreContainerIPv6 = (*Manager).ApplyIPv6
+
 func EnsureAllRunningPortMappings() {
 	m := NewManager()
-	m.cleanOrphanedPortMappings()
-	for i := range config.AppConfig.Containers {
-		c := &config.AppConfig.Containers[i]
-		if c.Status != "running" || strings.TrimSpace(c.IP) == "" {
+	restorePortMappingOrphans(m)
+	containers := append([]config.Container(nil), config.AppConfig.Containers...)
+	for i := range containers {
+		c := &containers[i]
+		if c.Status != "running" || (strings.TrimSpace(c.IP) == "" && c.IPv6NATAddress == "") {
 			if err := m.CleanPortMappings(c.ID); err != nil {
 				fmt.Printf("Warning: failed to clean inactive port mappings for %s: %v\n", c.Name, err)
 			}
 			continue
 		}
-		if err := m.ApplyPortMappings(c.ID); err != nil {
+		if err := restoreContainerPortMappings(m, c.ID); err != nil {
 			fmt.Printf("Warning: failed to restore port mappings for %s: %v\n", c.Name, err)
+		}
+		if !c.IsKVM() && c.IPv6NATAddress != "" {
+			if err := restoreContainerIPv6(m, c.ID); err != nil {
+				fmt.Printf("Warning: failed to restore IPv6 NAT routing for %s: %v\n", c.Name, err)
+			}
 		}
 	}
 }
@@ -271,6 +301,16 @@ func EnsureAllRunningPortMappings() {
 var taggedContainerIDPattern = regexp.MustCompile(`clicd-c([0-9]+)-`)
 
 func (m *Manager) cleanOrphanedPortMappings() {
+	if output, err := exec.Command("ip6tables-save", "-t", "nat").Output(); err == nil {
+		for _, match := range taggedContainerIDPattern.FindAllSubmatch(output, -1) {
+			id, err := strconv.Atoi(string(match[1]))
+			if err == nil && config.FindContainer(id) == nil {
+				if err := m.CleanIPv6PortMappings(id); err != nil {
+					fmt.Printf("Warning: failed to clean orphaned IPv6 port mappings: %v\n", err)
+				}
+			}
+		}
+	}
 	output, err := exec.Command("iptables-save").Output()
 	if err != nil {
 		return
@@ -404,6 +444,13 @@ func (m *Manager) cleanPortMappingsLocked(id int) error {
 		}
 	}
 	if c := config.FindContainer(id); c != nil {
+		snapshot := *c
+		c = &snapshot
+		if c.IPv6NATAddress != "" {
+			if err := cleanIPv6PortMappingsLocked(id); err != nil {
+				cleanupErrors = append(cleanupErrors, err)
+			}
+		}
 		for _, mapping := range c.PortMappings {
 			clearPortMappingConntrack(mapping)
 		}
@@ -567,6 +614,8 @@ func defaultPortMappingHostIP(assignments []config.PublicIPv4Assignment) string 
 
 // AddPortMapping adds a NAT rule to a container
 func (m *Manager) AddPortMapping(id int, pm config.PortMapping) ([]config.PortMapping, error) {
+	portMappingMutationMu.Lock()
+	defer portMappingMutationMu.Unlock()
 	c := config.FindContainer(id)
 	if c == nil {
 		return nil, fmt.Errorf("container not found: %d", id)
@@ -581,7 +630,12 @@ func (m *Manager) AddPortMapping(id int, pm config.PortMapping) ([]config.PortMa
 	if err != nil {
 		return nil, err
 	}
-	c.PortMappings = append(c.PortMappings, normalized)
+	candidate := *c
+	candidate.PortMappings = append(append([]config.PortMapping(nil), c.PortMappings...), normalized)
+	if err := validateIPv6MappingInventory(&candidate); err != nil {
+		return nil, err
+	}
+	c.PortMappings = candidate.PortMappings
 	if err := persistAndReloadMappings(m, c); err != nil {
 		return nil, err
 	}
@@ -590,6 +644,8 @@ func (m *Manager) AddPortMapping(id int, pm config.PortMapping) ([]config.PortMa
 
 // UpdatePortMapping updates an existing NAT rule
 func (m *Manager) UpdatePortMapping(id int, index int, pm config.PortMapping) ([]config.PortMapping, error) {
+	portMappingMutationMu.Lock()
+	defer portMappingMutationMu.Unlock()
 	c := config.FindContainer(id)
 	if c == nil {
 		return nil, fmt.Errorf("container not found: %d", id)
@@ -605,16 +661,25 @@ func (m *Manager) UpdatePortMapping(id int, index int, pm config.PortMapping) ([
 	if strings.EqualFold(existing.Description, "SSH") {
 		normalized.Description = "SSH"
 	}
-	c.PortMappings[index] = normalized
+	candidate := *c
+	candidate.PortMappings = append([]config.PortMapping(nil), c.PortMappings...)
+	candidate.PortMappings[index] = normalized
+	if err := validateIPv6MappingInventory(&candidate); err != nil {
+		return nil, err
+	}
+	c.PortMappings = candidate.PortMappings
 	if err := persistAndReloadMappings(m, c); err != nil {
 		return nil, err
 	}
 	clearPortMappingConntrack(existing)
+	clearSynchronizedIPv6Conntrack(c, existing)
 	return c.PortMappings, nil
 }
 
 // DeletePortMapping removes a NAT rule
 func (m *Manager) DeletePortMapping(id int, index int) ([]config.PortMapping, error) {
+	portMappingMutationMu.Lock()
+	defer portMappingMutationMu.Unlock()
 	c := config.FindContainer(id)
 	if c == nil {
 		return nil, fmt.Errorf("container not found: %d", id)
@@ -631,13 +696,14 @@ func (m *Manager) DeletePortMapping(id int, index int) ([]config.PortMapping, er
 		return nil, err
 	}
 	clearPortMappingConntrack(removed)
+	clearSynchronizedIPv6Conntrack(c, removed)
 	return c.PortMappings, nil
 }
 
 func persistAndReloadMappings(m *Manager, c *config.Container) error {
 	syncContainerSSHPort(c)
 	config.SaveConfig()
-	if c.Status == "running" && c.IP != "" {
+	if c.Status == "running" && (c.IP != "" || c.IPv6NATAddress != "") {
 		return m.ApplyPortMappings(c.ID)
 	}
 	return nil
@@ -795,10 +861,15 @@ func SetupCreatePortMappings(c *config.Container, cfg ContainerConfig) ([]config
 // ReserveCreateNATPorts keeps concurrent create tasks from selecting each
 // other's custom or management ports before their containers are persisted.
 func ReserveCreateNATPorts(cfg ContainerConfig) (int, func(), error) {
-	if !cfg.WantsNAT() {
+	if !cfg.WantsNAT() && (config.NormalizeVirtualization(cfg.Virtualization) == config.VirtualizationKVM || cfg.WantsLANIPv4()) {
 		return 0, func() {}, nil
 	}
+	if IPv6NATConfigurationInProgress() {
+		return 0, nil, fmt.Errorf("IPv6 NAT configuration is changing; retry container creation")
+	}
 
+	portMappingMutationMu.Lock()
+	defer portMappingMutationMu.Unlock()
 	createNATReservationMu.Lock()
 	defer createNATReservationMu.Unlock()
 
@@ -809,7 +880,14 @@ func ReserveCreateNATPorts(cfg ContainerConfig) (int, func(), error) {
 			return 0, nil, fmt.Errorf("queued NAT port plan for %s no longer matches the create task", cfg.Name)
 		}
 		delete(queuedCreateNATReservations, owner)
-		return activateCreateNATReservationLocked(cfg.ManagementPort, queued)
+		delete(queuedCreateNATMirrorsIPv6, owner)
+		if err := validateCreateNATIPv6PortAvailability(cfg, cfg.ManagementPort); err != nil {
+			return 0, nil, err
+		}
+		return activateCreateNATReservationLocked(cfg.ManagementPort, queued, owner, createUsesIPv6PortSynchronization(cfg))
+	}
+	if !cfg.WantsNAT() {
+		return activateCreateNATReservationLocked(0, nil, owner, false)
 	}
 
 	if err := ValidateCreateNATPortAvailability(cfg); err != nil {
@@ -831,12 +909,20 @@ func ReserveCreateNATPorts(cfg ContainerConfig) (int, func(), error) {
 	}
 
 	reservations := createNATReservationMappings(cfg, managementPort)
-	return activateCreateNATReservationLocked(managementPort, reservations)
+	if err := validateCreateNATIPv6PortAvailability(cfg, managementPort); err != nil {
+		return 0, nil, err
+	}
+	return activateCreateNATReservationLocked(managementPort, reservations, owner, createUsesIPv6PortSynchronization(cfg))
 }
 
 // ReserveBatchCreateNATPorts resolves every automatic NAT port and reserves
 // the complete batch before any create task is enqueued.
 func ReserveBatchCreateNATPorts(configs []ContainerConfig) ([]ContainerConfig, error) {
+	if IPv6NATConfigurationInProgress() {
+		return nil, fmt.Errorf("IPv6 NAT configuration is changing; retry container creation")
+	}
+	portMappingMutationMu.Lock()
+	defer portMappingMutationMu.Unlock()
 	createNATReservationMu.Lock()
 	defer createNATReservationMu.Unlock()
 
@@ -845,6 +931,7 @@ func ReserveBatchCreateNATPorts(configs []ContainerConfig) ([]ContainerConfig, e
 	rollback := func() {
 		for _, owner := range addedOwners {
 			delete(queuedCreateNATReservations, owner)
+			delete(queuedCreateNATMirrorsIPv6, owner)
 		}
 	}
 
@@ -852,6 +939,20 @@ func ReserveBatchCreateNATPorts(configs []ContainerConfig) ([]ContainerConfig, e
 		cfg := &planned[i]
 		cfg.NATPortMappings = append([]config.PortMapping(nil), cfg.NATPortMappings...)
 		if !cfg.WantsNAT() {
+			if config.NormalizeVirtualization(cfg.Virtualization) != config.VirtualizationKVM && !cfg.WantsLANIPv4() {
+				owner := createNATReservationOwner(cfg.Name)
+				if owner == "" {
+					rollback()
+					return nil, fmt.Errorf("container name is required for IPv6 NAT configuration coordination")
+				}
+				if _, exists := queuedCreateNATReservations[owner]; exists {
+					rollback()
+					return nil, fmt.Errorf("container creation already has a reserved network plan: %s", cfg.Name)
+				}
+				queuedCreateNATReservations[owner] = nil
+				queuedCreateNATMirrorsIPv6[owner] = false
+				addedOwners = append(addedOwners, owner)
+			}
 			continue
 		}
 		owner := createNATReservationOwner(cfg.Name)
@@ -896,11 +997,16 @@ func ReserveBatchCreateNATPorts(configs []ContainerConfig) ([]ContainerConfig, e
 		}
 
 		reservations := createNATReservationMappings(*cfg, cfg.ManagementPort)
+		if err := validateCreateNATIPv6PortAvailability(*cfg, cfg.ManagementPort); err != nil {
+			rollback()
+			return nil, fmt.Errorf("%s: %w", cfg.Name, err)
+		}
 		if err := validateCreateNATReservationsAvailableLocked(reservations, owner); err != nil {
 			rollback()
 			return nil, fmt.Errorf("%s: %w", cfg.Name, err)
 		}
 		queuedCreateNATReservations[owner] = reservations
+		queuedCreateNATMirrorsIPv6[owner] = createUsesIPv6PortSynchronization(*cfg)
 		addedOwners = append(addedOwners, owner)
 	}
 	return planned, nil
@@ -913,19 +1019,24 @@ func ReleaseQueuedCreateNATPorts(name string) {
 	}
 	createNATReservationMu.Lock()
 	delete(queuedCreateNATReservations, owner)
+	delete(queuedCreateNATMirrorsIPv6, owner)
 	createNATReservationMu.Unlock()
 }
 
-func activateCreateNATReservationLocked(managementPort int, reservations []config.PortMapping) (int, func(), error) {
+func activateCreateNATReservationLocked(managementPort int, reservations []config.PortMapping, owner string, mirrorsIPv6 bool) (int, func(), error) {
 	createNATReservationNextID++
 	reservationID := createNATReservationNextID
 	createNATReservations[reservationID] = append([]config.PortMapping(nil), reservations...)
+	activeCreateNATOwners[reservationID] = owner
+	activeCreateNATMirrorsIPv6[reservationID] = mirrorsIPv6
 
 	var once sync.Once
 	release := func() {
 		once.Do(func() {
 			createNATReservationMu.Lock()
 			delete(createNATReservations, reservationID)
+			delete(activeCreateNATOwners, reservationID)
+			delete(activeCreateNATMirrorsIPv6, reservationID)
 			createNATReservationMu.Unlock()
 		})
 	}
@@ -1007,7 +1118,7 @@ func planDefaultCreateNATMappingsLocked(cfg ContainerConfig, count int, owner st
 	start, end := config.NATPortRange()
 	mappings := make([]config.PortMapping, 0, count)
 	for port := start; port <= end && len(mappings) < count; port++ {
-		if unavailable[port] || !HostPortAvailable(candidate, "", port, "tcp") {
+		if unavailable[port] || !HostPortAvailable(candidate, "", port, "tcp") || !createNAT6PortAvailable(cfg, port, "tcp") {
 			continue
 		}
 		unavailable[port] = true
@@ -1097,6 +1208,9 @@ func HostPortAvailable(c *config.Container, hostIP string, hostPort int, protoco
 				return false
 			}
 		}
+	}
+	if c.IPv6NATAddress != "" && ipv6MappingsSyncIPv4(c) && !IPv6HostPortAvailable(c, hostPort, protocol) {
+		return false
 	}
 	return true
 }
@@ -1234,6 +1348,8 @@ func applyFirewallRulesLocked(id int) error {
 	if c == nil {
 		return fmt.Errorf("container not found: %d", id)
 	}
+	snapshot := *c
+	c = &snapshot
 
 	// Always clean existing firewall rules first
 	cleanFirewallRulesLocked(id)
@@ -1364,6 +1480,9 @@ func firewallIPv6Addresses(c *config.Container) []string {
 			seen[ip] = true
 			result = append(result, ip)
 		}
+	}
+	if address, err := netip.ParseAddr(c.IPv6NATAddress); err == nil && address.Is6() && !address.Is4In6() && !seen[address.String()] {
+		result = append(result, address.String())
 	}
 	return result
 }

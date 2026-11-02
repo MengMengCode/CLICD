@@ -145,6 +145,10 @@ type Container struct {
 	IPv6PrefixLen                 int                    `json:"ipv6_prefix_len"`
 	IPv6Interface                 string                 `json:"ipv6_interface"`
 	IPv6Addresses                 []IPv6Assignment       `json:"ipv6_addresses,omitempty"`
+	IPv6NATAddress                string                 `json:"ipv6_nat_address,omitempty"`
+	IPv6PortMappings              []PortMapping          `json:"ipv6_port_mappings"`
+	IPv6NATSyncIPv4               *bool                  `json:"ipv6_nat_sync_ipv4,omitempty"`
+	IPv6PortMappingLimit          int                    `json:"ipv6_port_mapping_limit"`
 	VNCPort                       int                    `json:"vnc_port"`
 	SSHPort                       int                    `json:"ssh_port"`
 	SSHPassword                   string                 `json:"ssh_password"`
@@ -808,6 +812,7 @@ type ClicdConfig struct {
 	Snapshots            []Snapshot             `json:"snapshots"`
 	PublicIPv4Pool       []PublicIPv4Assignment `json:"public_ipv4_pool"`
 	PublicIPv6Prefixes   []PublicIPv6Prefix     `json:"public_ipv6_prefixes"`
+	IPv6NAT              IPv6NATSettings        `json:"ipv6_nat"`
 	WebSSHAllowedOrigins []string               `json:"webssh_allowed_origins"`
 	PanelAccessPolicy    PanelAccessPolicy      `json:"panel_access_policy"`
 	SecurityAutoShutdown bool                   `json:"security_auto_shutdown"`
@@ -994,6 +999,7 @@ func InitConfig() (*ClicdConfig, error) {
 		Snapshots:            []Snapshot{},
 		PublicIPv4Pool:       []PublicIPv4Assignment{},
 		PublicIPv6Prefixes:   []PublicIPv6Prefix{},
+		IPv6NAT:              IPv6NATSettings{Subnet: DefaultIPv6NATSubnet},
 		WebSSHAllowedOrigins: []string{},
 		PanelAccessPolicy: PanelAccessPolicy{
 			AllowedSources: []string{},
@@ -1023,6 +1029,10 @@ func InitConfig() (*ClicdConfig, error) {
 
 func normalizeConfigDefaults(dataDir string) bool {
 	changed := false
+	if normalized, err := NormalizeIPv6NATSettings(AppConfig.IPv6NAT); err == nil && normalized != AppConfig.IPv6NAT {
+		AppConfig.IPv6NAT = normalized
+		changed = true
+	}
 	if AppConfig.Port == 0 {
 		AppConfig.Port = 8999
 		changed = true
@@ -1951,6 +1961,11 @@ func collectAllHostPorts() map[int]bool {
 	for _, c := range AppConfig.Containers {
 		for _, pm := range c.PortMappings {
 			used[pm.HostPort] = true
+		}
+		if c.IPv6NATAddress != "" {
+			for _, mapping := range c.IPv6PortMappings {
+				used[mapping.HostPort] = true
+			}
 		}
 	}
 	return used

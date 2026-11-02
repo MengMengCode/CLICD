@@ -1580,12 +1580,12 @@ func (m *Manager) AssignIPv6(id int) (*config.Container, error) {
 		c.NormalizeNetworkAssignments()
 		config.SaveConfig()
 	}
-	if err := m.applyIPv6Config(c.LxcName(), c.IPv6AddressStrings()...); err != nil {
+	if err := m.applyIPv6Config(c.LxcName(), lxcIPv6AddressStrings(c)...); err != nil {
 		return nil, err
 	}
 	rootfsPath := filepath.Join(m.LxcPath, c.LxcName(), "rootfs")
 	if _, err := os.Stat(rootfsPath); err == nil {
-		if err := installContainerIPv6Init(rootfsPath, c.IPv6AddressStrings()...); err != nil {
+		if err := installContainerIPv6Init(rootfsPath, lxcIPv6AddressStrings(c)...); err != nil {
 			fmt.Printf("Warning: failed to install IPv6 init in %s: %v\n", c.LxcName(), err)
 		}
 	}
@@ -1634,16 +1634,16 @@ func (m *Manager) UpdateIPv6Assignments(id int, requested []string, count int, a
 	c.NormalizeNetworkAssignments()
 	config.SaveConfig()
 
-	if err := m.applyIPv6Config(c.LxcName(), c.IPv6AddressStrings()...); err != nil {
+	if err := m.applyIPv6Config(c.LxcName(), lxcIPv6AddressStrings(c)...); err != nil {
 		return nil, err
 	}
 	rootfsPath := filepath.Join(m.LxcPath, c.LxcName(), "rootfs")
 	if _, err := os.Stat(rootfsPath); err == nil {
-		if len(c.IPv6Addresses) == 0 {
+		if !hasLXCIPv6(c) {
 			if err := removeContainerIPv6Init(rootfsPath); err != nil {
 				fmt.Printf("Warning: failed to remove IPv6 init in %s: %v\n", c.LxcName(), err)
 			}
-		} else if err := installContainerIPv6Init(rootfsPath, c.IPv6AddressStrings()...); err != nil {
+		} else if err := installContainerIPv6Init(rootfsPath, lxcIPv6AddressStrings(c)...); err != nil {
 			fmt.Printf("Warning: failed to install IPv6 init in %s: %v\n", c.LxcName(), err)
 		}
 	}
@@ -1651,7 +1651,7 @@ func (m *Manager) UpdateIPv6Assignments(id int, requested []string, count int, a
 	if status == "running" {
 		m.removeGuestIPv6Addresses(c.LxcName(), oldAssignments)
 	}
-	if len(c.IPv6Addresses) > 0 {
+	if hasLXCIPv6(c) {
 		if err := m.ApplyIPv6(id); err != nil {
 			return nil, err
 		}
@@ -1697,6 +1697,9 @@ func (m *Manager) ApplyIPv6(id int) error {
 	if c == nil {
 		return fmt.Errorf("container not found: %d", id)
 	}
+	if err := m.applyIPv6NAT(c); err != nil {
+		return err
+	}
 	if c.IPv6 == "" && len(c.IPv6Addresses) == 0 {
 		return nil
 	}
@@ -1721,7 +1724,7 @@ func (m *Manager) ApplyIPv6(id int) error {
 
 	rootfsPath := filepath.Join(m.LxcPath, c.LxcName(), "rootfs")
 	if _, err := os.Stat(rootfsPath); err == nil {
-		if err := installContainerIPv6Init(rootfsPath, c.IPv6AddressStrings()...); err != nil {
+		if err := installContainerIPv6Init(rootfsPath, lxcIPv6AddressStrings(c)...); err != nil {
 			fmt.Printf("Warning: failed to install IPv6 init in %s: %v\n", c.LxcName(), err)
 		}
 	}
@@ -1819,6 +1822,9 @@ while [ "$i" -lt 30 ]; do
 done
 
 ip link set dev "$IFACE" up >/dev/null 2>&1 || true
+if [ -w "/proc/sys/net/ipv6/conf/$IFACE/accept_ra" ]; then
+	echo 0 > "/proc/sys/net/ipv6/conf/$IFACE/accept_ra"
+fi
 for IPV6_ADDR in $IPV6_ADDRS; do
 	ip -6 addr replace "$IPV6_ADDR/128" dev "$IFACE" >/dev/null 2>&1 || true
 done

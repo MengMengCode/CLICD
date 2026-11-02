@@ -21,7 +21,9 @@ func runtimeFromRequest(value string) string {
 }
 
 func hasRequestedNetwork(cfg lxc.ContainerConfig) bool {
-	return cfg.WantsNAT() || cfg.WantsLANIPv4() || cfg.AssignIPv4 || len(cfg.PublicIPv4s) > 0 || cfg.AssignIPv6 || len(cfg.IPv6Addresses) > 0
+	nat6 := config.AppConfig != nil && config.AppConfig.IPv6NAT.Enabled &&
+		runtimeFromRequest(cfg.Virtualization) == config.VirtualizationLXC && !cfg.WantsLANIPv4()
+	return cfg.WantsNAT() || cfg.WantsLANIPv4() || cfg.AssignIPv4 || len(cfg.PublicIPv4s) > 0 || cfg.AssignIPv6 || len(cfg.IPv6Addresses) > 0 || nat6
 }
 
 func runtimeFromTemplateID(templateID string) string {
