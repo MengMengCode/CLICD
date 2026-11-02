@@ -15,7 +15,6 @@ import { useDialog } from './Dialog'
 type Props = {
   containerId: ContainerIdentifier
   isSubUser: boolean
-  policyBlocked: boolean
   refreshKey: string
   onUpdated: () => void | Promise<void>
 }
@@ -43,7 +42,7 @@ function endpoint(address: string, port: number) {
   return address ? `[${address}]:${port}` : `未配置 IPv6:${port}`
 }
 
-export default function IPv6PortMappings({ containerId, isSubUser, policyBlocked, refreshKey, onUpdated }: Props) {
+export default function IPv6PortMappings({ containerId, isSubUser, refreshKey, onUpdated }: Props) {
   const dialog = useDialog()
   const [state, setState] = useState<IPv6PortMappingState | null>(null)
   const [loading, setLoading] = useState(true)
@@ -72,7 +71,7 @@ export default function IPv6PortMappings({ containerId, isSubUser, policyBlocked
   }, [])
 
   const load = useCallback(async () => {
-    if (policyBlocked || busyRef.current) {
+    if (busyRef.current) {
       setLoading(false)
       return
     }
@@ -88,7 +87,7 @@ export default function IPv6PortMappings({ containerId, isSubUser, policyBlocked
     } finally {
       if (currentRequest === requestID.current) setLoading(false)
     }
-  }, [containerId, policyBlocked, acceptState])
+  }, [containerId, acceptState])
 
   useEffect(() => {
     void load()
@@ -100,7 +99,7 @@ export default function IPv6PortMappings({ containerId, isSubUser, policyBlocked
   }, [load, refreshKey])
 
   const runMutation = async (operation: () => Promise<void>, success: string) => {
-    if (busyRef.current || policyBlocked) return
+    if (busyRef.current) return
     busyRef.current = true
     ++requestID.current
     setBusy(true)
@@ -122,7 +121,7 @@ export default function IPv6PortMappings({ containerId, isSubUser, policyBlocked
   }
 
   const toggleSync = async () => {
-    if (!state?.enabled || isSubUser || policyBlocked || busyRef.current) return
+    if (!state?.enabled || isSubUser || busyRef.current) return
     const enabled = !state.sync_ipv4
     if (enabled && !await dialog.confirm('同步 IPv4 映射', '启用后，IPv6 NAT 将跟随 IPv4 端口映射，不能独立编辑。')) return
     await runMutation(async () => {
@@ -133,7 +132,7 @@ export default function IPv6PortMappings({ containerId, isSubUser, policyBlocked
 
   const saveMapping = async (event: FormEvent) => {
     event.preventDefault()
-    if (!draft || !state?.enabled || state.sync_ipv4 || policyBlocked) return
+    if (!draft || !state?.enabled || state.sync_ipv4) return
     const existing = draft.index === null ? undefined : state.mappings[draft.index]
     if (isSubUser && !existing) return
     if (draft.index === null && state.mappings.length >= state.limit) {
@@ -162,7 +161,7 @@ export default function IPv6PortMappings({ containerId, isSubUser, policyBlocked
   }
 
   const removeMapping = async (index: number) => {
-    if (!state?.enabled || state.sync_ipv4 || isSubUser || policyBlocked || busyRef.current) return
+    if (!state?.enabled || state.sync_ipv4 || isSubUser || busyRef.current) return
     const target = state.mappings[index]
     if (!await dialog.confirm('删除 IPv6 NAT 映射', '确认删除这条 IPv6 NAT 端口映射？')) return
     if (JSON.stringify(target) !== JSON.stringify(stateRef.current?.mappings[index])) {
@@ -176,7 +175,7 @@ export default function IPv6PortMappings({ containerId, isSubUser, policyBlocked
   }
 
   const ready = !!state?.enabled && !!state.host_ipv6 && !!state.guest_ipv6
-  const canEdit = ready && !!state && !state.sync_ipv4 && !policyBlocked && !busy
+  const canEdit = ready && !!state && !state.sync_ipv4 && !busy
   const canAdd = canEdit && !isSubUser && !!state && state.mappings.length < state.limit
   const canSave = canEdit && (draft?.index !== null || canAdd)
 
@@ -185,7 +184,7 @@ export default function IPv6PortMappings({ containerId, isSubUser, policyBlocked
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-black">IPv6 NAT 端口映射</h2>
         <div className="flex items-center gap-2">
-          <button type="button" className={buttonClass} onClick={() => { void load() }} disabled={busy || policyBlocked} title="刷新 IPv6 NAT 映射">
+          <button type="button" className={buttonClass} onClick={() => { void load() }} disabled={busy} title="刷新 IPv6 NAT 映射">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />刷新
           </button>
           {!isSubUser && (
@@ -198,9 +197,7 @@ export default function IPv6PortMappings({ containerId, isSubUser, policyBlocked
           )}
         </div>
       </div>
-      {policyBlocked ? (
-        <p className="text-sm text-red-700">容器被策略封禁，暂不可管理 IPv6 NAT 映射。</p>
-      ) : loading && !state ? (
+      {loading && !state ? (
         <p className="text-sm text-gray-500">正在读取 IPv6 NAT 映射...</p>
       ) : state && (
         <>

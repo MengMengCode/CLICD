@@ -4,7 +4,7 @@ layout: home
 hero:
   name: CLICD
   text: Lightweight LXC/KVM Virtualization Panel
-  tagline: Web console, CLI, container orchestration, NAT/IPv4/IPv6 routing, snapshots, security alerts, sub-users, and API automation.
+  tagline: Web console, CLI, container orchestration, NAT/IPv4/IPv6 routing, snapshots, sub-users, and API automation.
   actions:
     - theme: brand
       text: Install
@@ -19,5 +19,5 @@ features:
   - title: Web and CLI Together
     details: Use the web panel for daily operations, or drop into the clicd CLI for maintenance tasks.
   - title: Automation Friendly
-    details: /api/v1 exposes containers, images, snapshots, security, logs, sub-users, and API key management.
+    details: /api/v1 exposes containers, images, snapshots, logs, sub-users, and API key management.
 ---

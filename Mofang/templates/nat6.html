@@ -26,8 +26,8 @@
   function element(tag, text) { var node = document.createElement(tag); if (text !== undefined) node.textContent = text; return node; }
   function render() {
     if (!state) return;
-    var ready = state.enabled && !state.policy_blocked && state.host_ipv6 && state.guest_ipv6;
-    panel.querySelector('#clicd-nat6-status').textContent = state.policy_blocked ? '实例被策略封禁，不能修改映射。' : state.enabled
+    var ready = state.enabled && state.host_ipv6 && state.guest_ipv6;
+    panel.querySelector('#clicd-nat6-status').textContent = state.enabled
       ? '宿主机 ' + (state.host_ipv6 || '未配置') + ' → 容器内网 ' + (state.guest_ipv6 || '未分配') + ' · 配额 ' + (state.mappings || []).length + '/' + state.limit
       : '节点未启用 LXC IPv6 NAT，请联系管理员在路由页面配置。';
     sync.checked = !!state.sync_ipv4;

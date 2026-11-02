@@ -232,6 +232,33 @@ func TestTaskQueueCreateFailureCleanupUsesStableID(t *testing.T) {
 	}
 }
 
+func TestRestoreTasksDoesNotReplayRetiredAlertShutdowns(t *testing.T) {
+	setupTaskQueueConfig(t)
+	previous := globalQueue
+	q := newTaskQueue(1)
+	globalQueue = q
+	t.Cleanup(func() { globalQueue = previous })
+	config.AppConfig.Tasks = []config.SavedTask{
+		{ID: "task-1", Type: string(TaskStop), ContainerID: 1, ContainerName: "guest", Status: "pending", User: "system:security"},
+		{ID: "task-2", Type: string(TaskStop), ContainerID: 1, ContainerName: "guest", Status: "running", User: "system:security"},
+		{ID: "task-3", Type: string(TaskStop), ContainerID: 1, ContainerName: "guest", Status: "pending", User: "admin"},
+		{ID: "task-4", Type: string(TaskStart), ContainerID: 1, ContainerName: "guest", Status: "done", User: "admin"},
+	}
+	RestoreTasks()
+	if len(q.tasks) != 2 || q.tasks["task-1"] != nil || q.tasks["task-2"] != nil {
+		t.Fatalf("retired automation was restored: %+v", q.tasks)
+	}
+	if len(q.opQueue) != 1 || q.opQueue[0].ID != "task-3" || q.opQueue[0].User != "admin" {
+		t.Fatalf("manual shutdown was not preserved: %+v", q.opQueue)
+	}
+	if q.tasks["task-4"] == nil || q.tasks["task-4"].Status != "done" {
+		t.Fatal("ordinary task history was lost")
+	}
+	if len(config.AppConfig.Tasks) != 0 {
+		t.Fatal("restored legacy shutdowns remain persisted")
+	}
+}
+
 func setupTaskQueueConfig(t *testing.T) {
 	t.Helper()
 	previous := config.AppConfig

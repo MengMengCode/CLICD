@@ -494,7 +494,6 @@ export default function Containers() {
                   const isInitializing = container.status === 'initializing'
                   const task = (container.id > 0 ? taskStatusMap[container.id] : undefined) || taskNameMap[container.name] || container.createTask
                   const isPlaceholder = !!container.isPlaceholder
-                  const isPolicyBlocked = !!container.policy_blocked
                   const usage = usageByName[container.name]
                   const cpuPct = isRunning
                     ? clamp((usage?.cpu_usage_pct || 0) / (container.vcpu || 1))
@@ -538,7 +537,7 @@ export default function Containers() {
                         </button>
                       </td>
                       <td className="px-2.5 py-2 align-top">
-                        <StatusBadge running={isRunning} initializing={isInitializing} task={task} placeholder={isPlaceholder} policyBlocked={isPolicyBlocked} />
+                        <StatusBadge running={isRunning} initializing={isInitializing} task={task} placeholder={isPlaceholder} />
                       </td>
                       <td className="px-2.5 py-2 align-top text-xs text-gray-600 whitespace-nowrap">
                         <span className="inline-flex items-center gap-1">
@@ -738,18 +737,9 @@ type DisplayContainer = Container & {
   createTask?: Task
 }
 
-function StatusBadge({ running, initializing, task, placeholder, policyBlocked }: { running: boolean; initializing?: boolean; task?: Task; placeholder?: boolean; policyBlocked?: boolean }) {
+function StatusBadge({ running, initializing, task, placeholder }: { running: boolean; initializing?: boolean; task?: Task; placeholder?: boolean }) {
   const { t } = useLanguage()
   const baseClass = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap"
-  if (policyBlocked) {
-    return (
-      <span className={`${baseClass} bg-red-50 text-red-700`}>
-        <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-        {t('策略封禁')}
-      </span>
-    )
-  }
-
   if (task?.status === 'failed') {
     return (
       <span className={`${baseClass} bg-red-50 text-red-700`}>

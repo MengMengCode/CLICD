@@ -133,9 +133,6 @@ export interface Container {
   snapshot_schedule_last_run: string
   snapshot_schedule_next_run: string
   snapshot_schedule_created_by: string
-  policy_blocked?: boolean
-  policy_blocked_reason?: string
-  policy_blocked_at?: string
 }
 
 export interface Template {
@@ -1046,60 +1043,6 @@ export interface AuditLog {
 
 export const getAuditLogs = () =>
   api.get<APIResponse<AuditLog[]>>('/audit-logs')
-
-// Security
-export interface SecurityAlert {
-  id: string
-  container_name: string
-  type: string
-  severity: string
-  source_ip: string
-  target_ip: string
-  target_port: number
-  detail: string
-  log_line: string
-  timestamp: string
-  count: number
-}
-
-export interface SecuritySummary {
-  total_alerts: number
-  critical: number
-  high: number
-  medium: number
-  low: number
-}
-
-export interface SecuritySettings {
-  auto_shutdown: boolean
-}
-
-export interface SecurityLog {
-  src_ip: string
-  dst_ip: string
-  src_port: number
-  dst_port: number
-  protocol: string
-  state: string
-}
-
-export const getSecurityAlerts = () =>
-  api.get<APIResponse<SecurityAlert[]>>('/security/alerts')
-
-export const checkContainerSecurity = (containerName: string) =>
-  api.post<APIResponse>('/security/check', { container_name: containerName })
-
-export const getSecurityLogs = (containerName: string) =>
-  api.get<APIResponse<SecurityLog[]>>('/security/logs', { params: { container: containerName } })
-
-export const getSecuritySummary = () =>
-  api.get<APIResponse<SecuritySummary>>('/security/summary')
-
-export const getSecuritySettings = () =>
-  api.get<APIResponse<SecuritySettings>>('/security/settings')
-
-export const updateSecuritySettings = (data: SecuritySettings) =>
-  api.put<APIResponse<SecuritySettings>>('/security/settings', data)
 
 export const createWebSSHTicket = (containerName: string) =>
   api.post<APIResponse<{ ticket: string }>>('/ssh-ticket', { container_name: containerName })

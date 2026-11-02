@@ -240,9 +240,6 @@ func ensureSchema() error {
 			snapshot_schedule_last_run TEXT,
 			snapshot_schedule_next_run TEXT,
 			snapshot_schedule_created_by TEXT,
-			policy_blocked INTEGER,
-			policy_blocked_reason TEXT,
-			policy_blocked_at TEXT,
 			allowed_image_ids TEXT,
 			image_limit_configured INTEGER NOT NULL DEFAULT 0
 		)`,
@@ -323,14 +320,7 @@ func ensureSchema() error {
 			success INTEGER,
 			error TEXT
 		)`,
-		`CREATE TABLE IF NOT EXISTS security_conntrack_snapshots (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			container_ip TEXT NOT NULL,
-			line TEXT NOT NULL,
-			captured_at TEXT NOT NULL
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_conntrack_snapshots_ip_time
-			ON security_conntrack_snapshots(container_ip, captured_at)`,
+
 		`CREATE TABLE IF NOT EXISTS tasks (
 			id TEXT PRIMARY KEY,
 			type TEXT,
@@ -604,22 +594,21 @@ func loadConfigFromDB() (*ClicdConfig, bool, error) {
 	}
 
 	cfg := &ClicdConfig{
-		AdminUser:            meta["admin_user"],
-		AdminPassHash:        meta["admin_pass_hash"],
-		JWTSecret:            meta["jwt_secret"],
-		Port:                 atoi(meta["port"]),
-		DataDir:              meta["data_dir"],
-		NextContainerID:      atoi(meta["next_container_id"]),
-		NextVNCPort:          atoi(meta["next_vnc_port"]),
-		NextSSHPort:          atoi(meta["next_ssh_port"]),
-		NATPortStart:         atoi(meta["nat_port_start"]),
-		NATPortEnd:           atoi(meta["nat_port_end"]),
-		LXCNATSubnet:         meta["lxc_nat_subnet"],
-		KVMNATSubnet:         meta["kvm_nat_subnet"],
-		SetupComplete:        atob(meta["setup_complete"]),
-		SecurityAutoShutdown: atob(meta["security_auto_shutdown"]),
-		TaskConcurrency:      atoi(meta["task_concurrency"]),
-		Language:             meta["language"],
+		AdminUser:       meta["admin_user"],
+		AdminPassHash:   meta["admin_pass_hash"],
+		JWTSecret:       meta["jwt_secret"],
+		Port:            atoi(meta["port"]),
+		DataDir:         meta["data_dir"],
+		NextContainerID: atoi(meta["next_container_id"]),
+		NextVNCPort:     atoi(meta["next_vnc_port"]),
+		NextSSHPort:     atoi(meta["next_ssh_port"]),
+		NATPortStart:    atoi(meta["nat_port_start"]),
+		NATPortEnd:      atoi(meta["nat_port_end"]),
+		LXCNATSubnet:    meta["lxc_nat_subnet"],
+		KVMNATSubnet:    meta["kvm_nat_subnet"],
+		SetupComplete:   atob(meta["setup_complete"]),
+		TaskConcurrency: atoi(meta["task_concurrency"]),
+		Language:        meta["language"],
 	}
 	if raw := strings.TrimSpace(meta["ssl"]); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &cfg.SSL)
@@ -770,7 +759,6 @@ func saveMeta(tx *sql.Tx) error {
 		"lxc_nat_subnet":         AppConfig.LXCNATSubnet,
 		"kvm_nat_subnet":         AppConfig.KVMNATSubnet,
 		"setup_complete":         btoa(AppConfig.SetupComplete),
-		"security_auto_shutdown": btoa(AppConfig.SecurityAutoShutdown),
 		"task_concurrency":       strconv.Itoa(AppConfig.TaskConcurrency),
 		"language":               NormalizeLanguage(AppConfig.Language),
 		"ssl":                    string(sslJSON),
@@ -809,10 +797,9 @@ func saveContainers(tx *sql.Tx) error {
 			ssh_host_key, port_mapping_limit, snapshot_limit, created_at, expires_at,
 			snapshot_schedule_enabled, snapshot_schedule_interval_hours, snapshot_schedule_time,
 			snapshot_schedule_last_run, snapshot_schedule_next_run, snapshot_schedule_created_by,
-			policy_blocked, policy_blocked_reason, policy_blocked_at,
 			firewall_enabled, firewall_default_action, firewall_rules, allowed_image_ids, image_limit_configured,
 			ipv6_nat_address, ipv6_port_mappings, ipv6_nat_sync_ipv4, ipv6_port_mapping_limit
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			c.ID, c.UUID, c.Name, c.Virtualization, c.LXCName, c.KVMName, c.DiskImage, c.StoragePoolID, c.StoragePath, c.MACAddress, c.Template,
 			c.VCPU, c.RAMMB, c.DiskGB, c.NetworkBWMbps, c.NetworkDownMbps, c.NetworkUpMbps,
 			c.MonthlyTrafficGB, c.TrafficMode, c.TrafficInGB,
@@ -823,7 +810,6 @@ func saveContainers(tx *sql.Tx) error {
 			c.SSHHostKey, c.PortMappingLimit, c.SnapshotLimit, c.CreatedAt, c.ExpiresAt,
 			boolInt(c.SnapshotScheduleEnabled), c.SnapshotScheduleIntervalHours, c.SnapshotScheduleTime,
 			c.SnapshotScheduleLastRun, c.SnapshotScheduleNextRun, c.SnapshotScheduleCreatedBy,
-			boolInt(c.PolicyBlocked), c.PolicyBlockedReason, c.PolicyBlockedAt,
 			boolInt(c.FirewallEnabled), normalizeFirewallDefaultAction(c.FirewallDefaultAction), marshalFirewallRules(c.FirewallRules), allowedImageIDs, boolInt(c.ImageLimitConfigured),
 			c.IPv6NATAddress, marshalIPv6PortMappings(c.IPv6PortMappings), boolPtrInt(c.IPv6NATSyncIPv4), c.IPv6PortMappingLimit,
 		); err != nil {
@@ -882,59 +868,6 @@ func saveAPIKeys(tx *sql.Tx) error {
 		}
 	}
 	return nil
-}
-
-// SaveConntrackSnapshot stores raw conntrack lines for a container IP.
-func SaveConntrackSnapshot(containerIP string, lines []string) {
-	if db == nil || len(lines) == 0 || strings.TrimSpace(containerIP) == "" {
-		return
-	}
-	now := time.Now().Format("2006-01-02 15:04:05")
-	tx, err := db.Begin()
-	if err != nil {
-		return
-	}
-	defer tx.Rollback()
-	stmt, err := tx.Prepare(`INSERT INTO security_conntrack_snapshots (container_ip, line, captured_at) VALUES (?, ?, ?)`)
-	if err != nil {
-		return
-	}
-	defer stmt.Close()
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		stmt.Exec(containerIP, line, now)
-	}
-	tx.Commit()
-
-	// Cleanup old snapshots (>1 hour)
-	db.Exec(`DELETE FROM security_conntrack_snapshots WHERE captured_at < ?`,
-		time.Now().Add(-1*time.Hour).Format("2006-01-02 15:04:05"))
-}
-
-// GetConntrackSnapshotLines returns stored conntrack lines for a container IP.
-func GetConntrackSnapshotLines(containerIP string) []string {
-	if db == nil || strings.TrimSpace(containerIP) == "" {
-		return nil
-	}
-	rows, err := db.Query(
-		`SELECT line FROM security_conntrack_snapshots WHERE container_ip = ? ORDER BY captured_at DESC LIMIT 200`,
-		containerIP,
-	)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var lines []string
-	for rows.Next() {
-		var line string
-		if rows.Scan(&line) == nil {
-			lines = append(lines, line)
-		}
-	}
-	return lines
 }
 
 func saveAuditLogs(tx *sql.Tx) error {
@@ -1042,7 +975,6 @@ func loadContainers() ([]Container, error) {
 		ssh_host_key, port_mapping_limit, snapshot_limit, created_at, expires_at,
 		snapshot_schedule_enabled, snapshot_schedule_interval_hours, snapshot_schedule_time,
 		snapshot_schedule_last_run, snapshot_schedule_next_run, snapshot_schedule_created_by,
-		policy_blocked, policy_blocked_reason, policy_blocked_at,
 		firewall_enabled, firewall_default_action, firewall_rules, allowed_image_ids, image_limit_configured,
 			ipv6_nat_address, ipv6_port_mappings, ipv6_nat_sync_ipv4, ipv6_port_mapping_limit
 		FROM containers ORDER BY id`)
@@ -1054,7 +986,7 @@ func loadContainers() ([]Container, error) {
 	result := []Container{}
 	for rows.Next() {
 		var c Container
-		var scheduleEnabled, policyBlocked, firewallEnabled, imageLimitConfigured, restoreOnHostBoot int
+		var scheduleEnabled, firewallEnabled, imageLimitConfigured, restoreOnHostBoot int
 		var firewallDefaultAction string
 		var firewallRulesJSON, allowedImageIDs, ipv6PortMappingsJSON sql.NullString
 		var ipv6NATSyncIPv4 sql.NullInt64
@@ -1073,7 +1005,6 @@ func loadContainers() ([]Container, error) {
 			&c.SSHHostKey, &c.PortMappingLimit, &c.SnapshotLimit, &c.CreatedAt, &c.ExpiresAt,
 			&scheduleEnabled, &c.SnapshotScheduleIntervalHours, &c.SnapshotScheduleTime,
 			&c.SnapshotScheduleLastRun, &c.SnapshotScheduleNextRun, &c.SnapshotScheduleCreatedBy,
-			&policyBlocked, &c.PolicyBlockedReason, &c.PolicyBlockedAt,
 			&firewallEnabled, &firewallDefaultAction, &firewallRulesJSON, &allowedImageIDs, &imageLimitConfigured,
 			&c.IPv6NATAddress, &ipv6PortMappingsJSON, &ipv6NATSyncIPv4, &c.IPv6PortMappingLimit,
 		); err != nil {
@@ -1097,7 +1028,6 @@ func loadContainers() ([]Container, error) {
 		c.LANIPv4Gateway = lanIPv4Gateway.String
 		c.SnapshotScheduleEnabled = scheduleEnabled != 0
 		c.RestoreOnHostBoot = restoreOnHostBoot != 0
-		c.PolicyBlocked = policyBlocked != 0
 		c.FirewallEnabled = firewallEnabled != 0
 		c.FirewallDefaultAction = normalizeFirewallDefaultAction(firewallDefaultAction)
 		c.ImageLimitConfigured = imageLimitConfigured != 0

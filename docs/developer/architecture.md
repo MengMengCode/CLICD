@@ -24,7 +24,6 @@ CLICD 由 Go 后端、React 前端和宿主机虚拟化能力组成。
 - 容器列表：`Containers.tsx`
 - 容器详情：`ContainerDetail.tsx`
 - 镜像管理：`ImageManagement.tsx`
-- 安全告警：`Security.tsx`
 - 快照管理：`Snapshots.tsx`
 - 路由管理：`Routing.tsx`
 - API 集成：`ApiIntegration.tsx`

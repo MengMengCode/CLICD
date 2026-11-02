@@ -65,8 +65,6 @@ func main() {
 		api.RestoreTasks()
 		api.RestoreLoginLogs()
 
-		// Start security scanner
-		api.InitScanner()
 		api.StartSSLRenewalMonitor()
 
 		// Ensure iptables FORWARD rules allow managed bridge traffic.

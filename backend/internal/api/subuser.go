@@ -565,10 +565,6 @@ func SubUserMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				if len(parts) > 1 {
 					action = strings.Join(parts[1:], "/")
 				}
-				if c.PolicyBlocked && isSubUserBlockedAction(action, r.Method) {
-					jsonResponse(w, http.StatusForbidden, APIResponse{Success: false, Message: policyBlockedMessage(c)})
-					return
-				}
 				if !isSubUserContainerActionAllowed(action, r.Method) {
 					jsonResponse(w, http.StatusForbidden, APIResponse{Success: false, Message: "Action is not allowed for this link"})
 					return
@@ -639,25 +635,6 @@ func isContainerAllowed(allowed subUserAccess, c *config.Container) bool {
 		return true
 	}
 	return c.Name != "" && allowed.names[c.Name]
-}
-
-func isSubUserBlockedAction(action string, method string) bool {
-	if action == "" {
-		return method != http.MethodGet
-	}
-	switch action {
-	case "usage", "traffic", "history":
-		return method != http.MethodGet
-	default:
-		return true
-	}
-}
-
-func policyBlockedMessage(c *config.Container) string {
-	if c != nil && c.PolicyBlockedReason != "" {
-		return "虚拟机被策略临时封禁：" + c.PolicyBlockedReason
-	}
-	return "虚拟机被策略临时封禁"
 }
 
 func isSubUserContainerActionAllowed(action string, method string) bool {
