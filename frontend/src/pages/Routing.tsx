@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Globe2, Network, Pencil, Plus, RefreshCw, Router, Save, Search, Server, Trash2, X } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { useLanguage, type Language } from '../contexts/LanguageContext'
+import IPv6NATSettingsPanel from '../components/IPv6NATSettingsPanel'
 import {
   getRoutingInfo,
   updateRoutingIPv6Prefixes,
@@ -302,6 +303,8 @@ export default function Routing() {
         <CapacityCard title={text.lanDHCP} watermark="LAN" remaining={String(routing?.lan_dhcp.used || 0)} total={routing?.lan_dhcp.total || 'DHCP'} used={routing?.lan_dhcp.used || 0} label={text.dhcpManagedByLAN} usedLabel={text.used} />
         <CapacityCard title="IPv6" watermark="IPv6" remaining={formatCapacity(routing?.ipv6.remaining || '0', language)} total={formatCapacity(routing?.ipv6.total || '0', language)} used={routing?.ipv6.used || 0} label={formatDetectedPrefixCount(ipv6Prefixes.length, language)} usedLabel={text.used} />
       </div>
+
+      <IPv6NATSettingsPanel onSaved={fetchData} />
 
       {editingNAT4 && (
         <RouteModal title={text.editNAT4Range} onClose={() => setEditingNAT4(false)}>

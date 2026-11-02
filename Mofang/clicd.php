@@ -40,7 +40,7 @@ function clicd_MetaData()
         'DisplayName' => 'CLICD 对接模块 by 欢-Huan and ChatGPT 5.5 and DeepSeek V4',
         'APIVersion'  => '1.1',
         'HelpDoc'     => 'https://github.com/MengMengCode/CLICD',
-        'version'     => '1.0.11',
+        'version'     => '1.0.12',
     ];
 }
 
@@ -61,6 +61,8 @@ function clicd_ConfigOptions()
         ['type' => 'text', 'name' => 'IO 速度 MB/s', 'description' => '磁盘 IO 限制，0 表示不限制', 'default' => '0', 'key' => 'io_speed_mbps'],
         ['type' => 'dropdown', 'name' => '分配 NAT', 'description' => '开通时是否分配 NAT 端口映射', 'default' => 'true', 'key' => 'assign_nat', 'options' => ['true' => '启用', 'false' => '禁用']],
         ['type' => 'text', 'name' => 'NAT 端口数量', 'description' => '开通时分配的端口映射数量，最小 2', 'default' => '2', 'key' => 'port_mapping_count'],
+        ['type' => 'dropdown', 'name' => 'IPv6 同步 IPv4 端口', 'description' => '节点启用 LXC IPv6 NAT 后生效；关闭后独立管理 IPv6 端口', 'default' => 'true', 'key' => 'ipv6_nat_sync_ipv4', 'options' => ['true' => '同步', 'false' => '独立']],
+        ['type' => 'text', 'name' => 'IPv6 NAT 端口数量', 'description' => '0 继承 IPv4 端口配额，1–64 为独立 IPv6 配额；不会开启 IPv4 NAT', 'default' => '0', 'key' => 'ipv6_port_mapping_count'],
         ['type' => 'text', 'name' => '快照配额', 'description' => '每台实例允许保留的快照数量', 'default' => '3', 'key' => 'snapshot_limit'],
         ['type' => 'text', 'name' => '额外端口', 'description' => '逗号分隔的容器端口，例如 80,443', 'default' => '', 'key' => 'extra_ports'],
         ['type' => 'dropdown', 'name' => '自动公网 IPv4', 'description' => '开通时是否从 CLICD 公网 IPv4 池分配独立 IPv4', 'default' => 'false', 'key' => 'assign_ipv4', 'options' => ['true' => '启用', 'false' => '禁用']],
@@ -583,6 +585,8 @@ function clicd_container_payload($params)
         'io_speed_mbps'      => clicd_int_option($options, 'io_speed_mbps', 0),
         'extra_ports'        => clicd_extra_ports($options['extra_ports'] ?? ''),
         'port_mapping_count' => $assignNat ? max(2, clicd_int_option($options, 'port_mapping_count', 2)) : 0,
+        'ipv6_nat_sync_ipv4' => clicd_bool_option($options['ipv6_nat_sync_ipv4'] ?? 'true', true),
+        'ipv6_port_mapping_count' => min(64, max(0, clicd_int_option($options, 'ipv6_port_mapping_count', 0))),
         'assign_nat'         => $assignNat,
         'assign_ipv4'        => $assignIpv4,
         'ipv4_count'         => max(1, clicd_int_option($options, 'ipv4_count', 1)),
@@ -1592,11 +1596,88 @@ function clicd_firewall_ajax($params)
     ];
 }
 
+function clicd_ipv6Nat($params)
+{
+    $input = clicd_json_input();
+    $rawAction = clicd_param_value($input, 'action', 'list');
+    $action = is_string($rawAction) ? strtolower(trim($rawAction)) : '';
+    if (!in_array($action, ['list', 'sync', 'add', 'update', 'delete'], true)) {
+        return ['status' => 'error', 'msg' => '未知 IPv6 NAT 操作'];
+    }
+    if ($action !== 'list' && strtoupper($_SERVER['REQUEST_METHOD'] ?? 'POST') !== 'POST') {
+        return ['status' => 'error', 'msg' => 'IPv6 NAT 修改操作需要 POST 请求'];
+    }
+    $container = [];
+    $containerId = clicd_container_api_id($params, $container);
+    if (empty($container)) {
+        return ['status' => 'error', 'msg' => '无法读取当前实例，未执行 IPv6 NAT 操作'];
+    }
+    if ($action !== 'list' && !empty($container['policy_blocked'])) {
+        return ['status' => 'error', 'msg' => '实例被策略封禁，不能修改映射'];
+    }
+    $base = '/api/v1/containers/' . rawurlencode($containerId);
+    if ($action === 'sync') {
+        $enabled = clicd_param_value($input, 'enabled', null);
+        if (!is_bool($enabled) && !in_array($enabled, ['true', 'false', '1', '0', 1, 0], true)) {
+            return ['status' => 'error', 'msg' => '同步开关必须为 true 或 false'];
+        }
+        $res = clicd_request($params, $base . '/ipv6-nat-sync', ['enabled' => clicd_bool_option($enabled, false)], 'PUT', 30);
+    } elseif ($action !== 'list') {
+        $endpoint = $base . '/ipv6-port-mappings';
+        if ($action === 'update' || $action === 'delete') {
+            $index = clicd_nat6_integer(clicd_param_value($input, 'index', ''), 0, PHP_INT_MAX);
+            if ($index === null) {
+                return ['status' => 'error', 'msg' => 'IPv6 映射索引错误'];
+            }
+            $endpoint .= '/' . $index;
+        }
+        $payload = [];
+        if ($action !== 'delete') {
+            $hostPort = clicd_nat6_integer(clicd_param_value($input, 'host_port', ''), 1, 65535);
+            $containerPort = clicd_nat6_integer(clicd_param_value($input, 'container_port', ''), 1, 65535);
+            $rawProtocol = clicd_param_value($input, 'protocol', 'tcp');
+            $protocol = is_string($rawProtocol) ? strtolower(trim($rawProtocol)) : '';
+            $description = clicd_param_value($input, 'description', '');
+            if ($hostPort === null || $containerPort === null || !in_array($protocol, ['tcp', 'udp'], true) || !is_string($description)) {
+                return ['status' => 'error', 'msg' => '请输入有效的 IPv6 端口和协议'];
+            }
+            $payload = ['host_port' => $hostPort, 'container_port' => $containerPort, 'protocol' => $protocol, 'description' => trim($description)];
+        }
+        $res = clicd_request($params, $endpoint, $payload, $action === 'add' ? 'POST' : ($action === 'update' ? 'PUT' : 'DELETE'), 30);
+    }
+    if (isset($res) && !clicd_success($res)) {
+        return ['status' => 'error', 'msg' => clicd_message($res, 'IPv6 NAT 操作失败')];
+    }
+    $state = clicd_request($params, $base . '/ipv6-port-mappings', [], 'GET', 30);
+    if (clicd_success($state)) {
+        $state['data']['policy_blocked'] = !empty($container['policy_blocked']);
+    }
+    return clicd_success($state)
+        ? ['status' => 200, 'msg' => 'IPv6 NAT 配置已读取', 'data' => $state['data'] ?? []]
+        : ['status' => 'error', 'msg' => clicd_message($state, '读取 IPv6 NAT 失败，请检查节点版本及 IPv6 NAT 设置')];
+}
+
+function clicd_nat6_integer($value, $minimum, $maximum)
+{
+    if (!is_int($value) && !is_string($value)) {
+        return null;
+    }
+    $text = trim((string)$value);
+    if (!preg_match('/^\d+$/', $text) || strlen($text) > strlen((string)PHP_INT_MAX)) {
+        return null;
+    }
+    if (strlen($text) === strlen((string)PHP_INT_MAX) && strcmp($text, (string)PHP_INT_MAX) > 0) {
+        return null;
+    }
+    $integer = (int)$text;
+    return $integer >= $minimum && $integer <= $maximum ? $integer : null;
+}
+
 function clicd_AllowFunction()
 {
     return [
-        'client' => ['TrafficReset', 'randomPort', 'addNat', 'updateNat', 'deleteNat', 'natList', 'infoData', 'webssh', 'firewallList', 'firewallUpdate'],
-        'admin'  => ['TrafficReset', 'randomPort', 'addNat', 'updateNat', 'deleteNat', 'natList', 'infoData', 'webssh', 'firewallList', 'firewallUpdate'],
+        'client' => ['TrafficReset', 'randomPort', 'addNat', 'updateNat', 'deleteNat', 'natList', 'infoData', 'webssh', 'firewallList', 'firewallUpdate', 'ipv6Nat'],
+        'admin'  => ['TrafficReset', 'randomPort', 'addNat', 'updateNat', 'deleteNat', 'natList', 'infoData', 'webssh', 'firewallList', 'firewallUpdate', 'ipv6Nat'],
     ];
 }
 
@@ -1605,6 +1686,7 @@ function clicd_ClientArea($params)
     return [
         'info'     => ['name' => '实例信息'],
         'nat'      => ['name' => 'NAT转发'],
+        'nat6'     => ['name' => 'IPv6 NAT'],
         'firewall' => ['name' => '防火墙'],
     ];
 }
@@ -1621,8 +1703,11 @@ function clicd_ClientAreaOutput($params, $key)
     if ($func === 'firewallajax') {
         clicd_json_response(clicd_firewall_ajax($params));
     }
+    if ($func === 'ipv6nat') {
+        clicd_json_response(clicd_ipv6Nat($params));
+    }
 
-    if (!in_array($key, ['info', 'nat', 'firewall'], true)) {
+    if (!in_array($key, ['info', 'nat', 'nat6', 'firewall'], true)) {
         return '';
     }
 
@@ -1633,6 +1718,13 @@ function clicd_ClientAreaOutput($params, $key)
 
     $c = $res['data'];
     $publicHost = clicd_public_host($params, $c, true);
+
+    if ($key === 'nat6') {
+        return [
+            'template' => 'templates/nat6.html',
+            'vars' => ['service_id' => clicd_host_id($params)],
+        ];
+    }
 
     if ($key === 'nat') {
         $operation = clicd_handle_nat_post($params);

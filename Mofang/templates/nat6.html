@@ -1,0 +1,76 @@
+<div id="clicd-nat6" data-endpoint="{$MODULE_CUSTOM_API}" data-service-id="{$service_id}" style="font-size:14px;color:#1f2937">
+  <h3>IPv6 NAT 端口映射</h3>
+  <p id="clicd-nat6-status">正在读取配置…</p>
+  <p id="clicd-nat6-message" role="status" style="color:#b91c1c"></p>
+  <label><input id="clicd-nat6-sync" type="checkbox" disabled> 同步 IPv4 端口映射</label>
+  <p>同步时使用 IPv4 的端口配置；关闭同步后，可独立配置 IPv6 映射。IPv6 访问端点使用 [IPv6地址]:端口。</p>
+  <form id="clicd-nat6-add" style="display:none;gap:8px;flex-wrap:wrap;margin:16px 0">
+    <input name="host_port" type="number" min="1" max="65535" required placeholder="IPv6 外部端口" aria-label="IPv6 外部端口">
+    <input name="container_port" type="number" min="1" max="65535" required placeholder="容器端口" aria-label="容器端口">
+    <select name="protocol" aria-label="协议"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+    <input name="description" placeholder="说明" aria-label="说明">
+    <button type="submit">添加映射</button>
+  </form>
+  <div id="clicd-nat6-list"></div>
+</div>
+<script>
+(function () {
+  var panel = document.getElementById('clicd-nat6');
+  if (!panel) return;
+  var sync = panel.querySelector('#clicd-nat6-sync');
+  var form = panel.querySelector('#clicd-nat6-add');
+  var list = panel.querySelector('#clicd-nat6-list');
+  var message = panel.querySelector('#clicd-nat6-message');
+  var state = null;
+  var busy = false;
+  function element(tag, text) { var node = document.createElement(tag); if (text !== undefined) node.textContent = text; return node; }
+  function render() {
+    if (!state) return;
+    var ready = state.enabled && !state.policy_blocked && state.host_ipv6 && state.guest_ipv6;
+    panel.querySelector('#clicd-nat6-status').textContent = state.policy_blocked ? '实例被策略封禁，不能修改映射。' : state.enabled
+      ? '宿主机 ' + (state.host_ipv6 || '未配置') + ' → 容器内网 ' + (state.guest_ipv6 || '未分配') + ' · 配额 ' + (state.mappings || []).length + '/' + state.limit
+      : '节点未启用 LXC IPv6 NAT，请联系管理员在路由页面配置。';
+    sync.checked = !!state.sync_ipv4;
+    sync.disabled = busy || !ready;
+    form.style.display = ready && !state.sync_ipv4 ? 'flex' : 'none';
+    form.querySelectorAll('input,select,button').forEach(function (input) { input.disabled = busy || (state.mappings || []).length >= state.limit; });
+    list.replaceChildren();
+    (state.mappings || []).forEach(function (mapping, index) {
+      var row = element('div'); row.style.cssText = 'border:1px solid #e5e7eb;padding:12px;margin:8px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+      row.appendChild(element('span', '[' + (mapping.host_ip || state.host_ipv6 || '') + ']:' + mapping.host_port + ' → [' + state.guest_ipv6 + ']:' + mapping.container_port + ' / ' + mapping.protocol.toUpperCase()));
+      row.appendChild(element('span', mapping.description || ''));
+      if (ready && !state.sync_ipv4) {
+        var internal = element('input'); internal.type = 'number'; internal.min = 1; internal.max = 65535; internal.required = true; internal.value = mapping.container_port; internal.setAttribute('aria-label', '容器端口'); internal.disabled = busy; row.appendChild(internal);
+        var save = element('button', '保存容器端口'); save.type = 'button'; save.disabled = busy; save.addEventListener('click', function () { if (internal.reportValidity()) request('update', Object.assign({}, mapping, {index:index, container_port:internal.value})); }); row.appendChild(save);
+        var remove = element('button', '删除'); remove.type = 'button'; remove.disabled = busy; remove.addEventListener('click', function () { if (window.confirm('确认删除此 IPv6 端口映射？')) request('delete', {index:index}); }); row.appendChild(remove);
+      }
+      list.appendChild(row);
+    });
+    if (!(state.mappings || []).length) list.appendChild(element('p', '暂无 IPv6 端口映射。'));
+  }
+  async function request(action, data) {
+    if (busy) return;
+    busy = true; message.textContent = ''; render();
+    try {
+      var endpoint = new URL(panel.getAttribute('data-endpoint'), window.location.href);
+      if (endpoint.origin !== window.location.origin) throw new Error('模块接口必须与当前页面同源');
+      var body = new URLSearchParams(); body.set('id', panel.getAttribute('data-service-id')); body.set('func', 'ipv6Nat'); body.set('action', action);
+      Object.keys(data || {}).forEach(function (key) { body.set(key, data[key]); });
+      var jwt = new URLSearchParams(window.location.search).get('jwt') || '';
+      var response = await fetch(endpoint.toString(), {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','Authorization':'JWT ' + jwt}, body:body.toString()});
+      var result = await response.json();
+      if (!response.ok || (result.status !== 200 && result.status !== 'success')) throw new Error(result.msg || 'IPv6 NAT 操作失败');
+      state = result.data;
+      if (action === 'add') form.reset();
+    } catch (error) { message.textContent = error.message || 'IPv6 NAT 请求失败'; }
+    finally { busy = false; render(); }
+  }
+  sync.addEventListener('change', function () {
+    var enabled = sync.checked;
+    if (enabled && !window.confirm('启用同步后，IPv6 映射将跟随 IPv4 配置，是否继续？')) { render(); return; }
+    request('sync', {enabled:enabled ? 'true' : 'false'});
+  });
+  form.addEventListener('submit', function (event) { event.preventDefault(); request('add', Object.fromEntries(new FormData(form).entries())); });
+  request('list', {});
+})();
+</script>

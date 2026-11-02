@@ -30,6 +30,26 @@ POST /api/v1/containers/{id}/ipv6
 
 如果宿主机没有公网 IPv6 或上游没有正确路由，面板中分配出的地址也无法从公网访问。
 
+## IPv6 NAT（NAT66）
+
+宿主机只有一个公网 IPv6 `/128` 时，可在「网络与路由」启用 IPv6 NAT，让容器通过 ULA 内网地址共享该公网 IPv6。ULA 不是独立公网地址池，不能直接从公网访问；入站服务使用 `[宿主机 IPv6]:外部端口 → [容器 ULA]:内部端口` 映射。
+
+全局开关默认关闭。启用后，普通 `lxcbr0` LXC 容器自动分配 ULA；可设置 ULA `/64` 子网和上联网卡。此功能不为 KVM 或其他自定义网桥自动分配地址。
+
+映射默认同步 IPv4 配置，IPv6 侧只读。管理员关闭同步时，会把当前映射保存为独立 IPv6 映射，之后可单独新增、编辑和删除，并受端口配额限制；未单独指定配额时继承 IPv4 配额。端口或地址冲突会返回错误，不会覆盖其他容器的映射。
+
+```http
+GET /api/v1/ipv6/nat
+PUT /api/v1/ipv6/nat
+GET /api/v1/containers/{id}/ipv6-port-mappings
+POST /api/v1/containers/{id}/ipv6-port-mappings
+PUT /api/v1/containers/{id}/ipv6-port-mappings/{index}
+DELETE /api/v1/containers/{id}/ipv6-port-mappings/{index}
+PUT /api/v1/containers/{id}/ipv6-nat-sync
+```
+
+全局设置仅限管理员。容器映射接口要求 `container:network` 权限及对应容器授权；同步开关接收 `{"enabled":true}` 或 `{"enabled":false}`。`{index}` 从零开始，现有 IPv4 接口和旧模块的索引语义保持不变；同步模式下，IPv4 映射更新也会反映到 IPv6。
+
 ## 公网 IPv4
 
 公网 IPv4 分配会从主机检测到的可用公网 IPv4 中选择地址，或使用 API 指定的 `public_ipv4s`。创建容器时可使用：

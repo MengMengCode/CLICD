@@ -2,6 +2,8 @@
 
 这是用于智简魔方 / IDCSMART 的 CLICD 服务器模块。模块通过 CLICD API 完成实例开通、删除、开关机、重启、重装、改密、资源变更、流量重置、NAT 端口映射管理、实例信息展示和 WebSSH 入口。
 
+1.0.12 新增 IPv6 NAT 客户区：节点启用 NAT66 后可查看 ULA 端点、切换 IPv4 同步和管理独立 IPv6 映射；未升级节点会提示接口不可用。操作目标始终由当前魔方产品对应的实例确定。
+
 ## 文件结构
 
 ```text
@@ -13,6 +15,7 @@ templates/
   firewall.html
   info.html
   nat.html
+  nat6.html
 ```
 
 安装时请保持目录结构不变，将整个 `clicd` 目录放入魔方服务器模块目录：
@@ -71,6 +74,8 @@ Content-Type: application/json
 | `traffic_out_gb` | 出站流量 GB，`in_out` 模式使用 |
 | `io_speed_mbps` | 磁盘 IO 限制，`0` 表示不限制 |
 | `port_mapping_count` | 开通时分配的 NAT 端口数量，最小 2 |
+| `ipv6_nat_sync_ipv4` | IPv6 NAT 是否同步 IPv4 映射，默认启用；关闭后独立管理 |
+| `ipv6_port_mapping_count` | IPv6 NAT 端口配额，`0` 继承 IPv4，最大 `64`；不自动开启 IPv4 NAT |
 | `snapshot_limit` | 快照配额 |
 | `extra_ports` | 额外映射的容器端口，逗号分隔，例如 `80,443` |
 | `assign_ipv6` | 开通时是否自动分配 IPv6 |
@@ -94,11 +99,12 @@ Content-Type: application/json
 
 ## 客户区页面
 
-模块提供三个客户区选项卡：
+模块提供四个客户区选项卡：
 
 ```text
 实例信息
 NAT转发
+IPv6 NAT
 防火墙
 ```
 
