@@ -186,18 +186,14 @@ func TestIsIPTablesRuleNotFoundError(t *testing.T) {
 }
 
 func TestPortMappingConntrackDeleteArgs(t *testing.T) {
-	got := portMappingConntrackDeleteArgs(config.PortMapping{
-		HostIP:   "203.0.113.10",
-		HostPort: 32022,
-		Protocol: "TCP",
-	})
-	want := []string{"-D", "-p", "tcp", "--dport", "32022", "--dst", "203.0.113.10"}
+	c := &config.Container{ID: 12, IP: "10.0.3.5", PortMappings: []config.PortMapping{{HostIP: "203.0.113.10", HostPort: 32022, ContainerPort: 22, Protocol: "tcp"}}}
+	got := mappingRuleConntrackArgs("iptables", ipv4MappingRules(c, "lxcbr0", "10.0.3.0/24", "eth0")[0])
+	want := []string{"-D", "-f", "ipv4", "--dst-nat", "--reply-src", "10.0.3.5", "-p", "tcp", "--dport", "32022", "--dst", "203.0.113.10", "--reply-port-src", "22"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("portMappingConntrackDeleteArgs() = %v, want %v", got, want)
+		t.Fatalf("cleanup = %v, want %v", got, want)
 	}
-
-	if got := portMappingConntrackDeleteArgs(config.PortMapping{HostPort: 32022, Protocol: "icmp"}); got != nil {
-		t.Fatalf("unsupported protocol returned args: %v", got)
+	if got := mappingRuleConntrackArgs("iptables", mappingRule{table: "filter", args: []string{"-j", "ACCEPT"}}); got != nil {
+		t.Fatalf("non-NAT rule caused invalidation: %v", got)
 	}
 }
 

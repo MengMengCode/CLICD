@@ -1837,7 +1837,10 @@ func (m *Manager) RefreshNetwork(id int) (string, error) {
 		config.SaveConfig()
 	}
 	if c.Status == "running" && shouldApplyPortMappings(id, changed) {
-		if err := lxc.NewManager().ApplyPortMappings(id); err != nil {
+		if err := lxc.NewManager().EnsurePortMappings(id); err != nil {
+			portMapApplyMu.Lock()
+			delete(lastPortMapApply, id)
+			portMapApplyMu.Unlock()
 			return ip, err
 		}
 	}

@@ -25,11 +25,20 @@ var (
 	queuedCreateNATMirrorsIPv6  = map[string]bool{}
 )
 
-// ApplyPortMappings applies iptables DNAT rules for a container's port mappings
+// ApplyPortMappings reconciles network rules and reapplies the configured firewall.
 func (m *Manager) ApplyPortMappings(id int) error {
+	return m.reconcilePortMappings(id)
+}
+
+// EnsurePortMappings repairs missing/stale network rules without disturbing
+// healthy connections or replaying the firewall on every background poll.
+func (m *Manager) EnsurePortMappings(id int) error {
+	return m.reconcilePortMappings(id)
+}
+
+func (m *Manager) reconcilePortMappings(id int) error {
 	iptablesMu.Lock()
 	defer iptablesMu.Unlock()
-
 	c := config.FindContainer(id)
 	if c == nil {
 		return fmt.Errorf("container not found: %d", id)
@@ -39,124 +48,31 @@ func (m *Manager) ApplyPortMappings(id int) error {
 	if err := validateIPv6MappingInventory(c); err != nil {
 		return err
 	}
-	if c.IP == "" {
-		if _, _, _, enabled := nat6PortEndpoint(c); enabled {
-			if err := cleanIPv6PortMappingsLocked(id); err != nil {
-				return err
-			}
-			if err := applyIPv6PortMappingsLocked(c); err != nil {
-				return err
-			}
-			return applyFirewallRulesLocked(id)
+	if c.IP != "" {
+		EnsureAssignedPublicIPv4s(c.PublicIPv4s)
+		bridge, subnet := "lxcbr0", config.LXCNATNetwork().Subnet
+		if c.IsKVM() {
+			bridge, subnet = "virbr0", config.KVMNATNetwork().Subnet
 		}
+		EnsureForwardRules(bridge)
+		var err error
+		_, err = reconcileMappingRules("iptables", "clicd-"+clicdTag(id)+"-",
+			[]mappingRule{{table: "nat", chain: "PREROUTING"}, {table: "nat", chain: "POSTROUTING"}, {table: "filter", chain: "FORWARD"}},
+			ipv4MappingRules(c, bridge, subnet, DetectPublicIPv4().Interface), runPortMappingCommand)
+		if err != nil {
+			return err
+		}
+		deleteBridgeMasquerade(subnet)
+	} else if _, _, _, enabled := nat6PortEndpoint(c); !enabled {
 		return fmt.Errorf("container has no IP")
 	}
-	EnsureAssignedPublicIPv4s(c.PublicIPv4s)
-	tag := clicdTag(id)
-	bridge := "lxcbr0"
-	subnet := config.LXCNATNetwork().Subnet
-	if c.IsKVM() {
-		bridge = "virbr0"
-		subnet = config.KVMNATNetwork().Subnet
-	}
-
-	EnsureForwardRules(bridge)
-	if err := m.cleanPortMappingsLocked(id); err != nil {
-		return fmt.Errorf("clean existing port mappings for container %d: %w", id, err)
-	}
-	deleteBridgeMasquerade(subnet)
-
-	for _, pm := range c.PortMappings {
-		for _, hostIP := range expandPortMappingHostIPs(c, pm) {
-			args := []string{
-				"-t", "nat",
-				"-I", "PREROUTING", "1",
-				"-p", pm.Protocol,
-			}
-			if hostIP != "" {
-				args = append(args, "-d", hostIP)
-			}
-			args = append(args,
-				"--dport", fmt.Sprintf("%d", pm.HostPort),
-				"-j", "DNAT",
-				"--to-destination", fmt.Sprintf("%s:%d", c.IP, pm.ContainerPort),
-				"-m", "comment", "--comment", fmt.Sprintf("clicd-%s-%s-%d", tag, natRuleIPTag(hostIP), pm.HostPort),
-			)
-			cmd := exec.Command("iptables", args...)
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				fmt.Printf("Warning: failed to apply port mapping %s:%d->%s:%d: %v, output: %s\n",
-					displayHostIP(hostIP), pm.HostPort, c.IP, pm.ContainerPort, err, string(output))
-				continue
-			}
-			fmt.Printf("Port mapping: %s:%d -> %s:%d\n", displayHostIP(hostIP), pm.HostPort, c.IP, pm.ContainerPort)
+	if c.IPv6NATAddress != "" {
+		_, err := reconcileIPv6PortMappingsLocked(c)
+		if err != nil {
+			return err
 		}
 	}
-
-	// When container has public IPv4, apply full port passthrough DNAT so the
-	// container owns all ports on its public IP (no NAT management needed).
-	if len(c.PublicIPv4s) > 0 {
-		ensureIndependentIPv4Ingress(c, tag)
-	}
-
-	applyIPv4EgressPolicy(c, bridge, subnet, tag)
-	if err := applyIPv6PortMappingsLocked(c); err != nil {
-		return err
-	}
-
-	if err := applyFirewallRulesLocked(id); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func ensureIndependentIPv4Ingress(c *config.Container, tag string) {
-	if c == nil || c.IP == "" || len(c.PublicIPv4s) == 0 {
-		return
-	}
-
-	for _, assignment := range c.PublicIPv4s {
-		hostIP := strings.TrimSpace(assignment.Address)
-		if hostIP == "" {
-			continue
-		}
-		// Full port passthrough: DNAT all TCP+UDP traffic on this public IP to the container.
-		for _, proto := range []string{"tcp", "udp"} {
-			args := []string{
-				"-t", "nat",
-				"-I", "PREROUTING", "1",
-				"-d", hostIP,
-				"-p", proto,
-				"-j", "DNAT",
-				"--to-destination", c.IP,
-				"-m", "comment", "--comment", fmt.Sprintf("clicd-%s-%s-all-%s", tag, natRuleIPTag(hostIP), proto),
-			}
-			cmd := exec.Command("iptables", args...)
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				fmt.Printf("Warning: failed to apply %s passthrough %s->%s: %v, output: %s\n",
-					proto, hostIP, c.IP, err, string(output))
-				continue
-			}
-			fmt.Printf("IPv4 passthrough (%s): %s -> %s (all ports)\n", proto, hostIP, c.IP)
-		}
-	}
-}
-
-func applyIPv4EgressPolicy(c *config.Container, bridge, subnet, tag string) {
-	if c == nil || strings.TrimSpace(c.IP) == "" {
-		return
-	}
-	if containerAllowsPublicIPv4Egress(c) {
-		if _, ok := primaryPublicIPv4Assignment(c); ok {
-			applyPublicIPv4SNAT(c, tag)
-			return
-		}
-		ensureContainerMasquerade(c, tag)
-		return
-	}
-	ensureIPv4EgressBlocked(c, bridge, subnet, tag)
+	return applyFirewallRulesLocked(id)
 }
 
 func containerAllowsPublicIPv4Egress(c *config.Container) bool {
@@ -169,91 +85,8 @@ func containerAllowsPublicIPv4Egress(c *config.Container) bool {
 	return c.PortMappingLimit > 0 || len(c.PortMappings) > 0
 }
 
-func ensureContainerMasquerade(c *config.Container, tag string) {
-	args := []string{
-		"-s", c.IP + "/32",
-		"-m", "comment", "--comment", fmt.Sprintf("clicd-%s-masq", tag),
-		"-j", "MASQUERADE",
-	}
-	if host := DetectPublicIPv4(); strings.TrimSpace(host.Interface) != "" {
-		args = append([]string{"-o", strings.TrimSpace(host.Interface)}, args...)
-	} else {
-		args = append([]string{"-o", "eth+"}, args...)
-	}
-	ensureNATRule("POSTROUTING", args)
-}
-
-func ensureIPv4EgressBlocked(c *config.Container, bridge, subnet, tag string) {
-	args := []string{
-		"-i", bridge,
-		"-s", c.IP + "/32",
-		"!", "-d", subnet,
-		"-m", "comment", "--comment", fmt.Sprintf("clicd-%s-v4-egress-block", tag),
-		"-j", "REJECT",
-	}
-	ensureFilterRule("FORWARD", args)
-}
-
-func ensureNATRule(chain string, args []string) {
-	check := append([]string{"-t", "nat", "-C", chain}, args...)
-	if exec.Command("iptables", check...).Run() == nil {
-		return
-	}
-	add := append([]string{"-t", "nat", "-I", chain, "1"}, args...)
-	exec.Command("iptables", add...).Run()
-}
-
-func ensureFilterRule(chain string, args []string) {
-	check := append([]string{"-C", chain}, args...)
-	if exec.Command("iptables", check...).Run() == nil {
-		return
-	}
-	add := append([]string{"-I", chain, "1"}, args...)
-	exec.Command("iptables", add...).Run()
-}
-
 func deleteBridgeMasquerade(subnet string) {
 	for exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", subnet, "-o", "eth+", "-j", "MASQUERADE").Run() == nil {
-	}
-}
-
-func applyPublicIPv4SNAT(c *config.Container, tag string) {
-	if c == nil || strings.TrimSpace(c.IP) == "" {
-		return
-	}
-	assignment, ok := primaryPublicIPv4Assignment(c)
-	if !ok {
-		return
-	}
-	hostIP := strings.TrimSpace(assignment.Address)
-	if hostIP == "" {
-		return
-	}
-	iface := strings.TrimSpace(assignment.Interface)
-	if iface == "" {
-		if info, ok := publicIPv4InfoByAddress(hostIP); ok {
-			iface = strings.TrimSpace(info.Interface)
-		}
-	}
-	if iface == "" {
-		if host := DetectPublicIPv4(); host.Interface != "" {
-			iface = host.Interface
-		}
-	}
-	args := []string{
-		"-t", "nat",
-		"-I", "POSTROUTING", "1",
-		"-s", c.IP + "/32",
-	}
-	if iface != "" {
-		args = append(args, "-o", iface)
-	}
-	args = append(args,
-		"-m", "comment", "--comment", fmt.Sprintf("clicd-%s-snat-%s", tag, natRuleIPTag(hostIP)),
-		"-j", "SNAT", "--to-source", hostIP,
-	)
-	if output, err := exec.Command("iptables", args...).CombinedOutput(); err != nil {
-		fmt.Printf("Warning: failed to apply public IPv4 SNAT %s -> %s: %v, output: %s\n", c.IP, hostIP, err, string(output))
 	}
 }
 
@@ -349,14 +182,7 @@ func EnsureForwardRules(bridge string) {
 		{"-i", bridge, "-j", "ACCEPT"},
 	}
 	for _, args := range inputRules {
-		for {
-			deleteArgs := append([]string{"-D", "INPUT"}, args...)
-			if exec.Command("iptables", deleteArgs...).Run() != nil {
-				break
-			}
-		}
-		insertArgs := append([]string{"-I", "INPUT", "1"}, args...)
-		exec.Command("iptables", insertArgs...).Run()
+		ensureBridgeAcceptRule("INPUT", args)
 	}
 
 	forwardRules := [][]string{
@@ -365,14 +191,7 @@ func EnsureForwardRules(bridge string) {
 		{"-i", bridge, "-o", bridge, "-j", "ACCEPT"},
 	}
 	for _, args := range forwardRules {
-		for {
-			deleteArgs := append([]string{"-D", "FORWARD"}, args...)
-			if exec.Command("iptables", deleteArgs...).Run() != nil {
-				break
-			}
-		}
-		insertArgs := append([]string{"-I", "FORWARD", "1"}, args...)
-		exec.Command("iptables", insertArgs...).Run()
+		ensureBridgeAcceptRule("FORWARD", args)
 	}
 }
 
@@ -410,14 +229,7 @@ func ensureLibvirtForwardRules(bridge string) {
 		if exec.Command("iptables", "-L", rule.chain, "-n").Run() != nil {
 			continue
 		}
-		for {
-			deleteArgs := append([]string{"-D", rule.chain}, rule.args...)
-			if exec.Command("iptables", deleteArgs...).Run() != nil {
-				break
-			}
-		}
-		insertArgs := append([]string{"-I", rule.chain, "1"}, rule.args...)
-		exec.Command("iptables", insertArgs...).Run()
+		ensureBridgeAcceptRule(rule.chain, rule.args)
 	}
 }
 
@@ -451,8 +263,8 @@ func (m *Manager) cleanPortMappingsLocked(id int) error {
 				cleanupErrors = append(cleanupErrors, err)
 			}
 		}
-		for _, mapping := range c.PortMappings {
-			clearPortMappingConntrack(mapping)
+		for _, rule := range ipv4MappingRules(c, "", "", "") {
+			clearMappingRuleConntrack("iptables", rule, runPortMappingCommand)
 		}
 	}
 	return errors.Join(cleanupErrors...)
@@ -486,6 +298,8 @@ func deleteTaggedIPTablesRules(table, chain, marker string) error {
 				"delete iptables %s/%s rule [%s]: %w: %s",
 				tableName(table), chain, strings.Join(spec, " "), err, outStr,
 			))
+		} else {
+			clearMappingRuleConntrack("iptables", mappingRule{table, chain, spec[2:]}, runPortMappingCommand)
 		}
 	}
 	return errors.Join(deleteErrors...)
@@ -521,11 +335,11 @@ func taggedRuleSpecifications(output []byte, marker string) [][]string {
 	var specs [][]string
 	for _, line := range strings.Split(string(output), "\n") {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || !strings.Contains(trimmed, marker) {
+		if trimmed == "" {
 			continue
 		}
 		fields := parseIPTablesRuleFields(trimmed)
-		if len(fields) >= 2 && fields[0] == "-A" {
+		if len(fields) >= 2 && fields[0] == "-A" && strings.HasPrefix(ruleOption(fields[2:], "--comment"), marker) {
 			fields[0] = "-D"
 			specs = append(specs, fields)
 		}
@@ -566,34 +380,6 @@ func tableName(table string) string {
 	return table
 }
 
-func clearPortMappingConntrack(mapping config.PortMapping) {
-	args := portMappingConntrackDeleteArgs(mapping)
-	if len(args) == 0 {
-		return
-	}
-	// conntrack exits non-zero when no matching flow exists; that is already clean.
-	_ = exec.Command("conntrack", args...).Run()
-}
-
-func portMappingConntrackDeleteArgs(mapping config.PortMapping) []string {
-	protocol := strings.ToLower(strings.TrimSpace(mapping.Protocol))
-	if protocol != "tcp" && protocol != "udp" {
-		return nil
-	}
-	if mapping.HostPort < 1 || mapping.HostPort > 65535 {
-		return nil
-	}
-	args := []string{
-		"-D",
-		"-p", protocol,
-		"--dport", strconv.Itoa(mapping.HostPort),
-	}
-	if hostIP := strings.TrimSpace(mapping.HostIP); hostIP != "" {
-		args = append(args, "--dst", hostIP)
-	}
-	return args
-}
-
 // SetupDefaultPortMappings creates default port mappings
 func SetupDefaultPortMappings(sshPort int) []config.PortMapping {
 	return []config.PortMapping{
@@ -630,6 +416,7 @@ func (m *Manager) AddPortMapping(id int, pm config.PortMapping) ([]config.PortMa
 	if err != nil {
 		return nil, err
 	}
+	previous := *c
 	candidate := *c
 	candidate.PortMappings = append(append([]config.PortMapping(nil), c.PortMappings...), normalized)
 	if err := validateIPv6MappingInventory(&candidate); err != nil {
@@ -639,6 +426,8 @@ func (m *Manager) AddPortMapping(id int, pm config.PortMapping) ([]config.PortMa
 	if err := persistAndReloadMappings(m, c); err != nil {
 		return nil, err
 	}
+	clearChangedIPv4Mappings(&previous, c)
+	clearChangedIPv6Mappings(&previous, c)
 	return c.PortMappings, nil
 }
 
@@ -661,6 +450,7 @@ func (m *Manager) UpdatePortMapping(id int, index int, pm config.PortMapping) ([
 	if strings.EqualFold(existing.Description, "SSH") {
 		normalized.Description = "SSH"
 	}
+	previous := *c
 	candidate := *c
 	candidate.PortMappings = append([]config.PortMapping(nil), c.PortMappings...)
 	candidate.PortMappings[index] = normalized
@@ -671,8 +461,8 @@ func (m *Manager) UpdatePortMapping(id int, index int, pm config.PortMapping) ([
 	if err := persistAndReloadMappings(m, c); err != nil {
 		return nil, err
 	}
-	clearPortMappingConntrack(existing)
-	clearSynchronizedIPv6Conntrack(c, existing)
+	clearChangedIPv4Mappings(&previous, c)
+	clearChangedIPv6Mappings(&previous, c)
 	return c.PortMappings, nil
 }
 
@@ -691,12 +481,13 @@ func (m *Manager) DeletePortMapping(id int, index int) ([]config.PortMapping, er
 	if strings.EqualFold(removed.Description, "SSH") {
 		return nil, fmt.Errorf("SSH default mapping cannot be deleted")
 	}
-	c.PortMappings = append(c.PortMappings[:index], c.PortMappings[index+1:]...)
+	previous := *c
+	c.PortMappings = append(append([]config.PortMapping(nil), c.PortMappings[:index]...), c.PortMappings[index+1:]...)
 	if err := persistAndReloadMappings(m, c); err != nil {
 		return nil, err
 	}
-	clearPortMappingConntrack(removed)
-	clearSynchronizedIPv6Conntrack(c, removed)
+	clearChangedIPv4Mappings(&previous, c)
+	clearChangedIPv6Mappings(&previous, c)
 	return c.PortMappings, nil
 }
 
@@ -1351,9 +1142,39 @@ func applyFirewallRulesLocked(id int) error {
 	snapshot := *c
 	c = &snapshot
 
-	// Always clean existing firewall rules first
+	rules, err := plannedFirewallRules(c)
+	if err != nil {
+		return err
+	}
+	healthy, err := firewallRulesPresent(c, rules)
+	if err != nil || healthy {
+		return err
+	}
 	cleanFirewallRulesLocked(id)
+	for _, rule := range rules {
+		if output, err := runPortMappingCommand(rule.command, rule.args...); err != nil {
+			return fmt.Errorf("apply firewall: %w: %s", err, output)
+		}
+	}
+	return nil
+}
 
+type firewallCommand struct {
+	command string
+	args    []string
+}
+
+func plannedFirewallRules(c *config.Container) ([]firewallCommand, error) {
+	var rules []firewallCommand
+	emit := func(command string, args []string) error {
+		rules = append(rules, firewallCommand{command, append([]string(nil), args...)})
+		return nil
+	}
+	err := walkFirewallRules(c, emit)
+	return rules, err
+}
+
+func walkFirewallRules(c *config.Container, emit func(string, []string) error) error {
 	// If firewall is disabled or no rules, nothing to apply
 	if !c.FirewallEnabled {
 		return nil
@@ -1368,16 +1189,16 @@ func applyFirewallRulesLocked(id int) error {
 	if containerIP == "" && len(containerIPv6s) == 0 {
 		return nil
 	}
-	tag := clicdTag(id)
+	tag := clicdTag(c.ID)
 
 	defaultAction := normalizeFirewallDefaultAction(c.FirewallDefaultAction)
 	if defaultAction == "DROP" {
 		if containerIP != "" {
-			if err := applyDefaultFirewallPolicy(tag, bridge, containerIP); err != nil {
+			if err := applyDefaultFirewallPolicy(tag, bridge, containerIP, emit); err != nil {
 				return err
 			}
 		}
-		if err := applyDefaultFirewallIPv6Policy(tag, bridge, containerIPv6s); err != nil {
+		if err := applyDefaultFirewallIPv6Policy(tag, bridge, containerIPv6s, emit); err != nil {
 			return err
 		}
 	}
@@ -1388,13 +1209,13 @@ func applyFirewallRulesLocked(id int) error {
 			continue
 		}
 		if containerIP != "" && firewallRuleAppliesToFamily(rule, true) {
-			if err := applyOneFirewallRule(tag, bridge, containerIP, rule); err != nil {
-				return fmt.Errorf("failed to apply firewall rule %s for container %d: %w", rule.ID, id, err)
+			if err := applyOneFirewallRule(tag, bridge, containerIP, rule, emit); err != nil {
+				return fmt.Errorf("failed to apply firewall rule %s for container %d: %w", rule.ID, c.ID, err)
 			}
 		}
 		if len(containerIPv6s) > 0 && firewallRuleAppliesToFamily(rule, false) {
-			if err := applyOneFirewallIPv6Rule(tag, bridge, containerIPv6s, rule); err != nil {
-				return fmt.Errorf("failed to apply IPv6 firewall rule %s for container %d: %w", rule.ID, id, err)
+			if err := applyOneFirewallIPv6Rule(tag, bridge, containerIPv6s, rule, emit); err != nil {
+				return fmt.Errorf("failed to apply IPv6 firewall rule %s for container %d: %w", rule.ID, c.ID, err)
 			}
 		}
 	}
@@ -1487,7 +1308,7 @@ func firewallIPv6Addresses(c *config.Container) []string {
 	return result
 }
 
-func applyOneFirewallRule(tag, bridge, containerIP string, rule config.FirewallRule) error {
+func applyOneFirewallRule(tag, bridge, containerIP string, rule config.FirewallRule, emit func(string, []string) error) error {
 	commentTag := fmt.Sprintf("clicd-%s-fw-%s", tag, rule.ID)
 
 	// Build base iptables args
@@ -1543,15 +1364,13 @@ func applyOneFirewallRule(tag, bridge, containerIP string, rule config.FirewallR
 	// Comment tag for cleanup
 	args = append(args, "-m", "comment", "--comment", commentTag)
 
-	cmd := exec.Command("iptables", args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("iptables error: %s", string(output))
+	if err := emit("iptables", args); err != nil {
+		return err
 	}
 	return nil
 }
 
-func applyOneFirewallIPv6Rule(tag, bridge string, containerIPs []string, rule config.FirewallRule) error {
+func applyOneFirewallIPv6Rule(tag, bridge string, containerIPs []string, rule config.FirewallRule, emit func(string, []string) error) error {
 	for _, containerIP := range containerIPs {
 		commentTag := fmt.Sprintf("clicd-%s-fw-%s-v6-%s", tag, rule.ID, firewallCommentIPTag(containerIP))
 		args := []string{"-I", "FORWARD", "1"}
@@ -1595,10 +1414,8 @@ func applyOneFirewallIPv6Rule(tag, bridge string, containerIPs []string, rule co
 		args = append(args, "-j", action)
 		args = append(args, "-m", "comment", "--comment", commentTag)
 
-		cmd := exec.Command("ip6tables", args...)
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("ip6tables error: %s", string(output))
+		if err := emit("ip6tables", args); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1633,7 +1450,7 @@ func normalizePortSpec(port string) string {
 	return strings.Join(parts, ",")
 }
 
-func applyDefaultFirewallPolicy(tag, bridge, containerIP string) error {
+func applyDefaultFirewallPolicy(tag, bridge, containerIP string, emit func(string, []string) error) error {
 	defaults := [][]string{
 		{
 			"-I", "FORWARD", "1",
@@ -1651,16 +1468,14 @@ func applyDefaultFirewallPolicy(tag, bridge, containerIP string) error {
 		},
 	}
 	for _, args := range defaults {
-		cmd := exec.Command("iptables", args...)
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("iptables default firewall error: %s", string(output))
+		if err := emit("iptables", args); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func applyDefaultFirewallIPv6Policy(tag, bridge string, containerIPs []string) error {
+func applyDefaultFirewallIPv6Policy(tag, bridge string, containerIPs []string, emit func(string, []string) error) error {
 	for _, containerIP := range containerIPs {
 		defaults := [][]string{
 			{
@@ -1679,10 +1494,8 @@ func applyDefaultFirewallIPv6Policy(tag, bridge string, containerIPs []string) e
 			},
 		}
 		for _, args := range defaults {
-			cmd := exec.Command("ip6tables", args...)
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("ip6tables default firewall error: %s", string(output))
+			if err := emit("ip6tables", args); err != nil {
+				return err
 			}
 		}
 	}
