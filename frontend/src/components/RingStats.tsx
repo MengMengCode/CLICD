@@ -1,5 +1,6 @@
 import { Card } from './ui/card'
 import type { ReactNode } from 'react'
+import { Activity, ArrowDownUp, Cpu, HardDrive, MemoryStick } from 'lucide-react'
 
 interface RingStatProps {
   value: number
@@ -10,19 +11,26 @@ interface RingStatProps {
   strokeWidth?: number
 }
 
-export function RingStat({ value, max = 100, label, subLabel, size = 120, strokeWidth = 8 }: RingStatProps) {
+export function RingStat({ value, max = 100, label, subLabel, size = 88, strokeWidth = 4 }: RingStatProps) {
   const radius = (size - strokeWidth) / 2
   const circumference = radius * 2 * Math.PI
   const percentage = max === Infinity ? Math.max(value, 0) : Math.min(Math.max(value / max * 100, 0), 100)
   const strokeDashoffset = circumference - (Math.min(percentage, 100) / 100) * circumference
 
-  const bgStroke = 'hsl(var(--muted))'
-  const progressStroke = 'hsl(var(--foreground))'
+  const bgStroke = 'hsl(var(--border))'
+  const progressStroke = 'hsl(var(--foreground) / 0.8)'
+  const displayValue = percentage.toFixed(percentage < 1 ? 2 : 1)
+  const Icon = label === 'CPU' ? Cpu : label === '内存' ? MemoryStick : label === 'SWAP' ? ArrowDownUp : label === '负载' ? Activity : HardDrive
+  const accessibleLabel = `${label === '/' ? '磁盘 /' : label} ${displayValue}%${typeof subLabel === 'string' ? `，${subLabel}` : ''}`
 
   return (
-    <div className="flex flex-col items-center">
-      <div className="relative" style={{ width: size, height: size }}>
-        <svg width={size} height={size} className="transform -rotate-90">
+    <div className="flex min-w-0 flex-col items-center gap-3" role="group" aria-label={accessibleLabel} data-metric={label}>
+      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+        <span>{label}</span>
+      </div>
+      <div className="relative aspect-square w-full" style={{ maxWidth: size }}>
+        <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} className="h-full w-full -rotate-90" aria-hidden="true">
           {/* Background ring */}
           <circle
             cx={size / 2}
@@ -43,17 +51,17 @@ export function RingStat({ value, max = 100, label, subLabel, size = 120, stroke
             strokeLinecap="round"
             strokeDasharray={circumference}
             strokeDashoffset={strokeDashoffset}
-            style={{ transition: 'stroke-dashoffset 0.5s ease' }}
+            className="transition-[stroke-dashoffset] duration-500 ease-out motion-reduce:transition-none"
           />
         </svg>
         {/* Center value */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-2xl font-bold text-foreground">{percentage.toFixed(percentage < 1 ? 2 : 1)}%</span>
+        <div className="absolute inset-0 flex items-center justify-center gap-0.5 tabular-nums">
+          <span className="text-xl font-semibold tracking-tight text-foreground">{displayValue}</span>
+          <span className="self-center pt-1 text-[10px] font-medium text-muted-foreground">%</span>
         </div>
       </div>
-      <div className="mt-2 text-center">
-        <div className="text-sm font-medium text-foreground">{label}</div>
-        {subLabel && <div className="text-xs text-muted-foreground mt-0.5">{subLabel}</div>}
+      <div className="min-h-4 max-w-full text-center text-[11px] leading-4 tabular-nums text-muted-foreground">
+        {subLabel}
       </div>
     </div>
   )
@@ -99,8 +107,8 @@ export default function RingStats({
 
   return (
     <Card className="p-5">
-      <h2 className="text-sm font-semibold text-foreground mb-4">状态</h2>
-      <div className={`grid ${hasSwap ? 'grid-cols-5' : 'grid-cols-4'} gap-3`}>
+      <h2 className="mb-5 text-sm font-medium text-foreground">状态</h2>
+      <div className={`grid grid-cols-2 ${hasSwap ? 'md:grid-cols-3 xl:grid-cols-5' : 'md:grid-cols-4'} gap-x-4 gap-y-6`}>
         <RingStat
           value={cpuPercent}
           label="CPU"

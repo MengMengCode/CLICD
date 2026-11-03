@@ -191,7 +191,7 @@ export default function ImageManagement() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">镜像管理</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">镜像管理</h1>
           <p className="text-sm text-muted-foreground mt-1">
             管理 LXC / KVM 系统镜像，下载后的镜像才能用于创建容器/虚拟机。
             已下载 {downloadedCount}/{images.length}

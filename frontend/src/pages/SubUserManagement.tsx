@@ -183,7 +183,7 @@ export default function SubUserManagement() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold text-foreground">{t('子用户管理')}</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">{t('子用户管理')}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {t('容器分配的子用户列表，共')} {users.length} {t('个')}
         </p>

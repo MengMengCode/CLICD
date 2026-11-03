@@ -42,7 +42,7 @@ export default function HostReport() {
     <div className="space-y-6" data-no-translate>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">{text.title}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{text.title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{text.subtitle}</p>
         </div>
         <Button variant="outline" size="sm" onClick={fetchReport} disabled={loading} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm">
@@ -171,13 +171,13 @@ export default function HostReport() {
 
 function ProbeMetric({ icon, label, value, sub }: { icon: ReactNode; label: string; value: string; sub: string }) {
   return (
-    <Card className="px-3 py-3">
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        {icon}
+    <Card className="flex flex-col px-3 py-3">
+      <div className="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border/60 bg-muted/40">{icon}</span>
         {label}
       </div>
-      <div className="line-clamp-2 break-words text-sm font-semibold text-foreground" title={value}>{value}</div>
-      <div className="mt-1 truncate text-xs text-muted-foreground" title={sub}>{sub}</div>
+      <div className="line-clamp-2 break-words text-sm font-medium tabular-nums text-foreground" title={value}>{value}</div>
+      <div className="mt-auto truncate pt-1 text-xs tabular-nums text-muted-foreground" title={sub}>{sub}</div>
     </Card>
   )
 }
@@ -332,7 +332,7 @@ const hostReportText = {
 function ProbeSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
-      <h2 className="mb-2 text-sm font-semibold text-foreground">{title}</h2>
+      <h2 className="mb-2.5 text-sm font-medium tracking-tight text-foreground">{title}</h2>
       {children}
     </section>
   )
@@ -344,7 +344,7 @@ function ProbeRows({ rows }: { rows: Array<[string, string]> }) {
       {rows.map(([label, value]) => (
         <div key={label} className="grid gap-2 border-b border-border px-3 py-2 text-xs last:border-b-0 md:grid-cols-[160px_1fr]">
           <div className="font-medium text-muted-foreground">{label}</div>
-          <div className="whitespace-pre-wrap break-words font-mono text-foreground">{value || '-'}</div>
+          <div className="whitespace-pre-wrap break-words font-mono tabular-nums text-foreground">{value || '-'}</div>
         </div>
       ))}
     </Card>
@@ -354,7 +354,7 @@ function ProbeRows({ rows }: { rows: Array<[string, string]> }) {
 function ProbeTable({ title, headers, rows, empty }: { title: string; headers: string[]; rows: string[][]; empty: string }) {
   return (
     <section>
-      <h2 className="mb-2 text-sm font-semibold text-foreground">{title}</h2>
+      <h2 className="mb-2.5 text-sm font-medium tracking-tight text-foreground">{title}</h2>
       {rows.length === 0 ? (
         <Card className="px-3 py-3 text-xs text-muted-foreground">{empty}</Card>
       ) : (
@@ -369,7 +369,7 @@ function ProbeTable({ title, headers, rows, empty }: { title: string; headers: s
               {rows.map((row, rowIndex) => (
                 <TableRow key={rowIndex} className="align-top">
                   {row.map((cell, cellIndex) => (
-                    <TableCell key={cellIndex} className="max-w-[280px] whitespace-pre-wrap break-words px-3 py-2">
+                    <TableCell key={cellIndex} className="max-w-[280px] whitespace-pre-wrap break-words px-3 py-2 tabular-nums">
                       {cell || '-'}
                     </TableCell>
                   ))}

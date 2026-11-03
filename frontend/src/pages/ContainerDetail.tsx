@@ -93,6 +93,7 @@ import { useLanguage } from '../contexts/LanguageContext'
 import WebSSHViewer from '../components/WebSSHViewer'
 import WebVNCViewer from '../components/WebVNCViewer'
 import { RingStat } from '../components/RingStats'
+import { WorkloadIdentity, WorkloadStatus } from '../components/WorkloadStatus'
 import IPv6PortMappings from '../components/IPv6PortMappings'
 import { copyToClipboard } from '../utils/clipboard'
 import ResourceStatsPanel, {
@@ -1089,14 +1090,19 @@ export default function ContainerDetail() {
 
       <Card className="p-5">
         <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="w-14 h-14 flex items-center justify-center">
-              {getTemplateIcon(container.template || '') || <Cpu className="w-7 h-7 text-slate-700" />}
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="relative shrink-0">
+              <WorkloadIdentity runtime={container.virtualization} name={container.name} size="lg" />
+              {getTemplateIcon(container.template || '') && (
+                <span className="absolute -bottom-1 -right-1 inline-flex rounded-md border bg-card p-0.5 [&_svg]:h-3 [&_svg]:w-3" title={container.template}>
+                  {getTemplateIcon(container.template || '')}
+                </span>
+              )}
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl font-bold text-foreground">{container.name}</h1>
-                <StatusBadge running={isRunning} initializing={isInitializing} />
+                <h1 className="max-w-full truncate text-xl font-semibold tracking-tight text-foreground" title={container.name}>{container.name}</h1>
+                <StatusBadge running={isRunning} initializing={isInitializing} status={container.status} taskLabel={taskStatus ? taskActionLabels[taskStatus] || '处理中' : undefined} />
               </div>
               <div className="flex items-center gap-2 flex-wrap mt-2">
                 <InfoTag color="blue">系统 {container.template}</InfoTag>
@@ -2266,21 +2272,13 @@ function FirewallIcon({ className }: { className?: string }) {
   )
 }
 
-function StatusBadge({ running, initializing }: { running: boolean; initializing?: boolean }) {
+function StatusBadge({ running, initializing, status, taskLabel }: { running: boolean; initializing?: boolean; status?: string; taskLabel?: string }) {
+  if (taskLabel) return <WorkloadStatus state="pending" label={taskLabel} loading />
   if (initializing) {
-    return (
-      <Badge variant="secondary" className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium whitespace-nowrap">
-        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-amber-500 animate-pulse"></span>
-        正在初始化
-      </Badge>
-    )
+    return <WorkloadStatus state="pending" label="正在初始化" loading />
   }
-  return (
-    <Badge variant="secondary" className="text-xs">
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0  ${running ? "bg-emerald-500" : "bg-rose-500"}`}></span>
-      {running ? '运行中' : '已停止'}
-    </Badge>
-  )
+  if (status === 'failed' || status === 'error') return <WorkloadStatus state="error" label="运行异常" />
+  return <WorkloadStatus state={running ? 'running' : 'stopped'} label={running ? '运行中' : '已停止'} />
 }
 
 function InfoTag({ children }: { color: 'blue' | 'emerald' | 'amber' | 'violet' | 'slate' | 'red'; children: ReactNode }) {

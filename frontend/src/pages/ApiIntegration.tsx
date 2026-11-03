@@ -410,7 +410,7 @@ export default function ApiIntegration() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">API 集成</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">API 集成</h1>
           <p className="mt-1 text-sm text-muted-foreground">管理外部调用凭据、权限范围与平台 API 文档</p>
         </div>
         <Button variant="default"

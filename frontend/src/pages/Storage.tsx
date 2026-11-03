@@ -145,7 +145,7 @@ export default function Storage() {
     <div className="min-w-0 space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">{t('存储管理')}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t('存储管理')}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t('只显示已挂载磁盘；勾选后，对应功能可以选择该磁盘保存数据。')}</p>
         </div>
         <div className="flex shrink-0 gap-2">

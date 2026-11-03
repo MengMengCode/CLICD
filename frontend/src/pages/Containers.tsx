@@ -30,6 +30,7 @@ import {
   X,
 } from 'lucide-react'
 import CreateContainerModal from '../components/CreateContainerModal'
+import { WorkloadIdentity, WorkloadStatus } from '../components/WorkloadStatus'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import {
@@ -300,7 +301,7 @@ export default function Containers() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-[180px]">
-          <h1 className="text-2xl font-bold text-foreground">容器管理</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">容器管理</h1>
           <p className="text-sm text-muted-foreground mt-1">
             共 {displayContainers.length} 个容器
             {filteredContainers.length !== displayContainers.length && `，筛选后 ${filteredContainers.length} 个`}
@@ -537,16 +538,20 @@ export default function Containers() {
                         #{container.id}
                       </TableCell>
                       <TableCell className="px-2.5 py-2 align-top">
-                        <Button variant="link"
-                          onClick={() => navigate(`/container/${encodeURIComponent(container.uuid || String(container.id))}`)}
-                          disabled={isPlaceholder}
-                          className="h-auto font-medium text-xs whitespace-nowrap p-0"
-                        >
-                          {container.name}
-                        </Button>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <WorkloadIdentity runtime={container.virtualization} name={container.name} size="sm" />
+                          <Button variant="link"
+                            onClick={() => navigate(`/container/${encodeURIComponent(container.uuid || String(container.id))}`)}
+                            disabled={isPlaceholder}
+                            className="h-auto max-w-[180px] justify-start truncate p-0 text-xs font-medium"
+                            title={container.name}
+                          >
+                            <span className="truncate">{container.name}</span>
+                          </Button>
+                        </div>
                       </TableCell>
                       <TableCell className="px-2.5 py-2 align-top">
-                        <StatusBadge running={isRunning} initializing={isInitializing} task={task} placeholder={isPlaceholder} />
+                        <StatusBadge running={isRunning} initializing={isInitializing} task={task} placeholder={isPlaceholder} status={container.status} />
                       </TableCell>
                       <TableCell className="px-2.5 py-2 align-top text-xs text-muted-foreground whitespace-nowrap">
                         <span className="inline-flex items-center gap-1">
@@ -744,42 +749,30 @@ type DisplayContainer = Container & {
   createTask?: Task
 }
 
-function StatusBadge({ running, initializing, task, placeholder }: { running: boolean; initializing?: boolean; task?: Task; placeholder?: boolean }) {
+function StatusBadge({ running, initializing, task, placeholder, status }: { running: boolean; initializing?: boolean; task?: Task; placeholder?: boolean; status?: string }) {
   const { t } = useLanguage()
   if (task?.status === 'failed') {
     return (
-      <Badge variant="destructive" className="gap-1 px-2 py-0.5 text-[11px] whitespace-nowrap">
-        <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-        {t('初始化失败')}
-      </Badge>
+      <WorkloadStatus state="error" label={t('初始化失败')} title={task.error || t('初始化失败')} />
     )
   }
 
   if (task?.type === 'create' && task.status === 'done') {
     return (
-      <Badge variant="secondary" className="gap-1 px-2 py-0.5 text-[11px] whitespace-nowrap">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-        {t('初始化完成')}
-      </Badge>
+      <WorkloadStatus state="success" label={t('初始化完成')} />
     )
   }
 
   if (task?.type === 'create' && task.status === 'running') {
     const detail = t(task.stage_detail || '正在初始化')
     return (
-      <Badge variant="secondary" className="gap-1 px-2 py-0.5 text-[11px] whitespace-nowrap max-w-[210px]" title={`${t('正在初始化')}: ${detail}`}>
-        <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-500 animate-pulse"></span>
-        <span className="truncate">{detail}</span>
-      </Badge>
+      <WorkloadStatus state="pending" label={detail} loading title={`${t('正在初始化')}: ${detail}`} className="max-w-[210px]" />
     )
   }
 
   if (placeholder || task?.type === 'create') {
     return (
-      <Badge variant="secondary" className="gap-1 px-2 py-0.5 text-[11px] whitespace-nowrap">
-        <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
-        {t('排队等待')}
-      </Badge>
+      <WorkloadStatus state="pending" label={t('排队等待')} />
     )
   }
 
@@ -788,28 +781,18 @@ function StatusBadge({ running, initializing, task, placeholder }: { running: bo
       start: '开机中', stop: '关机中', restart: '重启中', delete: '删除中', reinstall: '重装中',
     }
     return (
-      <Badge variant="secondary" className="gap-1 px-2 py-0.5 text-[11px] whitespace-nowrap">
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-        {t(taskLabels[task.type] || '处理中')}
-      </Badge>
+      <WorkloadStatus state="pending" label={t(taskLabels[task.type] || '处理中')} loading />
     )
   }
 
   if (initializing) {
     return (
-      <Badge variant="secondary" className="gap-1 px-2 py-0.5 text-[11px] whitespace-nowrap">
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-        {t('正在初始化')}
-      </Badge>
+      <WorkloadStatus state="pending" label={t('正在初始化')} loading />
     )
   }
 
-  return (
-    <Badge variant="secondary" className="gap-1 px-2 py-0.5 text-[11px] whitespace-nowrap">
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0  ${running ? "bg-green-500" : "bg-red-500"}`}></span>
-      {t(running ? '在线' : '离线')}
-    </Badge>
-  )
+  if (status === 'failed' || status === 'error') return <WorkloadStatus state="error" label={t('运行异常')} />
+  return <WorkloadStatus state={running ? 'running' : 'stopped'} label={t(running ? '在线' : '离线')} />
 }
 
 function RuntimeBadge({ runtime }: { runtime: string }) {

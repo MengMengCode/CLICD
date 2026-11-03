@@ -46,7 +46,7 @@ export default function AuditLogs() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">操作日志</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">操作日志</h1>
           <p className="text-sm text-muted-foreground mt-1">共 {logs.length} 条操作记录</p>
         </div>
         <Button variant="outline"

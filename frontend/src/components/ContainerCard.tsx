@@ -1,9 +1,9 @@
 import { useDialog } from './Dialog'
 import { Card } from './ui/card'
 import { Button } from './ui/button'
+import { WorkloadIdentity, WorkloadStatus } from './WorkloadStatus'
 import { useNavigate } from 'react-router'
 import {
-  Server,
   Cpu,
   HardDrive,
   MemoryStick,
@@ -52,27 +52,25 @@ export default function ContainerCard({ container, onRefresh }: ContainerCardPro
     }
   }
 
-  const statusColor = container.status === 'running' ? 'bg-green-500' : 'bg-red-500'
-  const statusText = container.status === 'running' ? '运行中' : '已停止'
+  const statusState = container.status === 'running' ? 'running' : container.status === 'initializing' ? 'pending' : container.status === 'failed' || container.status === 'error' ? 'error' : 'stopped'
+  const statusText = container.status === 'running' ? '运行中' : container.status === 'initializing' ? '正在初始化' : statusState === 'error' ? '运行异常' : '已停止'
 
   return (
     <Card className="p-5">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 flex items-center justify-center">
-            <Server className="w-5 h-5 text-foreground" />
-          </div>
-          <div>
+        <div className="flex min-w-0 items-center gap-3">
+          <WorkloadIdentity runtime={container.virtualization} name={container.name} />
+          <div className="min-w-0">
             <Button variant="link"
               onClick={() => navigate(`/container/${encodeURIComponent(String(containerIdentifier))}`)}
-              className="h-auto font-semibold text-left p-0"
+              className="h-auto max-w-full justify-start truncate p-0 text-left font-semibold"
+              title={container.name}
             >
-              {container.name}
+              <span className="truncate">{container.name}</span>
             </Button>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className={`w-1.5 h-1.5 rounded-full  ${statusColor}`}></span>
-              <span className="text-xs text-muted-foreground">{statusText}</span>
+            <div className="mt-1">
+              <WorkloadStatus state={statusState} label={statusText} loading={statusState === 'pending'} />
             </div>
           </div>
         </div>

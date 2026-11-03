@@ -313,7 +313,7 @@ export default function Settings() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold text-foreground">面板设置</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">面板设置</h1>
         <p className="mt-1 text-sm text-muted-foreground">任务队列、账号、访问控制、安全证书与访问记录</p>
       </div>
 

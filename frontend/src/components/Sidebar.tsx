@@ -120,7 +120,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 py-4" aria-label={t('主导航')}>
           {navItems.filter(item => !item.admin || !isSubUser).map(item => (
             <SidebarHint key={item.path} collapsed={collapsed} label={t(item.label)}>
-              <Button variant={item.active ? 'default' : 'ghost'} onClick={() => navigate(item.path)} aria-label={t(item.label)} aria-current={item.active ? 'page' : undefined}
+              <Button variant={item.active ? 'secondary' : 'ghost'} onClick={() => navigate(item.path)} aria-label={t(item.label)} aria-current={item.active ? 'page' : undefined}
                 className={cn('h-auto w-full gap-3 px-3 py-2.5 text-sm', collapsed ? 'justify-center' : 'justify-start')}>
                 <item.icon className="w-4 h-4" />
                 {!collapsed && <span>{item.label}</span>}
@@ -159,13 +159,13 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 </SidebarHint>
               ) : (
                 <div className="flex min-w-0 items-center gap-2">
-                  <Button asChild variant="link" className="h-auto min-w-0 gap-1 p-0 text-xs">
+                  <Button asChild variant="link" className="h-auto shrink-0 gap-1 p-0 text-xs">
                     <a href="https://github.com/MengMengCode/CLICD" target="_blank" rel="noreferrer" aria-label="CLICD">
                       <GitHubIcon className="h-3.5 w-3.5 shrink-0" />
                       <span className="truncate">CLICD</span>
                     </a>
                   </Button>
-                  <span className="shrink-0">v{version}</span>
+                  <span className="min-w-0 truncate font-mono text-[10px]" title={`v${version}`}>v{version}</span>
                 </div>
               )}
             </div>
