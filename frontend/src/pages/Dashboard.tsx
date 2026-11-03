@@ -1,3 +1,4 @@
+import { Card } from '../components/ui/card'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Cpu, HardDrive, MemoryStick, Network, Server } from 'lucide-react'
 import RingStats from '../components/RingStats'
@@ -72,7 +73,7 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       </div>
     )
   }
@@ -134,14 +135,14 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-black">控制面板</h1>
-        <p className="text-sm text-gray-500 mt-1">宿主机资源状态与容器概览</p>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">控制面板</h1>
+        <p className="mt-1 text-sm text-muted-foreground">宿主机资源状态与容器概览</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <SummaryCard icon={<Server className="w-5 h-5" />} title="容器总数" value={stats?.total_containers || 0} />
         <SummaryCard dot="bg-green-500" title="运行中" value={stats?.running || 0} />
-        <SummaryCard dot="bg-red-500" title="已停止" value={stats?.stopped || 0} muted />
+        <SummaryCard dot="bg-muted-foreground" title="已停止" value={stats?.stopped || 0} muted />
       </div>
 
       {host && (
@@ -178,14 +179,16 @@ function SummaryCard({
   muted?: boolean
 }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-5">
-      <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
-        {icon}
-        {dot && <span className={`w-2 h-2 rounded-full ${dot}`}></span>}
-        {title}
+    <Card className="p-5">
+      <div className="mb-1 flex items-center gap-2 text-sm text-muted-foreground">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border/60 bg-muted/40">
+          {icon}
+          {dot && <span className={`h-2 w-2 rounded-full ${dot}`} />}
+        </span>
+        <span className="font-medium">{title}</span>
       </div>
-      <div className={`text-3xl font-bold ${muted ? 'text-gray-600' : 'text-black'}`}>{value}</div>
-    </div>
+      <div className={`text-3xl font-semibold tracking-tight tabular-nums ${muted ? 'text-muted-foreground' : 'text-foreground'}`}>{value}</div>
+    </Card>
   )
 }
 

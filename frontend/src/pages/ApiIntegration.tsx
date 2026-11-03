@@ -1,3 +1,12 @@
+import { Modal } from '../components/ui/modal'
+import { Button } from '../components/ui/button'
+import { Card } from '../components/ui/card'
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '../components/ui/table'
+import { Badge } from '../components/ui/badge'
+import { Label } from '../components/ui/label'
+import { Input } from '../components/ui/input'
+import { Textarea } from '../components/ui/textarea'
+import { Checkbox } from '../components/ui/checkbox'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Check,
@@ -16,6 +25,7 @@ import {
 import api, { APIResponse, Container } from '../services/api'
 import { useLanguage } from '../contexts/LanguageContext'
 import { copyToClipboard } from '../utils/clipboard'
+import { useDialog } from '../components/Dialog'
 
 interface ApiKeyItem {
   id: string
@@ -255,6 +265,7 @@ const emptyForm = (): ApiKeyForm => ({
 })
 
 export default function ApiIntegration() {
+  const dialog = useDialog()
   const { t } = useLanguage()
   const [keys, setKeys] = useState<ApiKeyItem[]>([])
   const [containers, setContainers] = useState<Container[]>([])
@@ -347,7 +358,7 @@ export default function ApiIntegration() {
   }
 
   const deleteKey = async (id: string) => {
-    if (!window.confirm(t('确定删除这个 API Key 吗？'))) return
+    if (!(await dialog.confirm(t('删除 API Key'), t('确定删除这个 API Key 吗？')))) return
     try {
       await api.delete(`/api-keys/${id}`)
       setKeys(prev => prev.filter(k => k.id !== id))
@@ -399,151 +410,151 @@ export default function ApiIntegration() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-black">API 集成</h1>
-          <p className="mt-1 text-sm text-gray-500">管理外部调用凭据、权限范围与平台 API 文档</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">API 集成</h1>
+          <p className="mt-1 text-sm text-muted-foreground">管理外部调用凭据、权限范围与平台 API 文档</p>
         </div>
-        <button
+        <Button variant="default"
           onClick={openCreate}
-          className="inline-flex items-center gap-1.5 rounded-md bg-black px-3 py-2 text-sm text-white hover:bg-gray-800"
+          className="h-auto inline-flex items-center gap-1.5 px-3 py-2 text-sm"
         >
           <Plus className="h-4 w-4" />
           创建 Key
-        </button>
+        </Button>
       </div>
 
       {newKey && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <Card className="p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold text-amber-800">新的 API Key 已生成</div>
-            <button onClick={() => setNewKey('')} className="rounded p-1 text-amber-700 hover:bg-amber-100" title="关闭">
+            <div className="text-sm font-semibold text-foreground">新的 API Key 已生成</div>
+            <Button variant="ghost" onClick={() => setNewKey('')} className="h-auto p-1" title="关闭">
               <X className="h-4 w-4" />
-            </button>
+            </Button>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
-            <code className="min-w-0 flex-1 break-all rounded border border-amber-300 bg-white px-3 py-2 font-mono text-xs text-gray-800">
+            <code className="min-w-0 flex-1 break-all rounded border border-border bg-background px-3 py-2 font-mono text-xs text-foreground">
               {newKey}
             </code>
-            <button
+            <Button variant="default"
               onClick={copyKey}
-              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-amber-600 px-3 py-2 text-xs text-white hover:bg-amber-700"
+              className="h-auto inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs"
             >
               {copiedKey ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
               {copiedKey ? '已复制' : '复制'}
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
 
-      <div className="rounded-lg border border-gray-200 bg-white">
-        <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-black">
+      <Card className="">
+        <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <Key className="h-4 w-4" />
             API Keys
           </h2>
-          <button onClick={fetchData} className="rounded p-1.5 text-gray-400 hover:text-black" title="刷新">
+          <Button variant="ghost" onClick={fetchData} className="h-auto p-1.5" title="刷新">
             <RefreshCw className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
 
         {loading ? (
-          <div className="py-10 text-center text-sm text-gray-400">加载中...</div>
+          <div className="py-10 text-center text-sm text-muted-foreground">加载中...</div>
         ) : keys.length === 0 ? (
-          <div className="py-10 text-center text-sm text-gray-400">暂无 API Key</div>
+          <div className="py-10 text-center text-sm text-muted-foreground">暂无 API Key</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 text-left text-xs font-medium text-gray-500">
-                  <th className="px-4 py-3">名称</th>
-                  <th className="px-4 py-3">权限</th>
-                  <th className="px-4 py-3">绑定容器</th>
-                  <th className="px-4 py-3">限制</th>
-                  <th className="px-4 py-3">最后使用</th>
-                  <th className="px-4 py-3 text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
+            <Table className="w-full text-sm">
+              <TableHeader>
+                <TableRow className="border-b border-border text-left text-xs font-medium text-muted-foreground">
+                  <TableHead className="h-auto px-4 py-3">名称</TableHead>
+                  <TableHead className="h-auto px-4 py-3">权限</TableHead>
+                  <TableHead className="h-auto px-4 py-3">绑定容器</TableHead>
+                  <TableHead className="h-auto px-4 py-3">限制</TableHead>
+                  <TableHead className="h-auto px-4 py-3">最后使用</TableHead>
+                  <TableHead className="h-auto px-4 py-3 text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="divide-y divide-border">
                 {keys.map(item => (
-                  <tr key={item.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
+                  <TableRow key={item.id} className="hover:bg-muted/50">
+                    <TableCell className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-gray-900">{item.name}</span>
+                        <span className="font-medium text-foreground">{item.name}</span>
                         {item.disabled && (
-                          <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600">已禁用</span>
+                          <Badge variant="destructive" className="px-1.5 py-0.5 text-[10px] font-medium">已禁用</Badge>
                         )}
                       </div>
-                      <div className="mt-1 font-mono text-xs text-gray-400">{item.prefix}</div>
-                    </td>
-                    <td className="px-4 py-3">
+                      <div className="mt-1 font-mono text-xs text-muted-foreground">{item.prefix}</div>
+                    </TableCell>
+                    <TableCell className="px-4 py-3">
                       <ScopeSummary scopes={item.scopes || ['*']} />
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500">
+                    </TableCell>
+                    <TableCell className="px-4 py-3 text-xs text-muted-foreground">
                       {item.container_uuids?.length
                         ? item.container_uuids.map(uuid => containerNameByUUID.get(uuid) || uuid).join('、')
                         : '全部容器'}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500">
+                    </TableCell>
+                    <TableCell className="px-4 py-3 text-xs text-muted-foreground">
                       <div>{item.ip_whitelist ? 'IP 白名单' : '不限 IP'}</div>
                       <div>{item.expires_at ? `到期 ${item.expires_at}` : '长期有效'}</div>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500">
+                    </TableCell>
+                    <TableCell className="px-4 py-3 text-xs text-muted-foreground">
                       <div>{item.last_used || '从未使用'}</div>
-                      {item.last_used_ip && <div className="font-mono text-[11px] text-gray-400">{item.last_used_ip}</div>}
-                    </td>
-                    <td className="px-4 py-3">
+                      {item.last_used_ip && <div className="font-mono text-[11px] text-muted-foreground">{item.last_used_ip}</div>}
+                    </TableCell>
+                    <TableCell className="px-4 py-3">
                       <div className="flex justify-end gap-1">
-                        <button onClick={() => openEdit(item)} className="rounded p-1.5 text-gray-400 hover:text-black" title="编辑">
+                        <Button variant="ghost" onClick={() => openEdit(item)} className="h-auto p-1.5" title="编辑">
                           <Edit3 className="h-3.5 w-3.5" />
-                        </button>
-                        <button onClick={() => deleteKey(item.id)} className="rounded p-1.5 text-gray-400 hover:text-red-600" title="删除">
+                        </Button>
+                        <Button variant="ghost" onClick={() => deleteKey(item.id)} className="h-auto p-1.5" title="删除">
                           <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        </Button>
                       </div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
-      </div>
+      </Card>
 
-      <div className="rounded-lg border border-gray-200 bg-white">
-        <button
+      <Card className="">
+        <Button variant="outline"
           onClick={() => setShowDocs(value => !value)}
-          className="flex w-full items-center justify-between gap-3 border-b border-gray-200 px-5 py-4 text-left"
+          className="h-auto flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
         >
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-black">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <ShieldCheck className="h-4 w-4" />
             API 文档
           </h2>
-          {showDocs ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
-        </button>
+          {showDocs ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </Button>
 
         {showDocs && (
           <div className="space-y-6 p-5">
-            <div className="rounded-lg bg-gray-900 p-4 font-mono text-xs text-gray-100">
+            <div className="rounded-lg bg-background p-4 font-mono text-xs text-muted-foreground">
               <div>curl -X GET {BASE_URL}/api/v1/containers -H "X-API-Key: clicd_sk_xxxx"</div>
-              <div className="mt-2 text-gray-400">curl -X GET {BASE_URL}/api/v1/dashboard -H "Authorization: Bearer clicd_sk_xxxx"</div>
+              <div className="mt-2 text-muted-foreground">curl -X GET {BASE_URL}/api/v1/dashboard -H "Authorization: Bearer clicd_sk_xxxx"</div>
             </div>
 
             {endpointGroups.map(group => (
               <section key={group.title}>
-                <h3 className="mb-2 text-sm font-semibold text-black">{group.title}</h3>
-                <div className="overflow-hidden rounded-lg border border-gray-200">
+                <h3 className="mb-2 text-sm font-semibold text-foreground">{group.title}</h3>
+                <div className="overflow-hidden rounded-lg border border-border">
                   {group.endpoints.map(([method, path, desc]) => (
-                    <div key={`${method}-${path}`} className="grid gap-2 border-b border-gray-100 px-3 py-2 text-xs last:border-b-0 md:grid-cols-[72px_minmax(220px,1fr)_180px_72px]">
-                      <span className="w-fit rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-mono font-bold text-blue-700">{method}</span>
-                      <code className="min-w-0 break-all font-mono text-gray-800">{path}</code>
-                      <span className="text-gray-500">{desc}</span>
-                      <button
+                    <div key={`${method}-${path}`} className="grid gap-2 border-b border-border px-3 py-2 text-xs last:border-b-0 md:grid-cols-[72px_minmax(220px,1fr)_180px_72px]">
+                      <Badge variant="outline" className="w-fit px-1.5 py-0.5 font-mono font-bold">{method}</Badge>
+                      <code className="min-w-0 break-all font-mono text-foreground">{path}</code>
+                      <span className="text-muted-foreground">{desc}</span>
+                      <Button variant="outline"
                         onClick={() => setSelectedEndpoint(buildEndpointDoc(method, path, desc))}
-                        className="inline-flex w-fit items-center justify-center gap-1 rounded border border-gray-200 px-2 py-1 text-gray-600 hover:border-gray-300 hover:bg-gray-50 hover:text-black"
+                        className="h-auto inline-flex w-fit items-center justify-center gap-1 px-2 py-1"
                         title="查看使用范例"
                       >
                         <Eye className="h-3.5 w-3.5" />
                         查看
-                      </button>
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -551,137 +562,119 @@ export default function ApiIntegration() {
             ))}
           </div>
         )}
-      </div>
+      </Card>
 
       {selectedEndpoint && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setSelectedEndpoint(null)} />
-          <div className="relative flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl">
-            <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-mono text-xs font-bold text-blue-700">
-                    {selectedEndpoint.method}
-                  </span>
-                  <code className="min-w-0 break-all font-mono text-sm text-gray-900">{selectedEndpoint.path}</code>
-                </div>
-                <p className="mt-1 text-xs text-gray-500">{selectedEndpoint.desc}</p>
-              </div>
-              <button onClick={() => setSelectedEndpoint(null)} className="shrink-0 rounded p-1 text-gray-400 hover:text-black" title="关闭">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        <Modal size="5xl" onClose={() => setSelectedEndpoint(null)} title={<span className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="px-1.5 py-0.5 font-mono text-xs">{selectedEndpoint.method}</Badge><code className="min-w-0 break-all font-mono text-sm">{selectedEndpoint.path}</code></span>} description={selectedEndpoint.desc} flush>
+<div className="min-h-0 flex-1 overflow-y-auto p-5">
               <div className="grid gap-4 lg:grid-cols-2">
                 <section className="min-w-0">
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-black">Python 使用范例</h3>
-                    <button
+                    <h3 className="text-sm font-semibold text-foreground">Python 使用范例</h3>
+                    <Button variant="outline"
                       onClick={copyDocCode}
-                      className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                      className="h-auto inline-flex items-center gap-1 px-2 py-1 text-xs"
                     >
                       {copiedDoc ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                       {copiedDoc ? '已复制' : '复制'}
-                    </button>
+                    </Button>
                   </div>
-                  <pre className="max-h-[52vh] overflow-auto rounded-lg bg-gray-900 p-4 text-xs text-gray-100">
+                  <pre className="max-h-[52vh] overflow-auto rounded-lg bg-background p-4 text-xs text-muted-foreground">
                     <code>{buildPythonExample(selectedEndpoint)}</code>
                   </pre>
                 </section>
 
                 <section className="min-w-0">
-                  <h3 className="mb-2 text-sm font-semibold text-black">返回响应样例</h3>
+                  <h3 className="mb-2 text-sm font-semibold text-foreground">返回响应样例</h3>
                   {selectedEndpoint.note && (
-                    <div className="mb-2 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">{selectedEndpoint.note}</div>
+                    <div className="mb-2 rounded border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">{selectedEndpoint.note}</div>
                   )}
-                  <pre className="max-h-[52vh] overflow-auto rounded-lg bg-gray-900 p-4 text-xs text-gray-100">
+                  <pre className="max-h-[52vh] overflow-auto rounded-lg bg-background p-4 text-xs text-muted-foreground">
                     <code>{formatJSON(selectedEndpoint.response)}</code>
                   </pre>
                 </section>
               </div>
             </div>
-          </div>
-        </div>
+</Modal>
       )}
 
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowForm(false)} />
-          <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl">
-            <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
-              <h3 className="text-base font-semibold text-black">{editingKey ? '编辑 API Key' : '创建 API Key'}</h3>
-              <button onClick={() => setShowForm(false)} className="rounded p-1 text-gray-400 hover:text-black" title="关闭">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        <Modal size="4xl" onClose={() => setShowForm(false)} title={editingKey ? '编辑 API Key' : '创建 API Key'} flush footer={<>
+              <Button variant="outline" onClick={() => setShowForm(false)} className="h-auto px-4 py-2 text-sm">
+                取消
+              </Button>
+              <Button variant="default"
+                onClick={saveKey}
+                disabled={saving || !form.name.trim()}
+                className="h-auto px-4 py-2 text-sm"
+              >
+                {saving ? '保存中...' : '保存'}
+              </Button>
+            </>}>
+<div className="min-h-0 flex-1 overflow-y-auto p-5">
               <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]">
                 <div className="space-y-4">
-                  <label className="block">
-                    <span className="mb-1 block text-xs text-gray-500">名称</span>
-                    <input
+                  <Label className="block leading-normal">
+                    <span className="mb-1 block text-xs text-muted-foreground">名称</span>
+                    <Input
                       value={form.name}
                       onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))}
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      className="h-auto w-full px-3 py-2 text-sm"
                       placeholder="CI/CD、计费系统、自动化脚本"
                     />
-                  </label>
+                  </Label>
 
-                  <label className="block">
-                    <span className="mb-1 block text-xs text-gray-500">IP 白名单</span>
-                    <textarea
+                  <Label className="block leading-normal">
+                    <span className="mb-1 block text-xs text-muted-foreground">IP 白名单</span>
+                    <Textarea
                       value={form.ipWhitelist}
                       onChange={e => setForm(prev => ({ ...prev, ipWhitelist: e.target.value }))}
                       rows={4}
-                      className="w-full resize-none rounded-md border border-gray-300 px-3 py-2 font-mono text-sm"
+                      className="w-full resize-none px-3 py-2 font-mono text-sm"
                       placeholder={`1.2.3.4\n10.0.0.0/24`}
                     />
-                  </label>
+                  </Label>
 
-                  <label className="block">
-                    <span className="mb-1 block text-xs text-gray-500">过期时间</span>
-                    <input
+                  <Label className="block leading-normal">
+                    <span className="mb-1 block text-xs text-muted-foreground">过期时间</span>
+                    <Input
                       type="datetime-local"
                       value={form.expiresAt}
                       onChange={e => setForm(prev => ({ ...prev, expiresAt: e.target.value }))}
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      className="h-auto w-full px-3 py-2 text-sm"
                     />
-                  </label>
+                  </Label>
 
-                  <label className="flex items-center gap-2 text-sm text-gray-700">
-                    <input
-                      type="checkbox"
+                  <Label className="flex items-center gap-2 text-sm text-foreground leading-normal">
+                    <Checkbox
                       checked={form.disabled}
-                      onChange={e => setForm(prev => ({ ...prev, disabled: e.target.checked }))}
-                      className="h-4 w-4 accent-black"
+                      onCheckedChange={checked => setForm(prev => ({ ...prev, disabled: checked === true }))}
+                      className="h-4 w-4"
                     />
                     禁用这个 Key
-                  </label>
+                  </Label>
 
                   <div>
-                    <div className="mb-2 text-xs text-gray-500">绑定容器</div>
-                    <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-gray-200 p-2">
-                      <label className="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                        <input
-                          type="checkbox"
+                    <div className="mb-2 text-xs text-muted-foreground">绑定容器</div>
+                    <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+                      <Label className="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-foreground hover:bg-muted/50 leading-normal">
+                        <Checkbox
                           checked={form.containerUUIDs.length === 0}
-                          onChange={() => setForm(prev => ({ ...prev, containerUUIDs: [] }))}
-                          className="h-4 w-4 accent-black"
+                          onCheckedChange={() => setForm(prev => ({ ...prev, containerUUIDs: [] }))}
+                          className="h-4 w-4"
                         />
                         全部容器
-                      </label>
+                      </Label>
                       {containers.map(container => (
-                        <label key={container.uuid} className="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                          <input
-                            type="checkbox"
+                        <Label key={container.uuid} className="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-foreground hover:bg-muted/50 leading-normal">
+                          <Checkbox
                             checked={form.containerUUIDs.includes(container.uuid)}
-                            onChange={() => toggleContainer(container.uuid)}
-                            className="h-4 w-4 accent-black"
+                            onCheckedChange={() => toggleContainer(container.uuid)}
+                            className="h-4 w-4"
                           />
                           <span className="min-w-0 truncate">{container.name}</span>
-                          <span className="shrink-0 font-mono text-[10px] text-gray-400">{container.uuid.slice(0, 8)}</span>
-                        </label>
+                          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{container.uuid.slice(0, 8)}</span>
+                        </Label>
                       ))}
                     </div>
                   </div>
@@ -689,28 +682,27 @@ export default function ApiIntegration() {
 
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-3">
-                    <div className="text-xs text-gray-500">权限范围</div>
-                    <button onClick={() => toggleScope('*')} className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">
+                    <div className="text-xs text-muted-foreground">权限范围</div>
+                    <Button variant="outline" onClick={() => toggleScope('*')} className="h-auto px-2 py-1 text-xs">
                       {form.scopes.includes('*') ? '取消全权限' : '全权限'}
-                    </button>
+                    </Button>
                   </div>
                   <div className="space-y-4">
                     {scopeGroups.map(group => (
                       <div key={group.title}>
-                        <div className="mb-2 text-xs font-medium text-gray-700">{group.title}</div>
+                        <div className="mb-2 text-xs font-medium text-foreground">{group.title}</div>
                         <div className="grid gap-2 sm:grid-cols-2">
                           {group.scopes.map(([scope, label]) => (
-                            <label key={scope} className="flex items-center gap-2 rounded border border-gray-200 px-2 py-2 text-xs text-gray-700 hover:bg-gray-50">
-                              <input
-                                type="checkbox"
+                            <Label key={scope} className="flex items-center gap-2 rounded border border-border px-2 py-2 text-xs text-foreground hover:bg-muted/50 leading-normal">
+                              <Checkbox
                                 checked={form.scopes.includes('*') || form.scopes.includes(scope)}
                                 disabled={form.scopes.includes('*')}
-                                onChange={() => toggleScope(scope)}
-                                className="h-4 w-4 accent-black"
+                                onCheckedChange={() => toggleScope(scope)}
+                                className="h-4 w-4"
                               />
                               <span className="min-w-0 flex-1 truncate">{label}</span>
-                              <code className="hidden shrink-0 font-mono text-[10px] text-gray-400 sm:block">{scope}</code>
-                            </label>
+                              <code className="hidden shrink-0 font-mono text-[10px] text-muted-foreground sm:block">{scope}</code>
+                            </Label>
                           ))}
                         </div>
                       </div>
@@ -719,20 +711,7 @@ export default function ApiIntegration() {
                 </div>
               </div>
             </div>
-            <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-4">
-              <button onClick={() => setShowForm(false)} className="rounded-md border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
-                取消
-              </button>
-              <button
-                onClick={saveKey}
-                disabled={saving || !form.name.trim()}
-                className="rounded-md bg-black px-4 py-2 text-sm text-white hover:bg-gray-800 disabled:opacity-50"
-              >
-                {saving ? '保存中...' : '保存'}
-              </button>
-            </div>
-          </div>
-        </div>
+</Modal>
       )}
     </div>
   )
@@ -1472,18 +1451,18 @@ function formatJSON(value: unknown) {
 
 function ScopeSummary({ scopes }: { scopes: string[] }) {
   if (scopes.includes('*')) {
-    return <span className="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-600">全权限</span>
+    return <Badge variant="destructive" className="px-2 py-1 text-xs font-medium">全权限</Badge>
   }
   const visible = scopes.slice(0, 3)
   return (
     <div className="flex max-w-xs flex-wrap gap-1">
       {visible.map(scope => (
-        <span key={scope} className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-600">
+        <Badge variant="secondary" key={scope} className="px-1.5 py-0.5 font-mono text-[10px]">
           {scope}
-        </span>
+        </Badge>
       ))}
       {scopes.length > visible.length && (
-        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">+{scopes.length - visible.length}</span>
+        <Badge variant="secondary" className="px-1.5 py-0.5 text-[10px]">+{scopes.length - visible.length}</Badge>
       )}
     </div>
   )

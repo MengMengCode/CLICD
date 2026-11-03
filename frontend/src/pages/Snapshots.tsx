@@ -1,3 +1,7 @@
+import { Button } from '../components/ui/button'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table'
+import { Card } from '../components/ui/card'
+import { Badge } from '../components/ui/badge'
 import { useCallback, useEffect, useState } from 'react'
 import { Camera, RefreshCw, Server, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router'
@@ -48,7 +52,7 @@ export default function Snapshots() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-black" />
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
       </div>
     )
   }
@@ -57,77 +61,77 @@ export default function Snapshots() {
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-black">快照管理</h1>
-          <p className="mt-1 text-sm text-gray-500">全局快照列表，共 {snapshots.length} 个</p>
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">快照管理</h1>
+          <p className="mt-1 text-sm text-muted-foreground">全局快照列表，共 {snapshots.length} 个</p>
         </div>
-        <button
+        <Button variant="outline" size="sm"
           onClick={() => { setRefreshing(true); fetchData() }}
           disabled={refreshing}
-          className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-3 py-2 text-sm"
         >
           <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
           刷新
-        </button>
+        </Button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+      <Card className="overflow-hidden">
         {snapshots.length === 0 ? (
           <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
-            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-gray-100">
-              <Camera className="h-7 w-7 text-gray-400" />
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-muted">
+              <Camera className="h-7 w-7 text-muted-foreground" />
             </div>
-            <div className="text-sm font-medium text-gray-700">暂无快照</div>
+            <div className="text-sm font-medium text-foreground">暂无快照</div>
           </div>
         ) : (
-          <table className="w-full min-w-[820px] text-sm">
-            <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium">容器</th>
-                <th className="px-4 py-3 text-left font-medium">LXC 名称</th>
-                <th className="px-4 py-3 text-left font-medium">快照时间</th>
-                <th className="px-4 py-3 text-left font-medium">类型</th>
-                <th className="px-4 py-3 text-left font-medium">创建者</th>
-                <th className="px-4 py-3 text-right font-medium">大小</th>
-                <th className="px-4 py-3 text-center font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
+          <Table className="w-full min-w-[820px] text-sm">
+            <TableHeader className="text-xs">
+              <TableRow>
+                <TableHead className="px-4 py-3 text-left font-medium">容器</TableHead>
+                <TableHead className="px-4 py-3 text-left font-medium">LXC 名称</TableHead>
+                <TableHead className="px-4 py-3 text-left font-medium">快照时间</TableHead>
+                <TableHead className="px-4 py-3 text-left font-medium">类型</TableHead>
+                <TableHead className="px-4 py-3 text-left font-medium">创建者</TableHead>
+                <TableHead className="px-4 py-3 text-right font-medium">大小</TableHead>
+                <TableHead className="px-4 py-3 text-center font-medium">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody >
               {snapshots.map((snapshot) => (
-                <tr key={snapshot.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <button
+                <TableRow key={snapshot.id} >
+                  <TableCell className="px-4 py-3">
+                    <Button variant="link" size="sm"
                       onClick={() => navigate(`/container/${snapshot.container_id}`)}
-                      className="inline-flex items-center gap-2 text-left font-medium text-black hover:underline"
+                      className="h-auto p-0 inline-flex items-center gap-2 text-left font-medium"
                     >
-                      <Server className="h-4 w-4 text-gray-400" />
+                      <Server className="h-4 w-4 text-muted-foreground" />
                       {snapshot.container_name}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-600">{snapshot.lxc_name}</td>
-                  <td className="px-4 py-3 text-gray-700">{snapshot.created_at}</td>
-                  <td className="px-4 py-3">
-                    <span className={`rounded px-2 py-1 text-xs ${snapshot.scheduled ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>
+                    </Button>
+                  </TableCell>
+                  <TableCell className="px-4 py-3 font-mono text-xs">{snapshot.lxc_name}</TableCell>
+                  <TableCell className="px-4 py-3">{snapshot.created_at}</TableCell>
+                  <TableCell className="px-4 py-3">
+                    <Badge variant={snapshot.scheduled ? 'default' : 'secondary'}>
                       {snapshot.scheduled ? '定时' : '手动'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">{snapshot.created_by || '-'}</td>
-                  <td className="px-4 py-3 text-right font-mono text-xs text-gray-600">{formatBytes(snapshot.size_bytes || 0)}</td>
-                  <td className="px-4 py-3 text-center">
-                    <button
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="px-4 py-3">{snapshot.created_by || '-'}</TableCell>
+                  <TableCell className="px-4 py-3 text-right font-mono text-xs">{formatBytes(snapshot.size_bytes || 0)}</TableCell>
+                  <TableCell className="px-4 py-3 text-center">
+                    <Button variant="destructive" size="icon"
                       onClick={() => handleDelete(snapshot)}
                       disabled={deleting === snapshot.id}
-                      className="inline-flex items-center justify-center p-1.5 rounded text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
+                      className="h-8 w-8 inline-flex items-center justify-center"
                       title="删除快照"
                     >
                       <Trash2 className="h-4 w-4" />
-                    </button>
-                  </td>
-                </tr>
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-      </div>
+      </Card>
     </div>
   )
 }

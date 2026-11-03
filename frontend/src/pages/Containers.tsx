@@ -1,3 +1,12 @@
+import { Progress } from '../components/ui/progress'
+import { Modal } from '../components/ui/modal'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import { NativeSelect } from '../components/ui/native-select'
+import { Card } from '../components/ui/card'
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '../components/ui/table'
+import { Checkbox } from '../components/ui/checkbox'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import {
@@ -21,6 +30,7 @@ import {
   X,
 } from 'lucide-react'
 import CreateContainerModal from '../components/CreateContainerModal'
+import { WorkloadIdentity, WorkloadStatus } from '../components/WorkloadStatus'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import {
@@ -282,7 +292,7 @@ export default function Containers() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black"></div>
+        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" aria-label="加载中" />
       </div>
     )
   }
@@ -291,84 +301,84 @@ export default function Containers() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-[180px]">
-          <h1 className="text-2xl font-bold text-black">容器管理</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">容器管理</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             共 {displayContainers.length} 个容器
             {filteredContainers.length !== displayContainers.length && `，筛选后 ${filteredContainers.length} 个`}
             {selected.size > 0 && `，已选 ${selected.size} 个`}
           </p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <button
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:justify-end">
+          <Button variant="outline"
             onClick={handleRefreshList}
             disabled={refreshing}
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors text-xs font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium whitespace-nowrap"
             title="刷新列表"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5  ${refreshing ? "animate-spin" : ""}`} />
             刷新
-          </button>
-          <button
+          </Button>
+          <Button variant="outline"
             onClick={() => setShowTasks(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors text-xs font-medium whitespace-nowrap"
+            className="h-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium whitespace-nowrap"
           >
             <ListTodo className="w-3.5 h-3.5" />
             任务队列
             {activeTaskCount > 0 && (
-              <span className="ml-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
+              <Badge variant="secondary" className="ml-0.5 px-1.5 py-0.5 text-[11px] font-medium">
                 {activeTaskCount}
-              </span>
+              </Badge>
             )}
-          </button>
+          </Button>
           {!isSubUser && (
-            <button
+            <Button variant="default"
               onClick={() => setShowCreate(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-md hover:bg-gray-800 transition-colors text-xs font-medium whitespace-nowrap"
+              className="h-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium whitespace-nowrap"
             >
               <Plus className="w-3.5 h-3.5" />
               创建容器
-            </button>
+            </Button>
           )}
         </div>
       </div>
 
       {displayContainers.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-[260px]">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-              <input
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
+            <div className="relative w-full min-w-0 max-w-full sm:w-[260px]">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
                 value={searchText}
                 onChange={(event) => setSearchText(event.target.value)}
-                className="h-8 w-full rounded-md border border-gray-300 bg-white pl-8 pr-2 text-xs text-black outline-none focus:border-black focus:ring-2 focus:ring-black"
+                className="h-8 w-full pl-8 pr-2 text-xs"
                 placeholder="搜索名称、ID、UUID、IP"
               />
             </div>
-            <select
+            <NativeSelect wrapperClassName="w-fit"
               value={typeFilter}
               onChange={(event) => setTypeFilter(event.target.value)}
-              className="h-8 rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-700 outline-none focus:border-black focus:ring-2 focus:ring-black"
+              className="h-8 px-2 text-xs pr-9"
               title="类型筛选"
             >
               <option value="all">全部类型</option>
               <option value="lxc">LXC</option>
               <option value="kvm">KVM</option>
-            </select>
-            <select
+            </NativeSelect>
+            <NativeSelect wrapperClassName="w-fit"
               value={systemFilter}
               onChange={(event) => setSystemFilter(event.target.value)}
-              className="h-8 rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-700 outline-none focus:border-black focus:ring-2 focus:ring-black"
+              className="h-8 px-2 text-xs pr-9"
               title="系统筛选"
             >
               <option value="all">全部系统</option>
               {systemOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
-            </select>
-            <select
+            </NativeSelect>
+            <NativeSelect wrapperClassName="w-fit"
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
-              className="h-8 rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-700 outline-none focus:border-black focus:ring-2 focus:ring-black"
+              className="h-8 px-2 text-xs pr-9"
               title="状态筛选"
             >
               <option value="all">全部状态</option>
@@ -377,77 +387,77 @@ export default function Containers() {
               <option value="task">任务中</option>
               <option value="creating">创建中</option>
               <option value="failed">失败</option>
-            </select>
-            <select
+            </NativeSelect>
+            <NativeSelect wrapperClassName="w-fit"
               value={pageSize}
               onChange={(event) => setPageSize(Number(event.target.value))}
-              className="h-8 rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-700 outline-none focus:border-black focus:ring-2 focus:ring-black"
+              className="h-8 px-2 text-xs pr-9"
               title="每页数量"
             >
               <option value={10}>10 / 页</option>
               <option value={20}>20 / 页</option>
               <option value={50}>50 / 页</option>
-            </select>
+            </NativeSelect>
           </div>
 
           {selected.size > 0 && (
             <div className="flex flex-wrap items-center justify-end gap-1.5">
-              <span className="text-xs text-gray-500">{selected.size} 个</span>
-              <button onClick={() => handleBatchAction('start')} disabled={batchLoading || hasActiveTasks(tasks)} className="inline-flex h-8 items-center gap-1 px-2.5 text-xs text-gray-700 hover:bg-gray-100 rounded border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">
+              <span className="text-xs text-muted-foreground">{selected.size} 个</span>
+              <Button variant="outline" onClick={() => handleBatchAction('start')} disabled={batchLoading || hasActiveTasks(tasks)} className="inline-flex h-8 items-center gap-1 px-2.5 text-xs">
                 <Play className="w-3 h-3" />{batchLoading ? '执行中...' : '开机'}
-              </button>
-              <button onClick={() => handleBatchAction('stop')} disabled={batchLoading || hasActiveTasks(tasks)} className="inline-flex h-8 items-center gap-1 px-2.5 text-xs text-gray-700 hover:bg-gray-100 rounded border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">
+              </Button>
+              <Button variant="outline" onClick={() => handleBatchAction('stop')} disabled={batchLoading || hasActiveTasks(tasks)} className="inline-flex h-8 items-center gap-1 px-2.5 text-xs">
                 <Square className="w-3 h-3" />{batchLoading ? '执行中...' : '关机'}
-              </button>
-              <button onClick={() => handleBatchAction('restart')} disabled={batchLoading || hasActiveTasks(tasks)} className="inline-flex h-8 items-center gap-1 px-2.5 text-xs text-gray-700 hover:bg-gray-100 rounded border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">
+              </Button>
+              <Button variant="outline" onClick={() => handleBatchAction('restart')} disabled={batchLoading || hasActiveTasks(tasks)} className="inline-flex h-8 items-center gap-1 px-2.5 text-xs">
                 <RotateCcw className="w-3 h-3" />{batchLoading ? '执行中...' : '重启'}
-              </button>
-              <button onClick={() => handleBatchAction('delete')} disabled={batchLoading || hasActiveTasks(tasks)} className="inline-flex h-8 items-center gap-1 px-2.5 text-xs text-red-600 hover:bg-red-50 rounded border border-red-200 disabled:opacity-50 disabled:cursor-not-allowed">
+              </Button>
+              <Button variant="destructive" onClick={() => handleBatchAction('delete')} disabled={batchLoading || hasActiveTasks(tasks)} className="inline-flex h-8 items-center gap-1 px-2.5 text-xs">
                 <Trash2 className="w-3 h-3" />{batchLoading ? '执行中...' : '删除'}
-              </button>
+              </Button>
             </div>
           )}
         </div>
       )}
 
       {displayContainers.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
-          <div className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center mx-auto mb-4">
-            <Server className="w-8 h-8 text-gray-400" />
+        <Card className="p-12 text-center">
+          <div className="w-16 h-16 bg-muted rounded-lg flex items-center justify-center mx-auto mb-4">
+            <Server className="w-8 h-8 text-muted-foreground" />
           </div>
-          <h3 className="text-lg font-medium text-gray-700 mb-2">暂无容器</h3>
-          <p className="text-sm text-gray-500 mb-4">点击"创建容器"开始</p>
-        </div>
+          <h3 className="text-lg font-medium text-foreground mb-2">暂无容器</h3>
+          <p className="text-sm text-muted-foreground mb-4">点击"创建容器"开始</p>
+        </Card>
       ) : (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1260px]">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50">
-                  <th className="w-10 px-3 py-3">
+            <Table className="w-full min-w-[1260px]">
+              <TableHeader>
+                <TableRow >
+                  <TableHead className="w-10 px-3 py-3">
                     {!isSubUser && (
-                      <input
-                        type="checkbox"
+                      <Checkbox
+
                         checked={allFilteredSelected}
                         disabled={selectableIDs.length === 0}
-                        onChange={toggleAll}
-                        className="w-4 h-4 rounded border-gray-300 text-black focus:ring-black accent-black"
+                        onCheckedChange={toggleAll}
+                        className="w-4 h-4"
                       />
                     )}
-                  </th>
-                  <TableHead
+                  </TableHead>
+                  <SortableTableHead
                     sortable
                     sorted={sortField === 'id'}
                     sortOrder={sortOrder}
                     onSort={() => handleSort('id')}
                   >
                     ID
-                  </TableHead>
-                  <TableHead>名称</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>系统</TableHead>
-                  <TableHead>类型</TableHead>
-                  <TableHead
+                  </SortableTableHead>
+                  <SortableTableHead>名称</SortableTableHead>
+                  <SortableTableHead>状态</SortableTableHead>
+                  <SortableTableHead>系统</SortableTableHead>
+                  <SortableTableHead>类型</SortableTableHead>
+                  <SortableTableHead
                     icon
                     sortable
                     sorted={sortField === 'cpu'}
@@ -455,8 +465,8 @@ export default function Containers() {
                     onSort={() => handleSort('cpu')}
                   >
                     <Cpu className="w-3.5 h-3.5" />CPU
-                  </TableHead>
-                  <TableHead
+                  </SortableTableHead>
+                  <SortableTableHead
                     icon
                     sortable
                     sorted={sortField === 'ram'}
@@ -464,8 +474,8 @@ export default function Containers() {
                     onSort={() => handleSort('ram')}
                   >
                     <MemoryStick className="w-3.5 h-3.5" />MEMORY
-                  </TableHead>
-                  <TableHead
+                  </SortableTableHead>
+                  <SortableTableHead
                     icon
                     sortable
                     sorted={sortField === 'disk'}
@@ -473,8 +483,8 @@ export default function Containers() {
                     onSort={() => handleSort('disk')}
                   >
                     <HardDrive className="w-3.5 h-3.5" />DISK
-                  </TableHead>
-                  <TableHead
+                  </SortableTableHead>
+                  <SortableTableHead
                     icon
                     sortable
                     sorted={sortField === 'net'}
@@ -482,13 +492,13 @@ export default function Containers() {
                     onSort={() => handleSort('net')}
                   >
                     <Network className="w-3.5 h-3.5" />NET
-                  </TableHead>
-                  <TableHead>配置</TableHead>
-                  <TableHead>剩余时间</TableHead>
-                  <TableHead right>操作</TableHead>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
+                  </SortableTableHead>
+                  <SortableTableHead>配置</SortableTableHead>
+                  <SortableTableHead>剩余时间</SortableTableHead>
+                  <SortableTableHead right>操作</SortableTableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="divide-y divide-border">
                 {pageContainers.map((container) => {
                   const isRunning = container.status === 'running'
                   const isInitializing = container.status === 'initializing'
@@ -512,62 +522,64 @@ export default function Containers() {
                   const traffic = getTrafficUsage(container)
 
                   return (
-                    <tr key={container.isPlaceholder ? `placeholder-${container.name}` : container.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-2 py-2 align-top">
+                    <TableRow key={container.isPlaceholder ? `placeholder-${container.name}` : container.id} className="transition-colors">
+                      <TableCell className="px-2 py-2 align-top">
                         {!isSubUser && (
-                          <input
-                            type="checkbox"
+                          <Checkbox
+
                             checked={selected.has(container.id)}
-                            onChange={() => toggleSelect(container.id)}
+                            onCheckedChange={() => toggleSelect(container.id)}
                             disabled={isPlaceholder || !!taskStatusMap[container.id] || !!taskNameMap[container.name]}
-                            className="w-3.5 h-3.5 rounded border-gray-300 text-black focus:ring-black accent-black disabled:opacity-30"
+                            className="w-3.5 h-3.5"
                           />
                         )}
-                      </td>
-                      <td className="px-2.5 py-2 align-top text-xs text-gray-400 font-mono whitespace-nowrap">
+                      </TableCell>
+                      <TableCell className="px-2.5 py-2 align-top text-xs text-muted-foreground font-mono whitespace-nowrap">
                         #{container.id}
-                      </td>
-                      <td className="px-2.5 py-2 align-top">
-                        <button
-                          onClick={() => navigate(`/container/${encodeURIComponent(container.uuid || String(container.id))}`)}
-                          disabled={isPlaceholder}
-                          className="font-medium text-black hover:underline text-xs disabled:no-underline disabled:text-gray-500 disabled:cursor-not-allowed whitespace-nowrap"
-                        >
-                          {container.name}
-                        </button>
-                      </td>
-                      <td className="px-2.5 py-2 align-top">
-                        <StatusBadge running={isRunning} initializing={isInitializing} task={task} placeholder={isPlaceholder} />
-                      </td>
-                      <td className="px-2.5 py-2 align-top text-xs text-gray-600 whitespace-nowrap">
+                      </TableCell>
+                      <TableCell className="px-2.5 py-2 align-top">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <WorkloadIdentity runtime={container.virtualization} name={container.name} size="sm" />
+                          <Button variant="link"
+                            onClick={() => navigate(`/container/${encodeURIComponent(container.uuid || String(container.id))}`)}
+                            disabled={isPlaceholder}
+                            className="h-auto max-w-[180px] justify-start truncate p-0 text-xs font-medium"
+                            title={container.name}
+                          >
+                            <span className="truncate">{container.name}</span>
+                          </Button>
+                        </div>
+                      </TableCell>
+                      <TableCell className="px-2.5 py-2 align-top">
+                        <StatusBadge running={isRunning} initializing={isInitializing} task={task} placeholder={isPlaceholder} status={container.status} />
+                      </TableCell>
+                      <TableCell className="px-2.5 py-2 align-top text-xs text-muted-foreground whitespace-nowrap">
                         <span className="inline-flex items-center gap-1">
                           {getTemplateIcon(container.template)}
                           {getTemplateName(container.template)}
                         </span>
-                      </td>
-                      <td className="px-2.5 py-2 align-top">
+                      </TableCell>
+                      <TableCell className="px-2.5 py-2 align-top">
                         <RuntimeBadge runtime={container.virtualization || 'lxc'} />
-                      </td>
-                      <td className="px-2.5 py-2 align-top">
+                      </TableCell>
+                      <TableCell className="px-2.5 py-2 align-top">
                         <ProgressCell pct={cpuPct} />
-                      </td>
-                      <td className="px-2.5 py-2 align-top">
+                      </TableCell>
+                      <TableCell className="px-2.5 py-2 align-top">
                         <ProgressCell pct={ramPct} />
-                      </td>
-                      <td className="px-2.5 py-2 align-top">
+                      </TableCell>
+                      <TableCell className="px-2.5 py-2 align-top">
                         <ProgressCell pct={diskPct} />
-                      </td>
-                      <td className="px-2.5 py-2 align-top">
+                      </TableCell>
+                      <TableCell className="px-2.5 py-2 align-top">
                         <div className="space-y-1 min-w-[100px]">
                           {traffic.isUnlimited ? (
                             <div
                               className="flex items-center gap-2 min-w-[100px]"
                               title={traffic.used > 0 ? `已用: ${formatBytes(traffic.used)} (无限流量)` : '无限流量'}
                             >
-                              <span className="w-10 text-xs font-medium tabular-nums text-gray-400">∞</span>
-                              <div className="h-1.5 flex-1 rounded-full bg-gray-100 overflow-hidden">
-                                <div className="h-full bg-transparent" />
-                              </div>
+                              <span className="w-10 text-xs font-medium tabular-nums text-muted-foreground">∞</span>
+                              <Progress value={0} className="h-1.5 flex-1" />
                             </div>
                           ) : (
                             <ProgressCell
@@ -575,28 +587,28 @@ export default function Containers() {
                               title={`已用: ${formatBytes(traffic.used)} / ${formatBytes(traffic.limit)} (${traffic.pct.toFixed(1)}%)`}
                             />
                           )}
-                          <div className="flex items-center gap-2 text-[10px] font-medium tabular-nums text-gray-500 whitespace-nowrap">
-                            <span className="inline-flex items-center gap-0.5" title={`上行: ${formatRate(tx)}`}>
-                              <ArrowUp className="w-2.5 h-2.5 text-gray-400" />
-                              <span className="text-gray-600">{formatRate(tx)}</span>
+                          <div className="flex items-center gap-2 text-[10px] font-medium tabular-nums text-muted-foreground whitespace-nowrap">
+                            <span className="inline-flex items-center.5" title={`上行: ${formatRate(tx)}`}>
+                              <ArrowUp className="w-2.5 h-2.5 text-muted-foreground" />
+                              <span className="text-muted-foreground">{formatRate(tx)}</span>
                             </span>
-                            <span className="inline-flex items-center gap-0.5" title={`下行: ${formatRate(rx)}`}>
-                              <ArrowDown className="w-2.5 h-2.5 text-gray-400" />
-                              <span className="text-gray-600">{formatRate(rx)}</span>
+                            <span className="inline-flex items-center.5" title={`下行: ${formatRate(rx)}`}>
+                              <ArrowDown className="w-2.5 h-2.5 text-muted-foreground" />
+                              <span className="text-muted-foreground">{formatRate(rx)}</span>
                             </span>
                           </div>
                         </div>
-                      </td>
-                      <td className="px-2.5 py-2 align-top text-xs text-gray-600 whitespace-nowrap">
+                      </TableCell>
+                      <TableCell className="px-2.5 py-2 align-top text-xs text-muted-foreground whitespace-nowrap">
                         {container.vcpu}核/{formatRAM(container.ram_mb)}/{container.disk_gb}GB
-                      </td>
-                      <td className="px-2.5 py-2 align-top text-xs whitespace-nowrap">
-                        {container.expires_at ? getRemaining(container.expires_at) : <span className="text-gray-400">永久</span>}
-                      </td>
-                      <td className="px-2.5 py-2 align-top">
+                      </TableCell>
+                      <TableCell className="px-2.5 py-2 align-top text-xs whitespace-nowrap">
+                        {container.expires_at ? getRemaining(container.expires_at) : <span className="text-muted-foreground">永久</span>}
+                      </TableCell>
+                      <TableCell className="px-2.5 py-2 align-top">
                         <div className="flex justify-end">
                           {task?.status === 'failed' ? (
-                            <button
+                            <Button variant="destructive"
                               onClick={async () => {
                                 try {
                                   const { default: api } = await import('../services/api')
@@ -604,74 +616,74 @@ export default function Containers() {
                                   await Promise.all([fetchData(), fetchTasks()])
                                 } catch { /* ignore */ }
                               }}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-red-200 text-[11px] text-red-600 hover:bg-red-50 transition-colors whitespace-nowrap"
+                              className="h-auto inline-flex items-center gap-1 px-2 py-1 text-[11px] whitespace-nowrap"
                             >
                               <Trash2 className="w-3 h-3" />
                               删除
-                            </button>
+                            </Button>
                           ) : (
-                            <button
+                            <Button variant="outline"
                               onClick={() => navigate(`/container/${encodeURIComponent(container.uuid || String(container.id))}`)}
                               disabled={isPlaceholder}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-300 text-[11px] text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                              className="h-auto inline-flex items-center gap-1 px-2 py-1 text-[11px] whitespace-nowrap"
                             >
                               <Eye className="w-3 h-3" />
                               查看
-                            </button>
+                            </Button>
                           )}
                         </div>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   )
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
           {filteredContainers.length === 0 ? (
-            <div className="border-t border-gray-100 px-4 py-10 text-center text-sm text-gray-500">
+            <div className="border-t border-border px-4 py-10 text-center text-sm text-muted-foreground">
               没有匹配的容器
             </div>
           ) : (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-3">
-              <div className="text-xs text-gray-500">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
+              <div className="text-xs text-muted-foreground">
                 显示 {pageStart + 1}-{Math.min(pageStart + pageSize, filteredContainers.length)} / {filteredContainers.length}
               </div>
-              <div className="flex items-center gap-1">
-                <button
+              <div className="flex max-w-full flex-wrap items-center gap-1">
+                <Button variant="outline"
                   onClick={() => setPage(1)}
                   disabled={currentPage === 1}
-                  className="rounded border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                  className="h-auto px-2.5 py-1.5 text-xs"
                 >
                   首页
-                </button>
-                <button
+                </Button>
+                <Button variant="outline"
                   onClick={() => setPage((value) => Math.max(1, value - 1))}
                   disabled={currentPage === 1}
-                  className="rounded border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                  className="h-auto px-2.5 py-1.5 text-xs"
                 >
                   上一页
-                </button>
-                <span className="px-2 text-xs text-gray-500">
+                </Button>
+                <span className="shrink-0 whitespace-nowrap px-2 text-xs text-muted-foreground">
                   {currentPage} / {totalPages}
                 </span>
-                <button
+                <Button variant="outline"
                   onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
                   disabled={currentPage === totalPages}
-                  className="rounded border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                  className="h-auto px-2.5 py-1.5 text-xs"
                 >
                   下一页
-                </button>
-                <button
+                </Button>
+                <Button variant="outline"
                   onClick={() => setPage(totalPages)}
                   disabled={currentPage === totalPages}
-                  className="rounded border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                  className="h-auto px-2.5 py-1.5 text-xs"
                 >
                   末页
-                </button>
+                </Button>
               </div>
             </div>
           )}
-        </div>
+        </Card>
       )}
 
       <CreateContainerModal isOpen={showCreate} onClose={() => setShowCreate(false)} onSuccess={handleCreateQueued} existingNames={containers.map(c => c.name)} />
@@ -686,7 +698,7 @@ export default function Containers() {
   )
 }
 
-function TableHead({
+function SortableTableHead({
   children,
   right,
   icon,
@@ -704,31 +716,31 @@ function TableHead({
   onSort?: () => void
 }) {
   return (
-    <th
+    <TableHead
       onClick={sortable ? onSort : undefined}
-      className={`${right ? 'text-right' : 'text-left'} px-2.5 py-2 text-[11px] font-medium uppercase whitespace-nowrap ${
+      className={` ${right ? "text-right" : "text-left"} px-2.5 py-2 text-[11px] font-medium uppercase whitespace-nowrap ${
         sortable
-          ? 'cursor-pointer select-none text-gray-600 hover:text-black hover:bg-gray-100 transition-colors'
-          : 'text-gray-500'
+          ? "cursor-pointer select-none transition-colors"
+          : ""
       }`}
     >
       <span className="inline-flex items-center gap-1">
         {children}
         {sortable && (
-          <span className="inline-flex items-center ml-0.5 text-gray-400">
+          <span className="inline-flex items-center ml-0.5 text-muted-foreground">
             {sorted ? (
               sortOrder === 'asc' ? (
-                <ArrowUp className="w-3 h-3 text-black stroke-[2.5]" />
+                <ArrowUp className="w-3 h-3 text-foreground stroke-[2.5]" />
               ) : (
-                <ArrowDown className="w-3 h-3 text-black stroke-[2.5]" />
+                <ArrowDown className="w-3 h-3 text-foreground stroke-[2.5]" />
               )
             ) : (
-              <ArrowUpDown className="w-3 h-3 text-gray-300 hover:text-gray-500" />
+              <ArrowUpDown className="w-3 h-3 text-muted-foreground hover:text-muted-foreground" />
             )}
           </span>
         )}
       </span>
-    </th>
+    </TableHead>
   )
 }
 
@@ -737,43 +749,30 @@ type DisplayContainer = Container & {
   createTask?: Task
 }
 
-function StatusBadge({ running, initializing, task, placeholder }: { running: boolean; initializing?: boolean; task?: Task; placeholder?: boolean }) {
+function StatusBadge({ running, initializing, task, placeholder, status }: { running: boolean; initializing?: boolean; task?: Task; placeholder?: boolean; status?: string }) {
   const { t } = useLanguage()
-  const baseClass = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap"
   if (task?.status === 'failed') {
     return (
-      <span className={`${baseClass} bg-red-50 text-red-700`}>
-        <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-        {t('初始化失败')}
-      </span>
+      <WorkloadStatus state="error" label={t('初始化失败')} title={task.error || t('初始化失败')} />
     )
   }
 
   if (task?.type === 'create' && task.status === 'done') {
     return (
-      <span className={`${baseClass} bg-emerald-50 text-emerald-700`}>
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-        {t('初始化完成')}
-      </span>
+      <WorkloadStatus state="success" label={t('初始化完成')} />
     )
   }
 
   if (task?.type === 'create' && task.status === 'running') {
     const detail = t(task.stage_detail || '正在初始化')
     return (
-      <span className={`${baseClass} max-w-[210px] bg-amber-50 text-amber-700`} title={`${t('正在初始化')}: ${detail}`}>
-        <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-500 animate-pulse"></span>
-        <span className="truncate">{detail}</span>
-      </span>
+      <WorkloadStatus state="pending" label={detail} loading title={`${t('正在初始化')}: ${detail}`} className="max-w-[210px]" />
     )
   }
 
   if (placeholder || task?.type === 'create') {
     return (
-      <span className={`${baseClass} bg-gray-100 text-gray-500`}>
-        <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
-        {t('排队等待')}
-      </span>
+      <WorkloadStatus state="pending" label={t('排队等待')} />
     )
   }
 
@@ -782,36 +781,26 @@ function StatusBadge({ running, initializing, task, placeholder }: { running: bo
       start: '开机中', stop: '关机中', restart: '重启中', delete: '删除中', reinstall: '重装中',
     }
     return (
-      <span className={`${baseClass} bg-amber-50 text-amber-700`}>
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-        {t(taskLabels[task.type] || '处理中')}
-      </span>
+      <WorkloadStatus state="pending" label={t(taskLabels[task.type] || '处理中')} loading />
     )
   }
 
   if (initializing) {
     return (
-      <span className={`${baseClass} bg-amber-50 text-amber-700`}>
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-        {t('正在初始化')}
-      </span>
+      <WorkloadStatus state="pending" label={t('正在初始化')} loading />
     )
   }
 
-  return (
-    <span className={`${baseClass} ${running ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${running ? 'bg-green-500' : 'bg-red-500'}`}></span>
-      {t(running ? '在线' : '离线')}
-    </span>
-  )
+  if (status === 'failed' || status === 'error') return <WorkloadStatus state="error" label={t('运行异常')} />
+  return <WorkloadStatus state={running ? 'running' : 'stopped'} label={t(running ? '在线' : '离线')} />
 }
 
 function RuntimeBadge({ runtime }: { runtime: string }) {
   const normalized = runtime === 'kvm' ? 'kvm' : 'lxc'
   return (
-    <span className={`inline-flex rounded px-2 py-0.5 text-[11px] font-medium ${normalized === 'kvm' ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-700'}`}>
+    <Badge variant="secondary" className="text-xs">
       {normalized.toUpperCase()}
-    </span>
+    </Badge>
   )
 }
 
@@ -1026,95 +1015,71 @@ function TaskQueueModal({ tasks, onRefresh, onClose }: {
 }) {
   const { t } = useLanguage()
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="flex max-h-[86vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl">
-        <div className="flex items-center justify-between gap-4 border-b border-gray-200 px-5 py-4">
-          <div>
-            <h2 className="text-base font-semibold text-black">{t('任务队列')}</h2>
-            <p className="mt-0.5 text-xs text-gray-500">{t(`共 ${tasks.length} 个任务`)}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onRefresh}
-              className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <RefreshCw className="h-4 w-4" />
-              {t('刷新')}
-            </button>
-            <button onClick={onClose} className="rounded p-2 text-gray-500 hover:bg-gray-100" title={t('关闭')}>
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
+    <Modal title={t('任务队列')} description={t(`共 ${tasks.length} 个任务`)} onClose={onClose} size="6xl" flush className="max-h-[86vh]" extra={
+      <Button variant="outline" onClick={onRefresh} className="h-auto gap-2 px-3 py-2 text-sm"><RefreshCw className="h-4 w-4" />{t('刷新')}</Button>
+    }>
         {tasks.length === 0 ? (
-          <div className="p-8 text-center text-sm text-gray-500">{t('暂无任务')}</div>
+          <div className="p-8 text-center text-sm text-muted-foreground">{t('暂无任务')}</div>
         ) : (
           <div className="overflow-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-medium text-gray-500">
-                  <th className="whitespace-nowrap px-4 py-2.5">{t('状态')}</th>
-                  <th className="whitespace-nowrap px-4 py-2.5">{t('操作')}</th>
-                  <th className="whitespace-nowrap px-4 py-2.5">{t('容器')}</th>
-                  <th className="whitespace-nowrap px-4 py-2.5">{t('当前阶段')}</th>
-                  <th className="whitespace-nowrap px-4 py-2.5">{t('创建时间')}</th>
-                  <th className="px-4 py-2.5">{t('错误')}</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 w-10"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
+            <Table className="w-full text-sm">
+              <TableHeader>
+                <TableRow className="text-left text-xs font-medium text-muted-foreground">
+                  <TableHead className="whitespace-nowrap px-4 py-2.5">{t('状态')}</TableHead>
+                  <TableHead className="whitespace-nowrap px-4 py-2.5">{t('操作')}</TableHead>
+                  <TableHead className="whitespace-nowrap px-4 py-2.5">{t('容器')}</TableHead>
+                  <TableHead className="whitespace-nowrap px-4 py-2.5">{t('当前阶段')}</TableHead>
+                  <TableHead className="whitespace-nowrap px-4 py-2.5">{t('创建时间')}</TableHead>
+                  <TableHead className="px-4 py-2.5">{t('错误')}</TableHead>
+                  <TableHead className="whitespace-nowrap px-4 py-2.5 w-10"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="divide-y divide-border">
                 {tasks.map((task) => (
-                  <tr key={task.id} className="hover:bg-gray-50">
-                    <td className="whitespace-nowrap px-4 py-2.5">
-                      <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${taskStatusClass(task.status)}`}>
+                  <TableRow key={task.id} >
+                    <TableCell className="whitespace-nowrap px-4 py-2.5">
+                      <Badge variant="secondary" className="text-xs">
                         {t(taskStatusLabel(task.status))}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-gray-800">{t(actionLabel(task.type))}</td>
-                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-gray-700">{task.container_name}</td>
-                    <td className="min-w-[210px] px-4 py-2.5 text-xs text-gray-700">
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap px-4 py-2.5 text-foreground">{t(actionLabel(task.type))}</TableCell>
+                    <TableCell className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-foreground">{task.container_name}</TableCell>
+                    <TableCell className="min-w-[210px] px-4 py-2.5 text-xs text-foreground">
                       {task.type === 'create' ? t(task.stage_detail || (task.status === 'pending' ? '排队等待' : '-')) : '-'}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-gray-500">{task.created_at}</td>
-                    <td className="min-w-[260px] px-4 py-2.5 text-gray-600">{task.error || '-'}</td>
-                    <td className="whitespace-nowrap px-2 py-2.5">
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-muted-foreground">{task.created_at}</TableCell>
+                    <TableCell className="min-w-[260px] px-4 py-2.5 text-muted-foreground">{task.error || '-'}</TableCell>
+                    <TableCell className="whitespace-nowrap px-2 py-2.5">
                       {task.status === 'pending' && (
-                        <button
+                        <Button variant="destructive"
                           onClick={async () => {
                             try {
                               await deleteTask(task.id)
                               onRefresh()
                             } catch { /* ignore */ }
                           }}
-                          className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
+                          className="h-auto p-1"
                           title={t('取消任务')}
                         >
                           <X className="w-3.5 h-3.5" />
-                        </button>
+                        </Button>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   )
 }
 
 function ProgressCell({ pct, title }: { pct: number; title?: string }) {
   return (
     <div className="flex items-center gap-2 min-w-[100px]" title={title}>
-      <span className="w-10 text-xs font-medium tabular-nums text-gray-700">{pct.toFixed(1)}%</span>
-      <div className="h-1.5 flex-1 rounded-full bg-gray-100 overflow-hidden">
-        <div
-          className="h-full bg-gray-500 transition-all duration-500"
-          style={{ width: `${Math.max(pct, pct > 0 ? 2 : 0)}%` }}
-        />
-      </div>
+      <span className="w-10 text-xs font-medium tabular-nums text-foreground">{pct.toFixed(1)}%</span>
+      <Progress value={Math.max(pct, pct > 0 ? 2 : 0)} className="h-1.5 flex-1" />
     </div>
   )
 }

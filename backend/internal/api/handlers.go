@@ -97,6 +97,8 @@ func HandleSingleContainer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case action == "installation-media":
+		handleInstallationMedia(w, r, id)
 	case action == "start" && r.Method == http.MethodPost:
 		if !requireScope(w, r, "container:power") {
 			return
@@ -185,10 +187,14 @@ func HandleSingleContainer(w http.ResponseWriter, r *http.Request) {
 	case action == "snapshots" || strings.HasPrefix(action, "snapshots/"):
 		handleContainerSnapshots(w, r, id, action)
 	case action == "ipv6-port-mappings" || strings.HasPrefix(action, "ipv6-port-mappings/"):
-		if !requireScope(w, r, "container:network") { return }
+		if !requireScope(w, r, "container:network") {
+			return
+		}
 		handleIPv6PortMappings(w, r, id, action)
 	case action == "ipv6-nat-sync" && r.Method == http.MethodPut:
-		if !requireScope(w, r, "container:network") { return }
+		if !requireScope(w, r, "container:network") {
+			return
+		}
 		setIPv6NATSync(w, r, id)
 	case action == "port-mappings" && r.Method == http.MethodPost:
 		if !requireScope(w, r, "container:network") {

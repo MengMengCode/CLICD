@@ -250,7 +250,32 @@ func ImagePath(id string) string {
 	return filepath.Join(CacheDir(), safeID+exts[0])
 }
 
+func (image Image) IsManualISO() bool {
+	return strings.EqualFold(strings.TrimSpace(image.Provisioner), config.KVMProvisionerManualISO)
+}
+
+func IsManualISOImage(id string) bool {
+	image := FindImage(id)
+	return image != nil && image.IsManualISO()
+}
+
+func (image Image) EffectiveProvisioner() string {
+	if image.Provisioner != "" {
+		return image.Provisioner
+	}
+	if image.IsWindows11() {
+		return config.KVMProvisionerWindows11
+	}
+	if image.IsWindows() {
+		return config.KVMProvisionerWindows10
+	}
+	return config.KVMProvisionerLinuxCloudInit
+}
+
 func (image Image) IsWindows() bool {
+	if image.IsManualISO() {
+		return false
+	}
 	// Custom images are user-supplied: "distro" is free text and people write
 	// windows / win10 / win11. Previously any non-empty Provisioner (including
 	// a leftover "linux-cloud-init") masked a Windows distro, so the VM was
@@ -286,6 +311,9 @@ func (image Image) IsWindows11() bool {
 // downloadExtension chooses a cache name before the downloaded format is known.
 // Windows disk images are normalized to QCOW2; installation media remain ISO.
 func (image Image) downloadExtension() string {
+	if image.IsManualISO() {
+		return ".iso"
+	}
 	if source, err := url.Parse(image.URL); err == nil {
 		switch strings.ToLower(filepath.Ext(source.Path)) {
 		case ".qcow2", ".img":

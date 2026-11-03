@@ -140,6 +140,9 @@ func ImageDownloadedInfo(id string) (bool, int64) {
 	if err != nil || info.IsDir() {
 		return false, 0
 	}
+	if IsManualISOImage(id) && ValidateISOFile(path) != nil {
+		return false, 0
+	}
 	return true, info.Size()
 }
 
@@ -175,6 +178,11 @@ func DownloadImageWithProgress(ctx context.Context, image Image, progress Downlo
 	// manually place the file at the expected path.
 	if image.URL == "" {
 		if _, err := os.Stat(target); err == nil {
+			if image.IsManualISO() {
+				if err := ValidateISOFile(target); err != nil {
+					return err
+				}
+			}
 			_ = os.Chmod(target, 0644)
 			return nil
 		}
@@ -183,7 +191,7 @@ func DownloadImageWithProgress(ctx context.Context, image Image, progress Downlo
 	tmp := target + ".tmp"
 	_ = os.Remove(tmp)
 	var validate downloadResponseValidator
-	if image.IsWindows() {
+	if image.IsWindows() || image.IsManualISO() {
 		validate = validateWindowsImageResponse(target)
 	}
 	if err := downloadFileWithValidator(ctx, image.URL, tmp, validate, progress); err != nil {
@@ -205,7 +213,17 @@ func DownloadImageWithProgress(ctx context.Context, image Image, progress Downlo
 		_ = os.Remove(tmp)
 		return err
 	}
-	if image.IsWindows() && !qcow2 {
+	if image.IsManualISO() {
+		if err := ValidateISOFile(tmp); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+		target = filepath.Join(cacheDir, image.ID+".iso")
+		if err := os.Rename(tmp, target); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+	} else if image.IsWindows() && !qcow2 {
 		target = filepath.Join(cacheDir, image.ID+".iso")
 		if err := validateWindowsISO(tmp, target); err != nil {
 			_ = os.Remove(tmp)
@@ -267,7 +285,29 @@ func verifyFileSHA256(path, expected string) error {
 }
 
 func DeleteImage(id string) error {
-	return os.RemoveAll(ImagePath(id))
+	installationMediaMu.Lock()
+	defer installationMediaMu.Unlock()
+	if FindImage(id) == nil {
+		return fmt.Errorf("image not found")
+	}
+	if config.AppConfig != nil {
+		for i := range config.AppConfig.Containers {
+			c := &config.AppConfig.Containers[i]
+			if !c.IsKVM() {
+				continue
+			}
+			mounted, _ := InstallationMedia(c)
+			if mounted == id {
+				return fmt.Errorf("image is mounted by VM %s; eject it first", c.Name)
+			}
+			if c.Template == id {
+				if qcow, err := isQCOW2File(ImagePath(id)); err == nil && qcow {
+					return fmt.Errorf("image backs VM %s and cannot be deleted", c.Name)
+				}
+			}
+		}
+	}
+	return os.Remove(ImagePath(id))
 }
 
 type downloadResponseValidator func(*http.Response) error
@@ -390,6 +430,8 @@ func normalizeQCOW2(ctx context.Context, src, target string) error {
 }
 
 func (m *Manager) CreateContainer(cfg lxc.ContainerConfig) error {
+	installationMediaMu.Lock()
+	defer installationMediaMu.Unlock()
 	cfg.NormalizeResourceAliases()
 	cfg.ReportProgress("preparing", "检查 KVM 镜像与创建参数")
 	image := FindImage(cfg.TemplateID)
@@ -481,7 +523,7 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 	sshPassword := ""
 	sshPublicKey := ""
 	sshAuthMode := ""
-	if !IsWindowsImage(image.ID) {
+	if !IsWindowsImage(image.ID) && !image.IsManualISO() {
 		sshAccess, err := lxc.ResolveCreateSSHAccess(cfg)
 		if err != nil {
 			return nil, err
@@ -511,7 +553,13 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 
 	var xml string
 	winAdminPassword := ""
-	if IsWindowsImage(image.ID) {
+	if image.IsManualISO() {
+		cfg.ReportProgress("disk", "Create blank KVM disk")
+		if err := createEmptyDisk(diskPath, cfg.DiskGB); err != nil {
+			return nil, err
+		}
+		xml = manualDomainXML(vmName, int(cfg.VCPU), cfg.RAMMB, diskPath, ImagePath(image.ID), mac, cfg.IOReadMBps, cfg.IOWriteMBps, cfg.NetworkDownMbps, cfg.NetworkUpMbps, "cdrom")
+	} else if IsWindowsImage(image.ID) {
 		minVCPU, minRAMMB, minDiskGB := windowsMinimumResources(image.ID)
 		if cfg.VCPU < minVCPU {
 			cfg.VCPU = minVCPU
@@ -662,6 +710,11 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 		CreatedAt:            now,
 		ExpiresAt:            cfg.ExpiresAt,
 	}
+	if image.IsManualISO() {
+		container.ManualInstall = true
+		container.InstallationMediaImageID = image.ID
+		container.InstallationMediaBoot = "cdrom"
+	}
 	container.NormalizeNetworkAssignments()
 	cfg.ReportProgress("metadata", "保存虚拟机配置")
 	return container, nil
@@ -684,13 +737,13 @@ func (m *Manager) StartContainerContext(ctx context.Context, id int) error {
 	// Config deletion compacts the container slice. Never keep its element
 	// pointer across guest polling or external commands.
 	c := *stored
-	if err := m.validateHost(c.Template); err != nil {
+	if err := m.validateHost(c.Template, c.ManualInstall); err != nil {
 		return err
 	}
 	lxc.EnsureAssignedPublicIPv4s(c.PublicIPv4s)
 	name := c.VirshName()
 	if err := m.ensureDomainDefinition(&c); err != nil {
-		fmt.Printf("Warning: failed to refresh KVM domain definition for %s: %v\n", name, err)
+		return fmt.Errorf("refresh KVM domain definition for %s: %w", name, err)
 	}
 	status, _ := m.GetContainerStatus(name)
 	if status != "running" {
@@ -708,6 +761,31 @@ func (m *Manager) StartContainerContext(ctx context.Context, id int) error {
 	}
 	_ = exec.CommandContext(ctx, "virsh", "dommemstat", name, "--period", "10", "--live").Run()
 	_ = exec.CommandContext(ctx, "virsh", "dommemstat", name, "--period", "10", "--config").Run()
+	if c.ManualInstall || IsManualISOImage(c.Template) || c.InstallationMediaBoot == "cdrom" {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		config.UpdateContainerStatusAndRestore(id, "running", true)
+		// Preserve host-side isolation and assigned routes without trying to
+		// initialize a guest OS that the user has not installed yet.
+		c.Status = "stopped"
+		if c.IPv6 != "" || len(c.IPv6Addresses) > 0 {
+			if err := m.applyIPv6Runtime(&c); err != nil {
+				return err
+			}
+		} else {
+			ensureKVMIPv6DenyRule("virbr0", c.MACAddress)
+		}
+		if c.IP != "" {
+			if err := lxc.NewManager().ApplyPortMappings(id); err != nil {
+				return err
+			}
+		}
+		if err := lxc.ApplyFirewallRules(id); err != nil {
+			fmt.Printf("Warning: failed to apply firewall rules: %v\n", err)
+		}
+		return nil
+	}
 	// Windows VMs need manual install via VNC — don't require IP on first boot
 	isWindows := IsWindowsImage(c.Template)
 	attempts := 90
@@ -957,8 +1035,15 @@ func (m *Manager) DestroyContainer(id int) error {
 }
 
 func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...lxc.ContainerConfig) error {
-	c := config.FindContainer(id)
-	if c == nil {
+	installationMediaMu.Lock()
+	defer installationMediaMu.Unlock()
+	stored := config.FindContainer(id)
+	var snapshot config.Container
+	if stored != nil {
+		snapshot = *stored
+	}
+	c := &snapshot
+	if stored == nil {
 		return fmt.Errorf("container not found: %d", id)
 	}
 	image := FindImage(templateID)
@@ -969,11 +1054,24 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...lx
 		return fmt.Errorf("KVM image is not downloaded: %s", templateID)
 	}
 	name := c.VirshName()
-	_ = m.StopContainer(id)
-	_ = undefineDomain(name)
-	_ = os.RemoveAll(m.instanceDir(name))
+	if err := m.validateHost(templateID); err != nil {
+		return err
+	}
+	if err := m.StopContainer(id); err != nil {
+		return err
+	}
+	if state, err := m.GetContainerStatus(name); err != nil || state != "stopped" {
+		return fmt.Errorf("VM must be stopped before reinstall: %s, %v", state, err)
+	}
+	if err := undefineDomain(name); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(m.instanceDir(name)); err != nil {
+		return err
+	}
 	cfg := lxc.ContainerConfig{
 		Name:             c.Name,
+		StoragePoolID:    c.StoragePoolID,
 		TemplateID:       templateID,
 		VCPU:             c.VCPU,
 		RAMMB:            c.RAMMB,
@@ -992,7 +1090,7 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...lx
 		SnapshotLimit:    c.SnapshotLimit,
 		ExpiresAt:        c.ExpiresAt,
 	}
-	if len(authConfig) > 0 && lxc.HasSSHAuthOptions(authConfig[0]) && !IsWindowsImage(templateID) {
+	if len(authConfig) > 0 && lxc.HasSSHAuthOptions(authConfig[0]) && !IsWindowsImage(templateID) && !IsManualISOImage(templateID) {
 		sshAccess, err := lxc.ResolveReinstallSSHAccess(c.SSHPassword, authConfig[0])
 		if err != nil {
 			return err
@@ -1009,7 +1107,12 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...lx
 	if err != nil {
 		return err
 	}
-	c.Template = templateID
+	current := config.FindContainer(id)
+	if current == nil {
+		return fmt.Errorf("container disappeared during reinstall")
+	}
+	c = current
+	resetReinstalledMedia(c, next)
 	c.DiskImage = next.DiskImage
 	c.MACAddress = next.MACAddress
 	c.SSHPassword = next.SSHPassword
@@ -1018,8 +1121,13 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...lx
 	c.VNCPort = 0
 	normalizeKVMManagementPortMapping(c)
 	c.Status = "stopped"
-	config.SaveConfig()
-	if IsWindowsImage(templateID) {
+	if err := m.ensureDomainDefinition(c); err != nil {
+		return err
+	}
+	if err := config.SaveConfig(); err != nil {
+		return err
+	}
+	if IsWindowsImage(templateID) || c.ManualInstall {
 		return nil
 	}
 	return m.StartContainer(id)
@@ -1092,14 +1200,9 @@ func (m *Manager) ApplyContainerLimits(c *config.Container) error {
 	if c.DiskImage == "" || c.MACAddress == "" {
 		return nil
 	}
-	var xml string
-	if IsWindowsImage(c.Template) {
-		winISO := windowsInstallISOPath(c.Template)
-		unattendISO := existingWindowsUnattendISO(m.instanceDir(c.VirshName()))
-		xml = windowsDomainXML(c.VirshName(), int(c.VCPU), c.RAMMB, c.DiskImage, winISO, unattendISO, c.MACAddress, c.IOReadMBps, c.IOWriteMBps, c.NetworkDownMbps, c.NetworkUpMbps)
-	} else {
-		seedPath := filepath.Join(m.instanceDir(c.VirshName()), "seed.iso")
-		xml = domainXML(c.VirshName(), int(c.VCPU), c.RAMMB, c.DiskImage, seedPath, c.MACAddress, c.IOReadMBps, c.IOWriteMBps, c.NetworkDownMbps, c.NetworkUpMbps, isKVMDesktopTemplate(c.Template))
+	xml, err := m.containerDomainXML(c)
+	if err != nil {
+		return err
 	}
 	xmlPath := filepath.Join(m.instanceDir(c.VirshName()), "domain.xml")
 	if err := os.WriteFile(xmlPath, []byte(xml), 0644); err != nil {
@@ -1117,16 +1220,11 @@ func (m *Manager) ensureDomainDefinition(c *config.Container) error {
 		return nil
 	}
 	config.NormalizeContainerResourceAliases(c)
-	var xml string
-	xmlPath := filepath.Join(m.instanceDir(c.VirshName()), "domain.xml")
-	if IsWindowsImage(c.Template) {
-		winISO := windowsInstallISOPath(c.Template)
-		unattendISO := existingWindowsUnattendISO(m.instanceDir(c.VirshName()))
-		xml = windowsDomainXML(c.VirshName(), int(c.VCPU), c.RAMMB, c.DiskImage, winISO, unattendISO, c.MACAddress, c.IOReadMBps, c.IOWriteMBps, c.NetworkDownMbps, c.NetworkUpMbps)
-	} else {
-		seedPath := filepath.Join(m.instanceDir(c.VirshName()), "seed.iso")
-		xml = domainXML(c.VirshName(), int(c.VCPU), c.RAMMB, c.DiskImage, seedPath, c.MACAddress, c.IOReadMBps, c.IOWriteMBps, c.NetworkDownMbps, c.NetworkUpMbps, isKVMDesktopTemplate(c.Template))
+	xml, err := m.containerDomainXML(c)
+	if err != nil {
+		return err
 	}
+	xmlPath := filepath.Join(m.instanceDir(c.VirshName()), "domain.xml")
 	if err := os.WriteFile(xmlPath, []byte(xml), 0644); err != nil {
 		return err
 	}
@@ -1734,7 +1832,7 @@ func (m *Manager) GetContainerStatus(name string) (string, error) {
 	if strings.Contains(state, "running") {
 		return "running", nil
 	}
-	if strings.Contains(state, "shut") || strings.Contains(state, "off") {
+	if state == "shut off" || state == "shutoff" || state == "off" {
 		return "stopped", nil
 	}
 	return state, nil
@@ -1766,7 +1864,7 @@ func (m *Manager) getContainerIPContext(ctx context.Context, name string) (strin
 	return "", fmt.Errorf("no IPv4 address found for %s", name)
 }
 
-func (m *Manager) validateHost(imageID string) error {
+func (m *Manager) validateHost(imageID string, manualInstall ...bool) error {
 	for _, name := range []string{"virsh", "qemu-img"} {
 		if err := requireCommand(name); err != nil {
 			return err
@@ -1775,7 +1873,23 @@ func (m *Manager) validateHost(imageID string) error {
 	if err := requireCommand(kvmEmulatorCommand()); err != nil {
 		return err
 	}
-	if IsWindowsImage(imageID) {
+	persistedManual := len(manualInstall) > 0 && manualInstall[0]
+	if err := validateProvisioningTools(imageID, persistedManual); err != nil {
+		return err
+	}
+	if _, err := os.Stat("/dev/kvm"); err != nil {
+		return fmt.Errorf("KVM is not available: /dev/kvm not found")
+	}
+	if err := ensureDefaultNetwork(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateProvisioningTools(imageID string, manualInstall bool) error {
+	if manualInstall || IsManualISOImage(imageID) {
+		// Manual installation needs no seed or unattended ISO tools.
+	} else if IsWindowsImage(imageID) {
 		if runtime.GOARCH != "amd64" {
 			return fmt.Errorf("Windows KVM is currently supported only on x86_64/amd64 hosts")
 		}
@@ -1788,12 +1902,6 @@ func (m *Manager) validateHost(imageID string) error {
 		if err := requireCommand("cloud-localds"); err != nil {
 			return err
 		}
-	}
-	if _, err := os.Stat("/dev/kvm"); err != nil {
-		return fmt.Errorf("KVM is not available: /dev/kvm not found")
-	}
-	if err := ensureDefaultNetwork(); err != nil {
-		return err
 	}
 	return nil
 }
@@ -2104,6 +2212,9 @@ func windowsMinimumResources(imageID string) (float64, int, int) {
 
 // GetKVMImageMinDiskGB returns the minimum required disk size in GB for a KVM image.
 func GetKVMImageMinDiskGB(imageID string) float64 {
+	if IsManualISOImage(imageID) {
+		return 1
+	}
 	if IsWindowsImage(imageID) {
 		if IsWindows11Image(imageID) {
 			return 64
@@ -2523,6 +2634,9 @@ func domainXML(name string, vcpu int, ramMB int, diskPath, seedPath, mac string,
       <target dev='vdb' bus='virtio'/>
       <readonly/>
     </disk>`, xmlEscape(seedPath))
+	}
+	if seedPath == "" {
+		seedDisk = ""
 	}
 	return fmt.Sprintf(`<domain type='kvm'>
   <name>%s</name>

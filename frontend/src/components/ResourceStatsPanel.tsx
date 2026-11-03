@@ -1,6 +1,8 @@
-import { ReactNode, useId } from 'react'
+import { Card } from './ui/card'
+import { Button } from './ui/button'
+import { ReactNode, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
-import { useTheme } from '../contexts/ThemeContext'
+import { calculateChartLayout, type ChartLayout } from '../lib/chart-layout'
 
 export type StatsRangeKey = '30m' | '1h' | '1d' | '1w'
 
@@ -56,32 +58,30 @@ export default function ResourceStatsPanel({
   charts: ResourceChartConfig[]
 }) {
   return (
-    <section className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-        <h2 className="text-sm font-semibold text-gray-950 dark:text-white">统计信息</h2>
-        <div className="flex items-center gap-1.5">
-          <div className="inline-flex rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 p-0.5">
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-background">
+        <h2 className="text-sm font-semibold text-foreground">统计信息</h2>
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+          <div className="inline-flex flex-wrap gap-0.5">
             {(Object.keys(rangeLabels) as StatsRangeKey[]).map((item) => (
-              <button
+              <Button variant={range === item ? 'default' : 'ghost'}
                 key={item}
                 onClick={() => onRangeChange(item)}
-                className={`h-7 px-3 rounded text-xs font-medium transition-colors ${
-                  range === item
-                    ? 'bg-gray-800 text-white shadow-sm dark:bg-white dark:text-black'
-                    : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
-                }`}
+                className="h-7 px-3 text-xs"
+                aria-pressed={range === item}
               >
                 {rangeLabels[item]}
-              </button>
+              </Button>
             ))}
           </div>
-          <button
+          <Button variant="outline"
+            size="icon"
             onClick={onRefresh}
-            className="h-8 w-8 inline-flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white"
+            className="h-8 w-8"
             title="刷新"
           >
             <RefreshCw className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -90,7 +90,7 @@ export default function ResourceStatsPanel({
           <DetailedChart key={chart.title} chart={chart} range={range} className={chartBorderClass(index)} />
         ))}
       </div>
-    </section>
+    </Card>
   )
 }
 
@@ -101,17 +101,17 @@ function DetailedChart({ chart, range, className }: { chart: ResourceChartConfig
   const primaryStats = getSeriesStats(series[0], chart.current)
 
   return (
-    <div className={`p-4 ${className}`}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-2">
+    <div className={`min-w-0 p-4 ${className}`} data-resource-chart={chart.title}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between mb-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-sm font-semibold text-gray-950 dark:text-white">
-            <span className="text-gray-500 dark:text-gray-400">{chart.icon}</span>
+          <div className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+            <span className="text-muted-foreground">{chart.icon}</span>
             <span>{chart.title}</span>
           </div>
-          {chart.detail && <p className="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">{chart.detail}</p>}
+          {chart.detail && <p className="mt-0.5 text-[11px] text-muted-foreground [overflow-wrap:anywhere]">{chart.detail}</p>}
         </div>
         {series.length > 1 ? (
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-right sm:shrink-0">
+          <div className="grid min-w-0 max-w-full grid-cols-2 gap-x-4 gap-y-1 text-right sm:shrink-0">
             {series.map((item, index) => (
               <SeriesStat
                 key={item.label}
@@ -123,7 +123,7 @@ function DetailedChart({ chart, range, className }: { chart: ResourceChartConfig
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-3 text-right sm:shrink-0">
+          <div className="grid min-w-0 max-w-full grid-cols-3 gap-3 text-right sm:shrink-0">
             <Stat label="当前" value={chart.formatValue(primaryStats.current)} />
             <Stat label="平均" value={chart.formatValue(primaryStats.avg)} />
             <Stat label="峰值" value={chart.formatValue(primaryStats.peak)} />
@@ -131,6 +131,7 @@ function DetailedChart({ chart, range, className }: { chart: ResourceChartConfig
         )}
       </div>
       <LineAreaChart
+        label={chart.title}
         series={series}
         range={range}
         max={chart.max}
@@ -153,15 +154,15 @@ function SeriesStat({
   formatValue: (value: number) => string
 }) {
   return (
-    <div className="min-w-[104px]">
-      <div className="flex items-center justify-end gap-1 text-[10px] text-gray-400 dark:text-gray-500">
-        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-        <span>{label}</span>
+    <div className="min-w-0">
+      <div className="flex items-center justify-end gap-1 text-[10px] text-muted-foreground">
+        <span className="h-0.5 w-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+        <span className="[overflow-wrap:anywhere]">{label}</span>
       </div>
-      <div className="text-xs font-semibold text-gray-900 dark:text-gray-100 tabular-nums whitespace-nowrap">
+      <div className="text-xs font-medium text-foreground tabular-nums [overflow-wrap:anywhere]">
         {formatValue(stats.current)}
       </div>
-      <div className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums whitespace-nowrap">
+      <div className="text-[10px] text-muted-foreground tabular-nums [overflow-wrap:anywhere]">
         均 {formatValue(stats.avg)} / 峰 {formatValue(stats.peak)}
       </div>
     </div>
@@ -170,9 +171,9 @@ function SeriesStat({
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="text-[10px] text-gray-400 dark:text-gray-500">{label}</div>
-      <div className="text-xs font-semibold text-gray-900 dark:text-gray-100 tabular-nums whitespace-nowrap">{value}</div>
+    <div className="min-w-0">
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="text-xs font-medium text-foreground tabular-nums [overflow-wrap:anywhere]">{value}</div>
     </div>
   )
 }
@@ -189,31 +190,25 @@ function getSeriesStats(series: ResourceChartSeries, fallbackCurrent = 0) {
 }
 
 function LineAreaChart({
+  label,
   series,
   range,
   max,
   formatValue,
   unitLabel,
 }: {
+  label: string
   series: ResourceChartSeries[]
   range: StatsRangeKey
   max?: number
   formatValue: (value: number) => string
   unitLabel?: string
 }) {
-  const { theme } = useTheme()
-  const isDark = theme === 'dark'
-  const gradientId = `resource-chart-fill-${useId().replace(/:/g, '')}`
-
-  const width = 520
-  const height = 150
-  const left = 50
-  const right = 10
-  const top = 8
-  const bottom = 28
-  const innerWidth = width - left - right
-  const innerHeight = height - top - bottom
-  const now = Date.now()
+  const chartId = `resource-chart-${useId().replace(/:/g, '')}`
+  const containerRef = useRef<HTMLDivElement>(null)
+  const measureRef = useRef<SVGTextElement>(null)
+  const [layout, setLayout] = useState<ChartLayout | null>(null)
+  const now = useMemo(() => Date.now(), [series, range])
   const chartSeries = series.map((item) => {
     const validPoints = item.points.filter((point) => Number.isFinite(point.ts) && Number.isFinite(point.value))
     return {
@@ -225,77 +220,140 @@ function LineAreaChart({
   })
   const allPoints = chartSeries.flatMap((item) => item.points)
   const maxValue = Math.max(max || 0, ...allPoints.map((point) => point.value), 1)
-  const maxTs = now
   const minTs = now - statsRanges[range]
-  const span = Math.max(maxTs - minTs, 1)
-  const yTicks = [1, 0.5, 0]
-  const xTicks = [0, 0.5, 1]
+  const span = Math.max(statsRanges[range], 1)
+  const yLabelKey = JSON.stringify([1, 0.5, 0].map((tick) => formatValue(maxValue * tick)))
+  const xLabelKey = JSON.stringify([0, 0.5, 1].map((tick) => formatTime(minTs + tick * span)))
 
-  // Dark mode colors
-  const gridStroke = isDark ? '#374151' : '#e5e7eb'
-  const gridStrokeV = isDark ? '#1f2937' : '#edf0f2'
-  const axisStroke = isDark ? '#9ca3af' : '#888'
-  const lineStroke = isDark ? '#f9fafb' : '#444'
-  const gradientTop = isDark ? '#f9fafb' : '#555'
-  const gradientBottom = isDark ? '#374151' : '#555'
-  const primaryLine = buildLine(chartSeries[0]?.points || [{ ts: now, value: 0 }], minTs, span, left, top, innerWidth, innerHeight, maxValue)
-  const area = `${left},${top + innerHeight} ${primaryLine} ${left + innerWidth},${top + innerHeight}`
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    const textNode = measureRef.current
+    if (!container || !textNode) return
+    let disposed = false
+    let frame = 0
+    const measure = (text: string) => {
+      textNode.textContent = text
+      return textNode.getComputedTextLength()
+    }
+    const update = () => {
+      if (disposed) return
+      const width = container.getBoundingClientRect().width
+      if (width <= 0) return
+      const yLabels: string[] = JSON.parse(yLabelKey)
+      const xLabels: string[] = JSON.parse(xLabelKey)
+      let fontTop = 0
+      let fontBottom = 0
+      // Real SVG metrics include tabular figures and any translated fallback font.
+      for (const text of [...yLabels, ...xLabels, unitLabel || '', '0123456789Mg']) {
+        measure(text)
+        const box = textNode.getBBox()
+        fontTop = Math.min(fontTop, box.y)
+        fontBottom = Math.max(fontBottom, box.y + box.height)
+      }
+      const next = calculateChartLayout({
+        width, yLabels, xLabels, unitLabel, measure, fontTop,
+        fontHeight: Math.max(1, fontBottom - fontTop),
+      })
+      setLayout((previous) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next)
+    }
+    const schedule = () => {
+      if (disposed) return
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(update)
+    }
+    const observer = new ResizeObserver(schedule)
+    observer.observe(container)
+    document.fonts.ready.then(schedule)
+    document.fonts.addEventListener('loadingdone', schedule)
+    update()
+    return () => {
+      disposed = true
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+      document.fonts.removeEventListener('loadingdone', schedule)
+    }
+  }, [yLabelKey, xLabelKey, unitLabel])
+
+  const gridStroke = 'hsl(var(--border))'
+  const axisStroke = 'hsl(var(--muted-foreground))'
+  const lineStroke = 'hsl(var(--foreground))'
+  const plot = layout?.plot
+  const primaryLine = plot
+    ? buildLine(chartSeries[0]?.points || [], minTs, span, plot.left, plot.top, plot.width, plot.height, maxValue)
+    : ''
+  const area = plot ? `${plot.left},${plot.top + plot.height} ${primaryLine} ${plot.left + plot.width},${plot.top + plot.height}` : ''
+  const textBaseline = (center: number, lines: string[]) => layout
+    ? center - (layout.fontHeight + (lines.length - 1) * layout.lineHeight) / 2 - layout.fontTop
+    : center
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-[140px]" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={gradientTop} stopOpacity="0.25" />
-          <stop offset="100%" stopColor={gradientBottom} stopOpacity="0.02" />
-        </linearGradient>
-      </defs>
+    <div ref={containerRef} className="min-w-0 w-full" data-chart-container>
+      <svg
+        viewBox={`0 0 ${layout?.width || 1} ${layout?.height || 140}`}
+        className="block w-full overflow-hidden text-[10px] tabular-nums"
+        style={{ height: layout?.height || 140 }}
+        role="img"
+        aria-label={label}
+      >
+        <text ref={measureRef} visibility="hidden" aria-hidden="true" />
+        {layout && plot && <>
+          <defs>
+            <linearGradient id={`${chartId}-fill`} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor={lineStroke} stopOpacity="0.07" />
+              <stop offset="100%" stopColor={lineStroke} stopOpacity="0.005" />
+            </linearGradient>
+            <clipPath id={`${chartId}-clip`} clipPathUnits="userSpaceOnUse">
+              <rect x={plot.left} y={plot.top} width={plot.width} height={plot.height} data-chart-plot />
+            </clipPath>
+          </defs>
 
-      {yTicks.map((tick) => {
-        const y = top + (1 - tick) * innerHeight
-        return (
-          <g key={tick}>
-            <line x1={left} y1={y} x2={left + innerWidth} y2={y} stroke={gridStroke} strokeDasharray="3 3" />
-            <text x={left - 8} y={y + 3} textAnchor="end" fontSize="10" fill={axisStroke}>
-              {formatValue(maxValue * tick)}
+          {layout.yLabels.map(({ tick, lines }) => {
+            const y = plot.top + (1 - tick) * plot.height
+            return (
+              <g key={tick}>
+                <line x1={plot.left} y1={y} x2={plot.left + plot.width} y2={y} stroke={gridStroke} strokeWidth="0.75" strokeOpacity="0.7" />
+                <text x={plot.left - 8} y={textBaseline(y, lines)} textAnchor="end" fill={axisStroke} data-chart-y-label>
+                  {lines.map((line, index) => <tspan key={index} x={plot.left - 8} dy={index === 0 ? 0 : layout.lineHeight}>{line}</tspan>)}
+                </text>
+              </g>
+            )
+          })}
+
+          {layout.xLabels.map(({ tick, lines }) => {
+            const x = plot.left + tick * plot.width
+            return (
+              <g key={tick}>
+                <line x1={x} y1={plot.top} x2={x} y2={plot.top + plot.height} stroke={gridStroke} strokeWidth="0.75" strokeOpacity="0.35" />
+                <text x={x} y={plot.top + plot.height + 8 - layout.fontTop} textAnchor={tick === 0 ? 'start' : tick === 1 ? 'end' : 'middle'} fill={axisStroke} data-chart-x-label>
+                  {lines.map((line, index) => <tspan key={index} x={x} dy={index === 0 ? 0 : layout.lineHeight}>{line}</tspan>)}
+                </text>
+              </g>
+            )
+          })}
+
+          {layout.unitLines.length > 0 && (
+            <text x={4} y={4 - layout.fontTop} fill={axisStroke} data-chart-unit-label>
+              {layout.unitLines.map((line, index) => <tspan key={index} x={4} dy={index === 0 ? 0 : layout.lineHeight}>{line}</tspan>)}
             </text>
+          )}
+
+          <g clipPath={`url(#${chartId}-clip)`} data-chart-series>
+            {chartSeries.length === 1 && <polygon points={area} fill={`url(#${chartId}-fill)`} />}
+            {chartSeries.map((item, index) => (
+              <polyline
+                key={item.label || index}
+                points={buildLine(item.points, minTs, span, plot.left, plot.top, plot.width, plot.height, maxValue)}
+                fill="none"
+                stroke={item.color || (chartSeries.length === 1 ? lineStroke : chartPalette[index % chartPalette.length])}
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ))}
           </g>
-        )
-      })}
-
-      {xTicks.map((tick) => {
-        const x = left + tick * innerWidth
-        const ts = minTs + tick * span
-        return (
-          <g key={tick}>
-            <line x1={x} y1={top} x2={x} y2={top + innerHeight} stroke={gridStrokeV} strokeDasharray="3 3" />
-            <text x={x} y={height - 5} textAnchor={tick === 0 ? 'start' : tick === 1 ? 'end' : 'middle'} fontSize="10" fill={axisStroke}>
-              {formatTime(ts)}
-            </text>
-          </g>
-        )
-      })}
-
-      {unitLabel && (
-        <text x={left - 45} y={top + 10} fontSize="10" fill={axisStroke}>
-          {unitLabel}
-        </text>
-      )}
-
-      <line x1={left} y1={top} x2={left} y2={top + innerHeight} stroke={axisStroke} />
-      <line x1={left} y1={top + innerHeight} x2={left + innerWidth} y2={top + innerHeight} stroke={axisStroke} />
-      {chartSeries.length === 1 && <polygon points={area} fill={`url(#${gradientId})`} />}
-      {chartSeries.map((item, index) => (
-        <polyline
-          key={item.label || index}
-          points={buildLine(item.points, minTs, span, left, top, innerWidth, innerHeight, maxValue)}
-          fill="none"
-          stroke={item.color || (chartSeries.length === 1 ? lineStroke : chartPalette[index % chartPalette.length])}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      ))}
-    </svg>
+        </>}
+      </svg>
+    </div>
   )
 }
 
@@ -325,7 +383,7 @@ function buildLine(
 function chartBorderClass(index: number) {
   const right = index % 2 === 0 ? 'xl:border-r' : ''
   const top = index > 1 ? 'border-t' : ''
-  return `${right} ${top} border-gray-200`
+  return `${right} ${top} border-border`
 }
 
 function formatTime(ts: number) {

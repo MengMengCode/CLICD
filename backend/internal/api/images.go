@@ -43,6 +43,9 @@ type ImageInfo struct {
 	ManualPath      string `json:"manual_path,omitempty"`
 	Desktop         string `json:"desktop,omitempty"`
 	Provisioner     string `json:"provisioner,omitempty"`
+	Format          string `json:"format,omitempty"`
+	ManualInstall   bool   `json:"manual_install,omitempty"`
+	RequiresURL     bool   `json:"requires_url,omitempty"`
 	Custom          bool   `json:"custom,omitempty"`
 	SHA256          string `json:"sha256,omitempty"`
 }
@@ -486,7 +489,10 @@ func HandleImages(w http.ResponseWriter, r *http.Request) {
 			SizeBytes:       size,
 			ManualPath:      manualPath,
 			Desktop:         t.Desktop,
-			Provisioner:     t.Provisioner,
+			Provisioner:     t.EffectiveProvisioner(),
+			Format:          kvm.ImageFormat(t),
+			ManualInstall:   t.IsManualISO(),
+			RequiresURL:     strings.TrimSpace(t.URL) == "",
 			Custom:          t.Custom,
 			SHA256:          t.SHA256,
 		})
@@ -565,6 +571,17 @@ func handleCustomKVMImageCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if req.Type == config.VirtualizationKVM {
 		switch req.Provisioner {
+		case config.KVMProvisionerManualISO:
+			if req.Distro == "" {
+				req.Distro = "generic"
+			}
+			if req.Release == "" {
+				req.Release = "manual"
+			}
+			if !customImageFieldPattern.MatchString(req.Distro) || !customImageFieldPattern.MatchString(req.Release) {
+				jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "distro or release contains unsupported characters"})
+				return
+			}
 		case config.KVMProvisionerLinuxCloudInit:
 			if !customImageFieldPattern.MatchString(req.Distro) {
 				jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "distro contains unsupported characters"})
@@ -1075,8 +1092,12 @@ func HandleImageDelete(w http.ResponseWriter, r *http.Request) {
 	tmpl := lxc.FindTemplate(req.TemplateID)
 	if tmpl == nil {
 		if image := kvm.FindImage(req.TemplateID); image != nil {
+			if imageHasActiveTask(image.ID) {
+				jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "Image is referenced by an active task"})
+				return
+			}
 			if err := kvm.DeleteImage(image.ID); err != nil {
-				jsonResponse(w, http.StatusInternalServerError, APIResponse{Success: false, Message: "Failed to delete image cache: " + err.Error()})
+				jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "Failed to delete image cache: " + err.Error()})
 				return
 			}
 			removeImageEnabled(image.ID)
@@ -1088,7 +1109,7 @@ func HandleImageDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if tmpl.Custom {
 		if err := lxc.DeleteCustomImage(tmpl.ID); err != nil {
-			jsonResponse(w, http.StatusInternalServerError, APIResponse{Success: false, Message: "Failed to delete image cache: " + err.Error()})
+			jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "Failed to delete image cache: " + err.Error()})
 			return
 		}
 		removeImageEnabled(tmpl.ID)
@@ -1176,7 +1197,7 @@ func HandleEnabledImages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result := make([]map[string]string, 0)
+	result := make([]map[string]interface{}, 0)
 	if runtime == config.VirtualizationKVM {
 		if !hostKVMAvailable() {
 			jsonResponse(w, http.StatusOK, APIResponse{Success: true, Data: result})
@@ -1187,9 +1208,10 @@ func HandleEnabledImages(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if downloaded, _ := kvm.ImageDownloadedInfo(t.ID); downloaded && (enabledSet[t.ID] || currentImageIDs[t.ID]) {
-				result = append(result, map[string]string{
+				result = append(result, map[string]interface{}{
 					"id": t.ID, "name": t.Name, "distro": t.Distro, "release": t.Release, "arch": t.Arch,
 					"description": t.Description, "type": config.VirtualizationKVM, "desktop": t.Desktop,
+					"provisioner": t.EffectiveProvisioner(), "format": kvm.ImageFormat(t), "manual_install": t.IsManualISO(),
 				})
 			}
 		}
@@ -1199,7 +1221,7 @@ func HandleEnabledImages(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if downloaded, _ := lxcTemplateDownloadedInfo(t); downloaded && (enabledSet[t.ID] || currentImageIDs[t.ID]) {
-				result = append(result, map[string]string{
+				result = append(result, map[string]interface{}{
 					"id": t.ID, "name": t.Name, "distro": t.Distro, "release": t.Release, "arch": t.Arch,
 					"variant": t.Variant, "description": t.Description, "type": config.VirtualizationLXC,
 				})
@@ -1334,4 +1356,13 @@ func removeImageEnabled(id string) {
 		config.AppConfig.EnabledImages = filtered
 		config.SaveConfig()
 	}
+}
+
+func imageHasActiveTask(imageID string) bool {
+	for _, task := range globalQueue.GetTasks() {
+		if (task.Status == "pending" || task.Status == "running") && (task.TemplateID == imageID || task.Config.TemplateID == imageID) {
+			return true
+		}
+	}
+	return false
 }

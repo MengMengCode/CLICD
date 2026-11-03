@@ -1,3 +1,16 @@
+import { Progress } from '../components/ui/progress'
+import { Alert } from '../components/ui/alert'
+import { Modal as SharedModal } from '../components/ui/modal'
+import { Switch } from '../components/ui/switch'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card } from '../components/ui/card'
+import { Label } from '../components/ui/label'
+import { NativeSelect } from '../components/ui/native-select'
+import { Input } from '../components/ui/input'
+import { Table, TableHeader, TableRow, TableHead as UITableHead, TableBody, TableCell } from '../components/ui/table'
+import { Checkbox } from '../components/ui/checkbox'
+import { Textarea } from '../components/ui/textarea'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { useParams, useNavigate } from 'react-router'
 import {
@@ -6,6 +19,7 @@ import {
   Clock,
   Copy,
   Cpu,
+  Disc3,
   HardDrive,
   Key,
   Maximize2,
@@ -80,7 +94,9 @@ import { useLanguage } from '../contexts/LanguageContext'
 import WebSSHViewer from '../components/WebSSHViewer'
 import WebVNCViewer from '../components/WebVNCViewer'
 import { RingStat } from '../components/RingStats'
+import { WorkloadIdentity, WorkloadStatus } from '../components/WorkloadStatus'
 import IPv6PortMappings from '../components/IPv6PortMappings'
+import KVMInstallMedia from '../components/KVMInstallMedia'
 import { copyToClipboard } from '../utils/clipboard'
 import ResourceStatsPanel, {
   ChartPoint,
@@ -91,7 +107,7 @@ import ResourceStatsPanel, {
 import { generateSSHPassword, sshPasswordError, sshPublicKeyError, type ReinstallSSHAuthMode } from '../utils/sshAuth'
 
 const PUBLIC_HOST = window.location.hostname
-const inputClass = 'w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-black bg-white focus:outline-none focus:ring-2 focus:ring-black focus:border-black'
+const inputClass = 'w-full px-3 py-2 text-sm'
 
 type MetricPoint = {
   ts: number
@@ -132,6 +148,7 @@ export default function ContainerDetail() {
   const { isSubUser } = useAuth()
   const { t } = useLanguage()
   const [container, setContainer] = useState<Container | null>(null)
+  const [manualInstall, setManualInstall] = useState<boolean | null>(null)
   const [hostInfo, setHostInfo] = useState<HostInfo | null>(null)
   const [usage, setUsage] = useState<ContainerUsage | null>(null)
   const [history, setHistory] = useState<MetricPoint[]>(() => readHistory(containerIdentifier))
@@ -141,6 +158,7 @@ export default function ContainerDetail() {
   const [taskStatus, setTaskStatus] = useState('') // current task type for this container
   const [showSSH, setShowSSH] = useState(false)
   const [showVNC, setShowVNC] = useState(false)
+  const [showInstallationMedia, setShowInstallationMedia] = useState(false)
   const vncFullscreenRef = useRef<HTMLDivElement>(null)
   const [vncFullscreen, setVncFullscreen] = useState(false)
   const [showNat, setShowNat] = useState(false)
@@ -199,6 +217,8 @@ export default function ContainerDetail() {
   const [firewallMessage, setFirewallMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [editingFirewallRule, setEditingFirewallRule] = useState<FirewallRule | null>(null)
   const [showFirewallEditor, setShowFirewallEditor] = useState(false)
+
+  useEffect(() => { setManualInstall(null) }, [containerIdentifier])
 
   const fetchContainer = useCallback(async () => {
     if (!containerIdentifier) return
@@ -572,7 +592,8 @@ export default function ContainerDetail() {
 
   const handleReinstall = async () => {
     if (!containerIdentifier || !selectedTemplate) return
-    const linuxTemplate = !isWindowsTemplate(selectedTemplate)
+    const targetTemplate = templates.find((template) => template.id === selectedTemplate)
+    const linuxTemplate = !isManualISOTemplate(targetTemplate) && !isWindowsTemplate(selectedTemplate)
     if (linuxTemplate && reinstallAuthMode === 'password') {
       const validationError = sshPasswordError(reinstallPasswordDraft.trim())
       if (validationError) {
@@ -902,7 +923,7 @@ export default function ContainerDetail() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black"></div>
+        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" aria-label="加载中" />
       </div>
     )
   }
@@ -910,10 +931,10 @@ export default function ContainerDetail() {
   if (!container) {
     return (
       <div className="text-center py-20">
-        <p className="text-gray-500">容器不存在</p>
-        <button onClick={() => navigate('/containers')} className="mt-4 text-sm text-black underline">
+        <p className="text-muted-foreground">容器不存在</p>
+        <Button variant="link" onClick={() => navigate('/containers')} className="h-auto mt-4 text-sm underline p-0">
           返回列表
-        </button>
+        </Button>
       </div>
     )
   }
@@ -921,14 +942,18 @@ export default function ContainerDetail() {
   const isRunning = container.status === 'running'
   const isInitializing = container.status === 'initializing'
   const isKVM = (container.virtualization || 'lxc') === 'kvm'
-  const isWindows = container.template?.includes('windows')
-  const reinstallLinuxTemplate = !isWindowsTemplate(selectedTemplate)
+  const isManualInstall = isKVM && manualInstall === true
+  const managedLogin = !isKVM || manualInstall === false
+  const isWindows = !isManualInstall && container.template?.includes('windows')
+  const reinstallManualISO = isManualISOTemplate(templates.find((template) => template.id === selectedTemplate))
+  const reinstallLinuxTemplate = !reinstallManualISO && !isWindowsTemplate(selectedTemplate)
   const canOpenVNC = isKVM && isRunning
   const isExpired = container.expires_at ? new Date(container.expires_at) < new Date() : false
   const publicIPv4s = container.public_ipv4s || []
   const assignedIPv4List = publicIPv4s.map((item) => item.address).filter(Boolean)
   const allocatableIPv4s = mergeIPv4Choices(hostInfo?.network.public_ipv4_addresses || [], publicIPv4s)
-  const publicHost = assignedIPv4List[0] || hostInfo?.network.public_ipv4 || PUBLIC_HOST
+  // The detected egress IP may belong to an upstream NAT router, not this node.
+  const publicHost = assignedIPv4List[0] || PUBLIC_HOST
   const ipv6NATAddress = container.ipv6_nat_address?.trim() || ''
   const hasIPv6NAT = !!ipv6NATAddress
   const ipv6List = (container.ipv6_addresses || [])
@@ -1064,26 +1089,31 @@ export default function ContainerDetail() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <button
+        <Button variant="ghost"
           onClick={() => navigate('/containers')}
-          className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black transition-colors"
+          className="h-auto flex items-center gap-1.5 text-sm p-0"
         >
           <ArrowLeft className="w-4 h-4" />
           返回列表
-        </button>
+        </Button>
         <div />
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-lg p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="w-14 h-14 flex items-center justify-center">
-              {getTemplateIcon(container.template || '') || <Cpu className="w-7 h-7 text-slate-700" />}
+      <Card className="p-4 sm:p-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="flex min-w-0 items-start gap-3 xl:flex-1">
+            <div className="relative shrink-0">
+              <WorkloadIdentity runtime={container.virtualization} name={container.name} size="lg" />
+              {getTemplateIcon(container.template || '') && (
+                <span className="absolute -bottom-1 -right-1 inline-flex rounded-md border bg-card p-0.5 [&_svg]:h-3 [&_svg]:w-3" title={container.template}>
+                  {getTemplateIcon(container.template || '')}
+                </span>
+              )}
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl font-bold text-black">{container.name}</h1>
-                <StatusBadge running={isRunning} initializing={isInitializing} />
+                <h1 className="max-w-full truncate text-xl font-semibold tracking-tight text-foreground" title={container.name}>{container.name}</h1>
+                <StatusBadge running={isRunning} initializing={isInitializing} status={container.status} taskLabel={taskStatus ? taskActionLabels[taskStatus] || '处理中' : undefined} />
               </div>
               <div className="flex items-center gap-2 flex-wrap mt-2">
                 <InfoTag color="blue">系统 {container.template}</InfoTag>
@@ -1094,12 +1124,13 @@ export default function ContainerDetail() {
                 ) : (
                   <InfoTag color="amber">IPv4 NAT {hasNATQuota ? `${mappingCount} 条` : '未分配'}</InfoTag>
                 )}
-                <InfoTag color="violet">{isWindows ? 'RDP' : 'SSH'} {publicEndpoint}</InfoTag>
+                {managedLogin && <InfoTag color="violet">{isWindows ? 'RDP' : 'SSH'} {publicEndpoint}</InfoTag>}
+                {isManualInstall && <InfoTag color="violet">{t('VNC 手动安装')}</InfoTag>}
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center xl:max-w-[60%] xl:justify-end">
             {!isRunning ? (
               <ActionButton dark disabled={!!taskStatus || isExpired} onClick={() => handleAction('start')}>
                 <Play className="w-3.5 h-3.5" />
@@ -1115,7 +1146,7 @@ export default function ContainerDetail() {
                   <RefreshCw className="w-3.5 h-3.5" />
                   {isExpired ? '已到期' : taskStatus === 'restart' ? taskActionLabels['restart'] : '重启'}
                 </ActionButton>
-                {!isWindows && (
+                {!isWindows && managedLogin && (
                   <ActionButton dark onClick={() => setShowSSH(true)}>
                     <TerminalSquare className="w-3.5 h-3.5" />
                     WebSSH
@@ -1149,6 +1180,12 @@ export default function ContainerDetail() {
               <Camera className="w-3.5 h-3.5" />
               快照
             </ActionButton>
+            {isKVM && (
+              <ActionButton onClick={() => setShowInstallationMedia(true)}>
+                <Disc3 className="w-3.5 h-3.5" />
+                {t('KVM 安装介质')}
+              </ActionButton>
+            )}
             <ActionButton onClick={openReinstall} disabled={!!taskStatus || isExpired}>
               <RefreshCw className="w-3.5 h-3.5" />
               {isExpired ? '已到期' : taskStatus === 'reinstall' ? taskActionLabels['reinstall'] : '重装'}
@@ -1161,39 +1198,46 @@ export default function ContainerDetail() {
             )}
           </div>
         </div>
-      </div>
+      </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 sm:gap-5">
         <Panel
           title="连接信息"
-          extra={!isWindows ? (
-            <button
+          extra={!isWindows && managedLogin ? (
+            <Button variant="ghost"
               onClick={openResetPassword}
-              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-100 hover:text-black"
+              className="h-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs"
             >
               <Key className="w-3.5 h-3.5" />
               重置 SSH 密码
-            </button>
+            </Button>
           ) : undefined}
         >
-          {isWindows ? (
+          {isKVM && manualInstall === null ? (
+            <p className="text-xs leading-5 text-muted-foreground">{t('正在读取安装方式…')}</p>
+          ) : isManualInstall ? (
+            <>
+              <PlainRow label={t('控制台')} value="WebVNC" />
+              <p className="text-xs leading-5 text-muted-foreground">{t('系统账号、密码和网络由你在安装程序中设置，面板不会生成初始登录凭据。')}</p>
+            </>
+          ) : isWindows ? (
             <>
               <PlainRow label="RDP 地址" value={publicEndpoint} mono />
               <PlainRow label="用户名" value="Administrator" mono />
               <div className="flex items-center justify-between gap-3">
-                <span className="text-gray-500">管理员密码</span>
+                <span className="text-muted-foreground">管理员密码</span>
                 <div className="flex items-center gap-1 min-w-0">
                   <span
-                    className={`font-mono text-xs cursor-pointer select-none ${showPassword ? 'text-black' : 'text-gray-400 tracking-[0.25em]'}`}
+                    className={`font-mono text-xs cursor-pointer select-none  ${showPassword ? "text-foreground" : "text-muted-foreground tracking-[0.25em]"}`}
                     onClick={() => setShowPassword(!showPassword)}
                     title={showPassword ? '点击隐藏' : '点击显示'}
                   >
                     {container.ssh_password ? (showPassword ? container.ssh_password : '••••••••') : '-'}
                   </span>
                   {container.ssh_password && (
-                    <button onClick={() => copyText(container.ssh_password)} className="p-0.5 text-gray-400 hover:text-black rounded" title="复制">
+                    <Button variant="ghost" onClick={() => copyText(container.ssh_password)} className="h-auto p-0.5" title="复制">
                       <Copy className="w-3 h-3" />
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -1206,19 +1250,19 @@ export default function ContainerDetail() {
               <PlainRow label="SSH 地址" value={publicEndpoint} mono copyValue={sshCommand} onCopy={copyText} />
               <PlainRow label="用户名" value="root" mono />
               <div className="flex items-center justify-between gap-3">
-                <span className="text-gray-500">SSH 密码</span>
+                <span className="text-muted-foreground">SSH 密码</span>
                 <div className="flex items-center gap-1 min-w-0">
                   <span
-                    className={`font-mono text-xs cursor-pointer select-none ${showPassword ? 'text-black' : 'text-gray-400 tracking-[0.25em]'}`}
+                    className={`font-mono text-xs cursor-pointer select-none  ${showPassword ? "text-foreground" : "text-muted-foreground tracking-[0.25em]"}`}
                     onClick={() => setShowPassword(!showPassword)}
                     title={showPassword ? '点击隐藏' : '点击显示'}
                   >
                     {container.ssh_password ? (showPassword ? container.ssh_password : '••••••••') : '-'}
                   </span>
                   {container.ssh_password && (
-                    <button onClick={() => copyText(container.ssh_password)} className="p-0.5 text-gray-400 hover:text-black rounded" title="复制">
+                    <Button variant="ghost" onClick={() => copyText(container.ssh_password)} className="h-auto p-0.5" title="复制">
                       <Copy className="w-3 h-3" />
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -1227,12 +1271,12 @@ export default function ContainerDetail() {
         </Panel>
 
         <Panel title="资源配置" extra={!isSubUser ? (
-          <button onClick={openResourceEdit} className="text-gray-400 hover:text-black transition-colors" title="编辑资源限制">
+          <Button variant="ghost" onClick={openResourceEdit} className="h-auto p-0" title="编辑资源限制">
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
-          </button>
+          </Button>
         ) : undefined}>
           <PlainRow label="vCPU" value={`${container.vcpu} 核`} />
           <PlainRow label="内存" value={`${container.ram_mb} MB`} />
@@ -1247,22 +1291,22 @@ export default function ContainerDetail() {
           <PlainRow label="内网 IP" value={container.ip || '-'} mono />
           <PlainRow label="Public IPv4" value={assignedIPv4List.length ? assignedIPv4List.join(', ') : '-'} mono copyValue={assignedIPv4List[0]} onCopy={copyText}>
             {!isSubUser && (
-              <button onClick={openIPAssign} className="ml-1 p-0.5 text-gray-400 hover:text-black rounded" title="修改公网 IP 分配">
+              <Button variant="ghost" onClick={openIPAssign} className="h-auto ml-1 p-0.5" title="修改公网 IP 分配">
                 <Pencil className="w-3 h-3" />
-              </button>
+              </Button>
             )}
           </PlainRow>
           <PlainRow label="IPv6" value={ipv6List.length ? ipv6List.join(', ') : '-'} mono copyValue={ipv6List[0]} onCopy={copyText}>
             {!isSubUser && (
               <>
                 {ipv6List.length === 0 && (
-                  <button onClick={handleAssignIPv6} disabled={actionLoading === 'ipv6'} className="ml-1 px-1.5 py-0.5 text-[10px] text-gray-600 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50">
+                  <Button variant="outline" onClick={handleAssignIPv6} disabled={actionLoading === 'ipv6'} className="h-auto ml-1 px-1.5 py-0.5 text-[10px]">
                     Assign
-                  </button>
+                  </Button>
                 )}
-                <button onClick={openIPAssign} className="ml-1 p-0.5 text-gray-400 hover:text-black rounded" title="修改公网 IP 分配">
+                <Button variant="ghost" onClick={openIPAssign} className="h-auto ml-1 p-0.5" title="修改公网 IP 分配">
                   <Pencil className="w-3 h-3" />
-                </button>
+                </Button>
               </>
             )}
           </PlainRow>
@@ -1271,13 +1315,27 @@ export default function ContainerDetail() {
           <PlainRow label="创建时间" value={container.created_at} />
           <PlainRow label="到期时间" value={formatExpiration(container.expires_at)}>
             {!isSubUser && (
-              <button onClick={() => { setEditExpiry(container.expires_at ? container.expires_at.slice(0, 10) : ''); setShowExpiryEdit(true) }} className="ml-1 p-0.5 text-gray-400 hover:text-black rounded" title="修改到期时间">
+              <Button variant="ghost" onClick={() => { setEditExpiry(container.expires_at ? container.expires_at.slice(0, 10) : ''); setShowExpiryEdit(true) }} className="h-auto ml-1 p-0.5" title="修改到期时间">
                 <Pencil className="w-3 h-3" />
-              </button>
+              </Button>
             )}
           </PlainRow>
         </Panel>
       </div>
+
+      {isKVM && <KVMInstallMedia
+        key={containerIdentifier}
+        open={showInstallationMedia}
+        onClose={() => setShowInstallationMedia(false)}
+        containerId={containerIdentifier}
+        status={container.status}
+        taskBusy={!!taskStatus || !!actionLoading}
+        isSubUser={isSubUser}
+        canOpenVNC={canOpenVNC}
+        onOpenVNC={() => { setShowInstallationMedia(false); setShowVNC(true) }}
+        onManualInstallChange={setManualInstall}
+        onUpdated={fetchContainer}
+      />}
 
       {(hasIPv6NAT || (container.ipv6_port_mapping_limit || 0) > 0) && (
         <IPv6PortMappings
@@ -1291,9 +1349,9 @@ export default function ContainerDetail() {
 
       {/* Container resource ring stats (matching host dashboard style) */}
       {container && (
-        <div className="bg-white border border-gray-200 rounded-lg p-5">
-          <h2 className="text-sm font-semibold text-black mb-4">状态</h2>
-          <div className="grid grid-cols-4 gap-4">
+        <Card className="p-4 [container-type:inline-size] sm:p-5">
+          <h2 className="text-sm font-semibold text-foreground mb-4">状态</h2>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-6 [@container(min-width:26rem)]:grid-cols-4">
             <RingStat
               value={cpuPct}
               label="CPU"
@@ -1315,83 +1373,83 @@ export default function ContainerDetail() {
               subLabel={`${formatGB(usage?.disk_usage_bytes || 0)} / ${container.disk_gb} GB`}
             />
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Traffic usage bar */}
       {container && (
-        <div className="bg-white border border-gray-200 rounded-lg p-5">
+        <Card className="p-5">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-black">月流量</h2>
+            <h2 className="text-sm font-semibold text-foreground">月流量</h2>
             {!isSubUser && (
-              <button
+              <Button variant="ghost"
                 onClick={openTrafficEdit}
-                className="text-gray-400 hover:text-black transition-colors"
+                className="h-auto p-0"
                 title="编辑流量限制"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                   <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                 </svg>
-              </button>
+              </Button>
             )}
           </div>
           <TrafficBar container={container} />
-        </div>
+        </Card>
       )}
       {/* Traffic limit edit modal */}
       {showTrafficEdit && (
-        <Modal title="编辑月流量限制" onClose={() => setShowTrafficEdit(false)}>
+        <Modal dismissible={!(savingTraffic)} title="编辑月流量限制" onClose={() => setShowTrafficEdit(false)}>
           <div className="space-y-3">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">流量统计模式</label>
-              <select
+              <Label className="block text-xs text-muted-foreground mb-1">流量统计模式</Label>
+              <NativeSelect wrapperClassName="w-full"
                 value={trafficEdit.mode}
                 onChange={(e) => setTrafficEdit({ ...trafficEdit, mode: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                className="w-full px-3 py-2 text-sm h-auto pr-9"
               >
                 <option value="total">双向合并统计</option>
                 <option value="in_out">入站/出站分开统计</option>
-              </select>
+              </NativeSelect>
             </div>
             {trafficEdit.mode === 'total' ? (
               <div>
-                <label className="block text-xs text-gray-500 mb-1">月流量上限 (GB，0=不限制)</label>
-                <input
+                <Label className="block text-xs text-muted-foreground mb-1">月流量上限 (GB，0=不限制)</Label>
+                <Input
                   type="number"
                   min="0"
                   value={trafficEdit.monthly}
                   onChange={(e) => setTrafficEdit({ ...trafficEdit, monthly: Math.max(0, Number(e.target.value)) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                  className="w-full px-3 py-2 text-sm h-auto"
                 />
               </div>
             ) : (
               <>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">入站上限 (GB，0=不限制)</label>
-                  <input
+                  <Label className="block text-xs text-muted-foreground mb-1">入站上限 (GB，0=不限制)</Label>
+                  <Input
                     type="number"
                     min="0"
                     value={trafficEdit.inGB}
                     onChange={(e) => setTrafficEdit({ ...trafficEdit, inGB: Math.max(0, Number(e.target.value)) })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                    className="w-full px-3 py-2 text-sm h-auto"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">出站上限 (GB，0=不限制)</label>
-                  <input
+                  <Label className="block text-xs text-muted-foreground mb-1">出站上限 (GB，0=不限制)</Label>
+                  <Input
                     type="number"
                     min="0"
                     value={trafficEdit.outGB}
                     onChange={(e) => setTrafficEdit({ ...trafficEdit, outGB: Math.max(0, Number(e.target.value)) })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                    className="w-full px-3 py-2 text-sm h-auto"
                   />
                 </div>
               </>
             )}
             <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setShowTrafficEdit(false)} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50">取消</button>
-              <button onClick={saveTrafficLimit} disabled={savingTraffic} className="px-4 py-2 text-sm bg-black text-white rounded-md hover:bg-gray-800 disabled:opacity-50">{savingTraffic ? '保存中...' : '保存'}</button>
+              <Button variant="outline" onClick={() => setShowTrafficEdit(false)} disabled={savingTraffic} className="h-auto px-4 py-2 text-sm">取消</Button>
+              <Button variant="default" onClick={saveTrafficLimit} disabled={savingTraffic} className="h-auto px-4 py-2 text-sm">{savingTraffic ? '保存中...' : '保存'}</Button>
             </div>
           </div>
         </Modal>
@@ -1400,54 +1458,54 @@ export default function ContainerDetail() {
       <ResourceStatsPanel range={range} onRangeChange={setRange} onRefresh={() => { fetchContainer(); fetchUsage() }} charts={charts} />
 
       {showResetPassword && (
-        <Modal title="重置 SSH 密码" onClose={() => setShowResetPassword(false)}>
+        <Modal dismissible={!(resetPasswordSaving)} title="重置 SSH 密码" onClose={() => setShowResetPassword(false)}>
           <div className="space-y-4">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">新 SSH 密码</label>
+              <Label className="block text-xs text-muted-foreground mb-1">新 SSH 密码</Label>
               <div className="flex gap-2">
-                <input
+                <Input
                   type="text"
                   value={resetPasswordDraft}
                   onChange={(e) => { setResetPasswordDraft(e.target.value); setResetPasswordResult('') }}
                   placeholder="请输入 8-64 位，至少包含字母和数字"
-                  className={inputClass}
+                  className={`${inputClass} h-auto`}
                 />
-                <button
+                <Button variant="outline"
                   type="button"
                   onClick={generateResetPassword}
-                  className="px-3 py-2 border border-gray-300 rounded-md text-gray-600 hover:bg-gray-50 hover:text-black"
+                  className="h-auto px-3 py-2"
                   title="生成随机密码"
                 >
                   <RefreshCw className="w-4 h-4" />
-                </button>
+                </Button>
               </div>
               {resetPasswordDraft && resetPasswordError(resetPasswordDraft) && (
                 <p className="mt-1 text-xs text-red-600">{resetPasswordError(resetPasswordDraft)}</p>
               )}
             </div>
             {resetPasswordResult && (
-              <div className="p-3 bg-green-50 border border-green-200 rounded-md">
+              <Alert variant="default" className="p-3">
                 <div className="text-xs text-green-700 mb-1">密码已修改成功</div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-sm text-green-900 break-all">{resetPasswordResult}</span>
-                  <button onClick={() => copyText(resetPasswordResult)} className="p-1 text-green-700 hover:text-green-900 rounded" title="复制">
+                  <Button variant="ghost" onClick={() => copyText(resetPasswordResult)} className="h-auto p-1" title="复制">
                     <Copy className="w-4 h-4" />
-                  </button>
+                  </Button>
                 </div>
-              </div>
+              </Alert>
             )}
-            <p className="text-xs text-gray-500 leading-relaxed">
+            <p className="text-xs text-muted-foreground leading-relaxed">
               Linux LXC/KVM 修改 root SSH 密码通常无需重启；KVM 需要虚拟机运行且 guest agent 或 SSH 可用。
             </p>
             <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setShowResetPassword(false)} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50">取消</button>
-              <button
+              <Button variant="outline" onClick={() => setShowResetPassword(false)} disabled={resetPasswordSaving} className="h-auto px-4 py-2 text-sm">取消</Button>
+              <Button variant="default"
                 onClick={handleResetPassword}
                 disabled={resetPasswordSaving || !resetPasswordDraft || !!resetPasswordError(resetPasswordDraft)}
-                className="px-4 py-2 text-sm bg-black text-white rounded-md hover:bg-gray-800 disabled:opacity-50"
+                className="h-auto px-4 py-2 text-sm"
               >
                 {resetPasswordSaving ? '修改中...' : '确认修改'}
-              </button>
+              </Button>
             </div>
           </div>
         </Modal>
@@ -1459,7 +1517,7 @@ export default function ContainerDetail() {
             {isRunning ? (
               <WebSSHViewer containerName={container.name} onClose={() => setShowSSH(false)} />
             ) : (
-              <div className="h-full flex items-center justify-center bg-gray-950 text-gray-400 rounded-md">容器未运行，请先开机</div>
+              <div className="h-full flex items-center justify-center bg-gray-950 text-muted-foreground rounded-md">容器未运行，请先开机</div>
             )}
           </div>
         </Modal>
@@ -1468,29 +1526,30 @@ export default function ContainerDetail() {
       {showVNC && (
         <Modal
           title={`WebVNC - ${container.name}`}
+          fullScreen={vncFullscreen}
           onClose={() => setShowVNC(false)}
           wide
           flush
           extra={
-            <button
+            <Button variant="ghost"
               onClick={toggleVNCFullscreen}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-600 hover:text-black hover:bg-gray-100 rounded"
+              className="h-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs"
               title={vncFullscreen ? '退出全屏' : '全屏显示'}
             >
               {vncFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               {vncFullscreen ? '退出全屏' : '全屏'}
-            </button>
+            </Button>
           }
         >
           <div
             ref={vncFullscreenRef}
-            className={`bg-white ${vncFullscreen ? 'fixed inset-0 z-[70] p-3' : 'h-[calc(92vh-112px)] min-h-[420px] p-5'}`}
+            className={`bg-card  ${vncFullscreen ? "h-full min-h-0 p-3" : "h-[calc(92vh-112px)] min-h-[420px] p-5"}`}
           >
             <div className="h-full">
             {canOpenVNC ? (
               <WebVNCViewer containerName={container.name} onClose={() => setShowVNC(false)} />
             ) : (
-              <div className="h-full flex items-center justify-center bg-gray-950 text-gray-400 rounded-md">VNC 控制台暂不可用，请确认 KVM 虚拟机已开机并刷新页面</div>
+              <div className="h-full flex items-center justify-center bg-gray-950 text-muted-foreground rounded-md">VNC 控制台暂不可用，请确认 KVM 虚拟机已开机并刷新页面</div>
             )}
             </div>
           </div>
@@ -1500,6 +1559,7 @@ export default function ContainerDetail() {
       {showSnapshots && (
         <Modal
           title="快照"
+          dismissible={!snapshotBusy}
           onClose={() => {
             setShowSnapshots(false)
             setEditingSnapshotQuota(false)
@@ -1507,86 +1567,82 @@ export default function ContainerDetail() {
           wide
           extra={
             <div className="flex items-center gap-2">
-              <button
+              <Button variant={snapshotSchedule?.enabled ? 'default' : 'outline'}
                 onClick={openSnapshotSchedule}
                 disabled={!!snapshotBusy || storageLoading || !snapshotStorageReady}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs ${
-                  snapshotSchedule?.enabled
-                    ? 'border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                    : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
-                } disabled:opacity-50`}
+                className="h-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
               >
                 <Clock className="w-3.5 h-3.5" />
                 {snapshotBusy === 'schedule' ? '处理中...' : snapshotSchedule?.enabled ? '定时设置' : '定时快照'}
-              </button>
-              <button
+              </Button>
+              <Button variant="default"
                 onClick={handleCreateSnapshot}
                 disabled={!!snapshotBusy || storageLoading || !snapshotStorageReady || (isSubUser && snapshots.length >= snapshotQuota)}
-                className="inline-flex items-center gap-1.5 rounded-md bg-black px-3 py-1.5 text-xs text-white hover:bg-gray-800 disabled:opacity-50"
+                className="h-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
               >
                 <Camera className="w-3.5 h-3.5" />
                 {snapshotBusy === 'create' ? '创建中...' : '新建快照'}
-              </button>
+              </Button>
             </div>
           }
         >
           <div className="space-y-4">
             {storageLoading && !isSubUser && (
-              <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+              <Card className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground">
                 <RefreshCw className="h-4 w-4 animate-spin" />
                 正在检查存储配置...
-              </div>
+              </Card>
             )}
             {!storageLoading && !snapshotStorageReady && (
-              <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <Alert variant="default" className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
                 <span>尚未开启快照存储，无法新建或启用定时快照。</span>
-                <button onClick={() => { setShowSnapshots(false); navigate('/storage') }} className="shrink-0 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-amber-100">
+                <Button variant="outline" onClick={() => { setShowSnapshots(false); navigate('/storage') }} className="h-auto shrink-0 px-3 py-1.5 text-xs font-medium">
                   去开启
-                </button>
-              </div>
+                </Button>
+              </Alert>
             )}
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
+            <Card className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-xs text-muted-foreground">
               <div>
                 快照数量：
-                <span className="font-mono text-gray-900">
+                <span className="font-mono text-foreground">
                   {snapshots.length}
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <span>子用户配额：</span>
-                <span className="font-mono text-gray-900">{snapshotQuota}</span>
+                <span className="font-mono text-foreground">{snapshotQuota}</span>
                 {!isSubUser && (
-                  <button
+                  <Button variant="outline"
                     onClick={() => {
                       setSnapshotQuotaDraft(snapshotQuota)
                       setEditingSnapshotQuota((value) => !value)
                     }}
-                    className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-50"
+                    className="h-auto inline-flex items-center gap-1 px-2 py-1 text-[11px]"
                     disabled={snapshotBusy === 'quota'}
                   >
                     <Pencil className="w-3 h-3" />
                     修改
-                  </button>
+                  </Button>
                 )}
               </div>
               <div>
                 定时状态：
-                <span className="text-gray-900">
+                <span className="text-foreground">
                   {snapshotSchedule?.enabled ? `已开启，每 ${formatScheduleInterval(snapshotSchedule.interval_hours || 24)}，${snapshotSchedule.time || '03:00'} 执行` : '未开启'}
                 </span>
               </div>
               {snapshotSchedule?.next_run && (
-                <div>下次执行：<span className="font-mono text-gray-900">{formatDateTime(snapshotSchedule.next_run)}</span></div>
+                <div>下次执行：<span className="font-mono text-foreground">{formatDateTime(snapshotSchedule.next_run)}</span></div>
               )}
-            </div>
+            </Card>
 
             {!isSubUser && snapshotStoragePools.length > 0 && (
-              <div className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+              <Card className="flex flex-wrap items-end gap-3 px-4 py-3">
                 <Field label="新建快照存储磁盘">
-                  <select
+                  <NativeSelect wrapperClassName="w-fit"
                     value={snapshotStoragePoolID}
                     onChange={(event) => setSnapshotStoragePoolID(event.target.value)}
-                    className="w-72 px-3 py-2 border border-gray-300 rounded-md text-sm text-black bg-white focus:outline-none focus:ring-2 focus:ring-black focus:border-black"
+                    className="w-72 px-3 py-2 text-sm h-auto pr-9"
                   >
                     <option value="">自动选择（默认盘优先，空间不足自动切换）</option>
                     {snapshotStoragePools.map((pool) => (
@@ -1594,45 +1650,45 @@ export default function ContainerDetail() {
                         {pool.name} · {pool.mount_point || pool.path}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </Field>
-                <div className="pb-2 text-xs text-gray-400">仅影响手动新建快照；定时快照使用默认磁盘。</div>
-              </div>
+                <div className="pb-2 text-xs text-muted-foreground">仅影响手动新建快照；定时快照使用默认磁盘。</div>
+              </Card>
             )}
 
             {editingSnapshotQuota && !isSubUser && (
-              <div className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+              <Card className="flex flex-wrap items-end gap-3 px-4 py-3">
                 <Field label="子用户每台容器快照上限">
-                  <input
+                  <Input
                     type="number"
                     min={1}
                     max={999}
                     value={snapshotQuotaDraft}
                     onChange={(event) => setSnapshotQuotaDraft(Math.max(1, Math.round(Number(event.target.value) || 1)))}
-                    className="w-44 px-3 py-2 border border-gray-300 rounded-md text-sm text-black bg-white focus:outline-none focus:ring-2 focus:ring-black focus:border-black"
+                    className="w-44 px-3 py-2 text-sm h-auto"
                   />
                 </Field>
                 <div className="flex gap-2 pb-0.5">
-                  <button
+                  <Button variant="ghost"
                     onClick={() => {
                       setEditingSnapshotQuota(false)
                       setSnapshotQuotaDraft(snapshotQuota)
                     }}
-                    className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
+                    className="h-auto px-3 py-2 text-sm"
                     disabled={snapshotBusy === 'quota'}
                   >
                     取消
-                  </button>
-                  <button
+                  </Button>
+                  <Button variant="default"
                     onClick={saveSnapshotQuota}
                     disabled={snapshotBusy === 'quota'}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm bg-black text-white rounded-md hover:bg-gray-800 disabled:opacity-50"
+                    className="h-auto inline-flex items-center gap-1.5 px-3 py-2 text-sm"
                   >
                     <Save className="w-4 h-4" />
                     {snapshotBusy === 'quota' ? '保存中...' : '保存'}
-                  </button>
+                  </Button>
                 </div>
-              </div>
+              </Card>
             )}
 
             <SnapshotTable
@@ -1646,50 +1702,50 @@ export default function ContainerDetail() {
       )}
 
       {showSnapshotSchedule && (
-        <Modal title="定时快照" onClose={() => setShowSnapshotSchedule(false)}>
+        <Modal dismissible={!(!!snapshotBusy)} title="定时快照" onClose={() => setShowSnapshotSchedule(false)}>
           <div className="space-y-4">
             <Field label="自动快照周期">
-              <select
+              <NativeSelect wrapperClassName="w-full"
                 value={snapshotScheduleDraft.intervalHours}
                 onChange={(e) => setSnapshotScheduleDraft({ ...snapshotScheduleDraft, intervalHours: Number(e.target.value) })}
-                className={inputClass}
+                className={`${inputClass} h-auto pr-9`}
               >
                 <option value={24}>1 天</option>
                 <option value={72}>3 天</option>
                 <option value={168}>7 天</option>
                 <option value={336}>14 天</option>
-              </select>
+              </NativeSelect>
             </Field>
             <Field label="执行时间">
-              <input
+              <Input
                 type="time"
                 value={snapshotScheduleDraft.time}
                 onChange={(e) => setSnapshotScheduleDraft({ ...snapshotScheduleDraft, time: e.target.value || '03:00' })}
-                className={inputClass}
+                className={`${inputClass} h-auto`}
               />
             </Field>
-            <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+            <Card className="px-3 py-2 text-xs text-muted-foreground">
               {`每 ${formatScheduleInterval(snapshotScheduleDraft.intervalHours)} 在 ${snapshotScheduleDraft.time || '03:00'} 执行。`}
-            </div>
+            </Card>
             <div className="flex justify-between gap-3 pt-2">
               {snapshotSchedule?.enabled ? (
-                <button
+                <Button variant="destructive"
                   onClick={() => saveSnapshotSchedule(false)}
                   disabled={snapshotBusy === 'schedule'}
-                  className="px-4 py-2 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50 disabled:opacity-50"
+                  className="h-auto px-4 py-2 text-sm"
                 >
                   关闭定时
-                </button>
+                </Button>
               ) : <div />}
               <div className="flex gap-2">
-                <button onClick={() => setShowSnapshotSchedule(false)} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">取消</button>
-                <button
+                <Button variant="ghost" onClick={() => setShowSnapshotSchedule(false)} disabled={!!snapshotBusy} className="h-auto px-4 py-2 text-sm">取消</Button>
+                <Button variant="default"
                   onClick={() => saveSnapshotSchedule(true)}
                   disabled={snapshotBusy === 'schedule'}
-                  className="px-4 py-2 text-sm bg-black text-white rounded-md hover:bg-gray-800 disabled:opacity-50"
+                  className="h-auto px-4 py-2 text-sm"
                 >
                   {snapshotBusy === 'schedule' ? '保存中...' : '保存'}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -1697,51 +1753,46 @@ export default function ContainerDetail() {
       )}
 
       {showFirewall && (
-        <Modal title="防火墙设置" onClose={() => { setShowFirewall(false); setShowFirewallEditor(false); setEditingFirewallRule(null) }} wide extra={
-          <button
+        <Modal dismissible={!(firewallSaving)} title="防火墙设置" onClose={() => { setShowFirewall(false); setShowFirewallEditor(false); setEditingFirewallRule(null) }} wide extra={
+          <Button variant="default"
             onClick={addFirewallRule}
             disabled={firewallNetworkOptions.length === 0}
             title={firewallNetworkOptions.length === 0 ? '当前容器没有可配置的 NAT、公网 IPv4 或 IPv6' : undefined}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-md text-xs hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
           >
             <Plus className="w-3.5 h-3.5" />添加规则
-          </button>
+          </Button>
         }>
           <div className="space-y-5">
             {/* Global toggle */}
             <div className="flex items-center justify-between gap-4">
               <div>
-                <div className="text-sm font-medium text-gray-800">防火墙</div>
-                <div className="text-xs text-gray-500">
+                <div className="text-sm font-medium text-foreground">防火墙</div>
+                <div className="text-xs text-muted-foreground">
                   {firewallEnabled
                     ? (firewallDefaultAction === 'DROP' ? '已启用，未匹配规则的流量将被拒绝' : '已启用，未匹配规则的流量将被放行')
                     : '未启用时不接管该容器流量'}
                 </div>
               </div>
-              <button
-                onClick={() => setFirewallEnabled(!firewallEnabled)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${firewallEnabled ? 'bg-emerald-500' : 'bg-gray-300'}`}
-              >
-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${firewallEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
-              </button>
+              <Switch checked={firewallEnabled} onCheckedChange={setFirewallEnabled} aria-label="启用防火墙" />
             </div>
 
-            <div className="flex items-center justify-between gap-4 rounded-md border border-gray-200 px-3 py-2">
+            <Card className="flex items-center justify-between gap-4 px-3 py-2">
               <div>
-                <div className="text-sm font-medium text-gray-800">默认动作</div>
-                <div className="text-xs text-gray-500">没有命中下方规则时如何处理</div>
+                <div className="text-sm font-medium text-foreground">默认动作</div>
+                <div className="text-xs text-muted-foreground">没有命中下方规则时如何处理</div>
               </div>
-              <select
+              <NativeSelect wrapperClassName="w-fit"
                 value={firewallDefaultAction}
                 onChange={(e) => setFirewallDefaultAction(e.target.value as 'ACCEPT' | 'DROP')}
-                className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-black focus:outline-none focus:ring-2 focus:ring-black disabled:opacity-60"
+                className="px-2.5 py-1.5 text-xs h-auto pr-9"
               >
                 <option value="DROP">未匹配拒绝</option>
                 <option value="ACCEPT">未匹配放行</option>
-              </select>
-            </div>
+              </NativeSelect>
+            </Card>
 
-            <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+            <Alert variant="default" className="px-3 py-2 text-xs">
               <div className="font-medium text-blue-900">网络范围</div>
               <div className="mt-1">
                 {firewallNetworkOptions.length > 0
@@ -1752,89 +1803,87 @@ export default function ContainerDetail() {
                 {hasIndependentIPv6 ? ' IPv6 规则覆盖该容器已分配的 IPv6 地址。' : ''}
                 {hasIPv6NAT ? ' IPv6 NAT 规则覆盖容器的 ULA 内网地址，入站填写容器内部端口，不是宿主机映射端口。' : ''}
               </div>
-            </div>
+            </Alert>
 
             {firewallMessage && (
-              <div className={`rounded-md px-3 py-2 text-xs ${firewallMessage.type === 'success' ? 'border border-emerald-100 bg-emerald-50 text-emerald-700' : 'border border-red-100 bg-red-50 text-red-700'}`}>
+              <Alert variant="default" className="px-3 py-2 text-xs">
                 {firewallMessage.text}
-              </div>
+              </Alert>
             )}
 
             {/* Rules table */}
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium">状态</th>
-                    <th className="px-3 py-2 text-left font-medium">网络</th>
-                    <th className="px-3 py-2 text-left font-medium">方向</th>
-                    <th className="px-3 py-2 text-left font-medium">协议</th>
-                    <th className="px-3 py-2 text-left font-medium">端口</th>
-                    <th className="px-3 py-2 text-left font-medium">来源/目标 IP</th>
-                    <th className="px-3 py-2 text-left font-medium">动作</th>
-                    <th className="px-3 py-2 text-left font-medium">描述</th>
-                    <th className="px-3 py-2 text-right font-medium">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
+              <Table className="w-full text-sm">
+                <TableHeader className="text-xs text-muted-foreground">
+                  <TableRow>
+                    <TableHead className="px-3 py-2 text-left font-medium">状态</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">网络</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">方向</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">协议</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">端口</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">来源/目标 IP</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">动作</TableHead>
+                    <TableHead className="px-3 py-2 text-left font-medium">描述</TableHead>
+                    <TableHead className="px-3 py-2 text-right font-medium">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className="divide-y divide-border">
                   {firewallRules.map((rule) => (
-                    <tr key={rule.id} className={!rule.enabled ? 'opacity-50' : ''}>
-                      <td className="px-3 py-2">
-                        <button onClick={() => toggleFirewallRule(rule.id)} className={`inline-flex h-4 w-7 items-center rounded-full transition-colors ${rule.enabled ? 'bg-emerald-500' : 'bg-gray-300'}`}>
-                          <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${rule.enabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                        </button>
-                      </td>
-                      <td className="px-3 py-2">
-                        <span className="inline-flex rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-700">
+                    <TableRow key={rule.id} className={!rule.enabled ? "opacity-50" : ""}>
+                      <TableCell className="px-3 py-2">
+                        <Switch checked={rule.enabled} onCheckedChange={() => toggleFirewallRule(rule.id)} aria-label={`启用规则 ${rule.description || rule.port || rule.id}`} />
+                      </TableCell>
+                      <TableCell className="px-3 py-2">
+                        <Badge variant="secondary" className="inline-flex px-1.5 py-0.5 text-xs font-medium">
                           {(rule.network || 'ipv4') === 'ipv6' ? 'IPv6' : (rule.network || 'ipv4') === 'all' ? '全部' : 'IPv4'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2">
-                        <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${rule.direction === 'in' ? 'bg-blue-50 text-blue-700' : 'bg-orange-50 text-orange-700'}`}>
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="px-3 py-2">
+                        <Badge variant="secondary" className="text-xs">
                           {rule.direction === 'in' ? '入站' : '出站'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 font-mono text-xs">{rule.protocol.toUpperCase()}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{rule.port || '全部'}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{rule.source_ip || '任意'}</td>
-                      <td className="px-3 py-2">
-                        <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${rule.action === 'ACCEPT' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs">{rule.protocol.toUpperCase()}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs">{rule.port || '全部'}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs">{rule.source_ip || '任意'}</TableCell>
+                      <TableCell className="px-3 py-2">
+                        <Badge variant="secondary" className="text-xs">
                           {rule.action === 'ACCEPT' ? '放行' : '拒绝'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-xs text-gray-600 max-w-32 truncate">{rule.description || '-'}</td>
-                      <td className="px-3 py-2 text-right">
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="px-3 py-2 text-xs text-muted-foreground max-w-32 truncate">{rule.description || '-'}</TableCell>
+                      <TableCell className="px-3 py-2 text-right">
                         <div className="inline-flex items-center gap-1">
-                          <button onClick={() => {
+                          <Button variant="ghost" aria-label={`编辑规则 ${rule.description || rule.id}`} onClick={() => {
                             const currentNetwork = (rule.network || 'ipv4') as NonNullable<FirewallRule['network']>
                             const network = firewallNetworkOptions.some((option) => option.value === currentNetwork)
                               ? currentNetwork
                               : (firewallNetworkOptions[0]?.value || currentNetwork)
                             setEditingFirewallRule({ ...rule, network })
                             setShowFirewallEditor(true)
-                          }} className="p-1.5 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100">
+                          }} className="h-auto p-1.5">
                             <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button onClick={() => deleteFirewallRule(rule.id)} className="p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50">
+                          </Button>
+                          <Button variant="destructive" aria-label={`删除规则 ${rule.description || rule.id}`} onClick={() => deleteFirewallRule(rule.id)} className="h-auto p-1.5">
                             <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          </Button>
                         </div>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
                   {firewallRules.length === 0 && (
-                    <tr><td colSpan={9} className="px-3 py-6 text-center text-xs text-gray-400">暂无防火墙规则</td></tr>
+                    <TableRow><TableCell colSpan={9} className="px-3 py-6 text-center text-xs text-muted-foreground">暂无防火墙规则</TableCell></TableRow>
                   )}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
 
             {/* Save button */}
             <div className="flex justify-end">
-              <button onClick={saveFirewall} disabled={firewallSaving} className="inline-flex items-center gap-1.5 px-4 py-2 bg-black text-white rounded-md text-sm hover:bg-gray-800 disabled:opacity-50">
+              <Button variant="default" onClick={saveFirewall} disabled={firewallSaving} className="h-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm">
                 <Save className="w-3.5 h-3.5" />
                 {firewallSaving ? '保存中...' : '保存'}
-              </button>
+              </Button>
             </div>
           </div>
         </Modal>
@@ -1845,23 +1894,23 @@ export default function ContainerDetail() {
           <div className="space-y-4">
             <Field label="网络">
               {firewallNetworkOptions.length > 0 ? (
-                <select value={editingFirewallRule.network || firewallNetworkOptions[0].value} onChange={(e) => setEditingFirewallRule({ ...editingFirewallRule, network: e.target.value as FirewallRule['network'] })} className={inputClass}>
+                <NativeSelect wrapperClassName="w-full" value={editingFirewallRule.network || firewallNetworkOptions[0].value} onChange={(e) => setEditingFirewallRule({ ...editingFirewallRule, network: e.target.value as FirewallRule['network'] })} className={`${inputClass} h-auto pr-9`}>
                   {firewallNetworkOptions.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
-                </select>
+                </NativeSelect>
               ) : (
-                <input value="当前容器没有可配置网络" disabled className={`${inputClass} bg-gray-100 text-gray-400`} />
+                <Input value="当前容器没有可配置网络" disabled className={`  ${inputClass} h-auto`} />
               )}
             </Field>
             <Field label="方向">
-              <select value={editingFirewallRule.direction} onChange={(e) => setEditingFirewallRule({ ...editingFirewallRule, direction: e.target.value as 'in' | 'out' })} className={inputClass}>
+              <NativeSelect wrapperClassName="w-full" value={editingFirewallRule.direction} onChange={(e) => setEditingFirewallRule({ ...editingFirewallRule, direction: e.target.value as 'in' | 'out' })} className={`${inputClass} h-auto pr-9`}>
                 <option value="in">入站 (Inbound)</option>
                 <option value="out">出站 (Outbound)</option>
-              </select>
+              </NativeSelect>
             </Field>
             <Field label="协议">
-              <select
+              <NativeSelect wrapperClassName="w-full"
                 value={editingFirewallRule.protocol}
                 onChange={(e) => {
                   const protocol = e.target.value as FirewallRule['protocol']
@@ -1871,13 +1920,13 @@ export default function ContainerDetail() {
                     port: protocol === 'tcp' || protocol === 'udp' ? editingFirewallRule.port : '',
                   })
                 }}
-                className={inputClass}
+                className={`${inputClass} h-auto pr-9`}
               >
                 <option value="tcp">TCP</option>
                 <option value="udp">UDP</option>
                 <option value="icmp">ICMP</option>
                 <option value="all">全部</option>
-              </select>
+              </NativeSelect>
             </Field>
             <Field
               label="端口"
@@ -1889,69 +1938,69 @@ export default function ContainerDetail() {
                   : '出站填远端目标端口；留空为全部端口，支持: 22 | 80,443 | 8000-9000')
                 : '端口仅适用于 TCP/UDP'}
             >
-              <input
+              <Input
                 value={editingFirewallRule.port}
                 onChange={(e) => setEditingFirewallRule({ ...editingFirewallRule, port: e.target.value })}
                 placeholder={editingFirewallRule.protocol === 'tcp' || editingFirewallRule.protocol === 'udp' ? '如: 22 或 80,443 或 8000-9000' : '当前协议不使用端口'}
                 disabled={editingFirewallRule.protocol !== 'tcp' && editingFirewallRule.protocol !== 'udp'}
-                className={`${inputClass} disabled:bg-gray-100 disabled:text-gray-400`}
+                className={`  ${inputClass} h-auto`}
               />
             </Field>
             <Field
               label={editingFirewallRule.direction === 'in' ? '来源 IP' : '目标 IP'}
               hint={(editingFirewallRule.network || 'ipv4') === 'ipv6' ? '留空为任意 IPv6，支持 CIDR: 2001:db8::/64' : (editingFirewallRule.network || 'ipv4') === 'all' ? '留空为任意 IP，支持 IPv4/IPv6 CIDR' : '留空为任意 IPv4，支持 CIDR: 192.168.1.0/24'}
             >
-              <input
+              <Input
                 value={editingFirewallRule.source_ip}
                 onChange={(e) => setEditingFirewallRule({ ...editingFirewallRule, source_ip: e.target.value })}
                 placeholder={(editingFirewallRule.network || 'ipv4') === 'ipv6' ? '如: 2001:db8::/64' : (editingFirewallRule.network || 'ipv4') === 'all' ? '如: 192.168.1.0/24 或 2001:db8::/64' : '如: 192.168.1.0/24'}
-                className={inputClass}
+                className={`${inputClass} h-auto`}
               />
             </Field>
             <Field label="动作">
-              <select value={editingFirewallRule.action} onChange={(e) => setEditingFirewallRule({ ...editingFirewallRule, action: e.target.value as 'ACCEPT' | 'DROP' })} className={inputClass}>
+              <NativeSelect wrapperClassName="w-full" value={editingFirewallRule.action} onChange={(e) => setEditingFirewallRule({ ...editingFirewallRule, action: e.target.value as 'ACCEPT' | 'DROP' })} className={`${inputClass} h-auto pr-9`}>
                 <option value="ACCEPT">放行 (ACCEPT)</option>
                 <option value="DROP">拒绝 (DROP)</option>
-              </select>
+              </NativeSelect>
             </Field>
             <Field label="描述">
-              <input value={editingFirewallRule.description} onChange={(e) => setEditingFirewallRule({ ...editingFirewallRule, description: e.target.value })} placeholder="规则描述" className={inputClass} />
+              <Input value={editingFirewallRule.description} onChange={(e) => setEditingFirewallRule({ ...editingFirewallRule, description: e.target.value })} placeholder="规则描述" className={`${inputClass} h-auto`} />
             </Field>
             <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => { setShowFirewallEditor(false); setEditingFirewallRule(null) }} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">取消</button>
-              <button onClick={() => saveFirewallRule(editingFirewallRule)} className="px-4 py-2 text-sm bg-black text-white rounded-md hover:bg-gray-800">确定</button>
+              <Button variant="ghost" onClick={() => { setShowFirewallEditor(false); setEditingFirewallRule(null) }} className="h-auto px-4 py-2 text-sm">取消</Button>
+              <Button variant="default" onClick={() => saveFirewallRule(editingFirewallRule)} className="h-auto px-4 py-2 text-sm">确定</Button>
             </div>
           </div>
         </Modal>
       )}
 
       {showIPAssign && (
-        <Modal title="公网 IP 分配" onClose={() => setShowIPAssign(false)} wide>
+        <Modal dismissible={!(savingIPAssign)} title="公网 IP 分配" onClose={() => setShowIPAssign(false)} wide>
           <div className="grid gap-5 md:grid-cols-2">
             <div className="space-y-3">
               <div>
-                <h3 className="text-sm font-medium text-gray-900">独立 IPv4</h3>
-                <p className="mt-1 text-xs text-gray-500">修改后会重放端口映射、SNAT 和防火墙规则。</p>
+                <h3 className="text-sm font-medium text-foreground">独立 IPv4</h3>
+                <p className="mt-1 text-xs text-muted-foreground">修改后会重放端口映射、SNAT 和防火墙规则。</p>
               </div>
               <Segmented value={ipv4AssignMode} onChange={setIPv4AssignMode} />
               {ipv4AssignMode === 'random' && (
                 <Field label="随机数量">
-                  <input type="number" min={1} max={64} value={ipv4AssignCount} onChange={(e) => setIPv4AssignCount(parseInt(e.target.value || '1', 10))} className={inputClass} />
+                  <Input type="number" min={1} max={64} value={ipv4AssignCount} onChange={(e) => setIPv4AssignCount(parseInt(e.target.value || '1', 10))} className={`${inputClass} h-auto`} />
                 </Field>
               )}
               {ipv4AssignMode === 'custom' && (
                 <div className="space-y-2">
                   {allocatableIPv4s.length === 0 ? (
-                    <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">没有可选择的公网 IPv4，请先到路由管理配置 IPv4 池。</div>
+                    <Card className="px-3 py-2 text-xs text-muted-foreground">没有可选择的公网 IPv4，请先到路由管理配置 IPv4 池。</Card>
                   ) : (
                     <div className="grid gap-2">
                       {allocatableIPv4s.map((ip) => (
-                        <label key={`${ip.interface}-${ip.address}`} className="flex min-w-0 items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-xs text-gray-700">
-                          <input
-                            type="checkbox"
+                        <Card key={`${ip.interface}-${ip.address}`}><Label className="flex min-w-0 items-center gap-2 px-3 py-2 text-xs text-foreground">
+                          <Checkbox
+
                             checked={ipv4Selected.includes(ip.address)}
-                            onChange={(event) => {
-                              const next = event.target.checked
+                            onCheckedChange={(nextChecked) => {
+                              const next = (nextChecked === true)
                                 ? Array.from(new Set([...ipv4Selected, ip.address]))
                                 : ipv4Selected.filter((value) => value !== ip.address)
                               setIPv4Selected(next)
@@ -1959,9 +2008,9 @@ export default function ContainerDetail() {
                             }}
                           />
                           <span className="truncate font-mono">{ip.address}</span>
-                          <span className="shrink-0 text-gray-400">{ip.interface}</span>
-                          {ip.gateway && <span className="shrink-0 text-gray-400">gw {ip.gateway}</span>}
-                        </label>
+                          <span className="shrink-0 text-muted-foreground">{ip.interface}</span>
+                          {ip.gateway && <span className="shrink-0 text-muted-foreground">gw {ip.gateway}</span>}
+                        </Label></Card>
                       ))}
                     </div>
                   )}
@@ -1971,55 +2020,55 @@ export default function ContainerDetail() {
 
             <div className="space-y-3">
               <div>
-                <h3 className="text-sm font-medium text-gray-900">独立 IPv6</h3>
-                <p className="mt-1 text-xs text-gray-500">自定义地址必须落在路由管理配置的 IPv6 前缀内。</p>
+                <h3 className="text-sm font-medium text-foreground">独立 IPv6</h3>
+                <p className="mt-1 text-xs text-muted-foreground">自定义地址必须落在路由管理配置的 IPv6 前缀内。</p>
               </div>
               <Segmented value={ipv6AssignMode} onChange={setIPv6AssignMode} />
               {ipv6AssignMode === 'random' && (
                 <Field label="随机数量">
-                  <input type="number" min={1} max={64} value={ipv6AssignCount} onChange={(e) => setIPv6AssignCount(parseInt(e.target.value || '1', 10))} className={inputClass} />
+                  <Input type="number" min={1} max={64} value={ipv6AssignCount} onChange={(e) => setIPv6AssignCount(parseInt(e.target.value || '1', 10))} className={`${inputClass} h-auto`} />
                 </Field>
               )}
               {ipv6AssignMode === 'custom' && (
                 <Field label="IPv6 地址">
-                  <textarea
+                  <Textarea
                     value={ipv6DraftText}
                     onChange={(e) => {
                       setIPv6DraftText(e.target.value)
                       setIPv6AssignCount(Math.max(1, splitAddressLines(e.target.value).length || 1))
                     }}
-                    className={`${inputClass} min-h-32 font-mono text-xs`}
+                    className={`  ${inputClass}  min-h-32 font-mono text-xs`}
                     placeholder="2001:db8:100::100&#10;2001:db8:100::101"
                   />
                 </Field>
               )}
             </div>
           </div>
-          <div className="mt-5 flex justify-end gap-2 border-t border-gray-200 pt-4">
-            <button onClick={() => setShowIPAssign(false)} disabled={savingIPAssign} className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+          <div className="mt-5 flex justify-end gap-2 border-t border-border pt-4">
+            <Button variant="outline" onClick={() => setShowIPAssign(false)} disabled={savingIPAssign} className="h-auto px-3 py-2 text-sm">
               取消
-            </button>
-            <button onClick={submitIPAssign} disabled={savingIPAssign} className="inline-flex items-center gap-1.5 rounded-md bg-black px-3 py-2 text-sm text-white hover:bg-gray-800 disabled:opacity-50">
+            </Button>
+            <Button variant="default" onClick={submitIPAssign} disabled={savingIPAssign} className="h-auto inline-flex items-center gap-1.5 px-3 py-2 text-sm">
               <Save className="h-4 w-4" />
               {savingIPAssign ? '保存中...' : '保存'}
-            </button>
+            </Button>
           </div>
         </Modal>
       )}
 
       {showNat && !hasIndependentIPv4 && (
-        <Modal title="IPv4 NAT 端口管理" onClose={() => { setShowNat(false); setDraft(emptyDraft); setShowMappingEditor(false) }} wide extra={
+        <Modal dismissible={!(savingMapping)} title="IPv4 NAT 端口管理" onClose={() => { setShowNat(false); setDraft(emptyDraft); setShowMappingEditor(false) }} wide extra={
           !isSubUser && canAddMapping && (
-            <button onClick={openAddMapping} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-md text-xs hover:bg-gray-800">
+            <Button variant="default" onClick={openAddMapping} className="h-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
               <Plus className="w-3.5 h-3.5" />添加映射
-            </button>
+            </Button>
           )
         }>
           <div className="space-y-5">
             <div className="flex items-center justify-between gap-4">
-              <div className="text-xs text-gray-500">
+              <div className="text-xs text-muted-foreground">
                 {hasNATQuota ? (
-                  <>端口配额：<span className="font-mono text-gray-800">{mappingCount}/{mappingLimit}</span></>
+                  <>端口配额：<span className="font-mono text-foreground">{mappingCount}/{mappingLimit}</span></>
                 ) : (
                   <span>未分配 IPv4 NAT 端口配额</span>
                 )}
@@ -2036,6 +2085,7 @@ export default function ContainerDetail() {
       {showMappingEditor && (
         <Modal
           title={draft.index === null ? '添加端口映射' : '修改端口映射'}
+          dismissible={!savingMapping}
           onClose={() => { setShowMappingEditor(false); setDraft(emptyDraft) }}
         >
           <MappingEditor
@@ -2059,19 +2109,19 @@ export default function ContainerDetail() {
 
       {showSubUser && subUser && (
         <Modal title="管理链接" onClose={() => setShowSubUser(false)}>
-          <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-sm space-y-3">
+          <div className="bg-muted rounded-lg p-4 text-sm space-y-3">
             <div className="flex items-start justify-between gap-3">
-              <span className="shrink-0 text-gray-500 dark:text-gray-400">地址</span>
+              <span className="shrink-0 text-muted-foreground dark:text-muted-foreground">地址</span>
               <div className="flex min-w-0 items-center gap-1">
-                <span className="font-mono text-xs text-black dark:text-white break-all">{managementUrl}</span>
-                <button onClick={() => copyText(managementUrl)} className="shrink-0 p-0.5 text-gray-400 hover:text-black dark:hover:text-white rounded"><Copy className="w-3 h-3" /></button>
+                <span className="font-mono text-xs text-foreground dark:text-white break-all">{managementUrl}</span>
+                <Button variant="ghost" onClick={() => copyText(managementUrl)} className="h-auto shrink-0 p-0.5"><Copy className="w-3 h-3" /></Button>
               </div>
             </div>
             <div className="flex items-start justify-between gap-3">
-              <span className="shrink-0 text-gray-500 dark:text-gray-400">密码</span>
+              <span className="shrink-0 text-muted-foreground dark:text-muted-foreground">密码</span>
               <div className="flex min-w-0 items-center gap-1">
-                <span className="font-mono text-xs text-black dark:text-white">{subUser.password || ''}</span>
-                <button onClick={() => copyText(subUser.password || '')} className="shrink-0 p-0.5 text-gray-400 hover:text-black dark:hover:text-white rounded"><Copy className="w-3 h-3" /></button>
+                <span className="font-mono text-xs text-foreground dark:text-white">{subUser.password || ''}</span>
+                <Button variant="ghost" onClick={() => copyText(subUser.password || '')} className="h-auto shrink-0 p-0.5"><Copy className="w-3 h-3" /></Button>
               </div>
             </div>
           </div>
@@ -2079,19 +2129,20 @@ export default function ContainerDetail() {
       )}
 
       {showReinstall && (
-        <Modal title="重装系统" onClose={() => setShowReinstall(false)}>
+        <Modal dismissible={!(reinstalling)} title="重装系统" onClose={() => setShowReinstall(false)}>
           <div className="space-y-4">
-            <p className="text-sm text-gray-600">重装系统会删除容器内所有数据，请谨慎操作。</p>
+            <p className="text-sm text-muted-foreground">重装系统会删除容器内所有数据，请谨慎操作。</p>
             <Field label="选择新系统模板">
-              <select value={selectedTemplate} onChange={(e) => setSelectedTemplate(e.target.value)} className={inputClass}>
+              <NativeSelect wrapperClassName="w-full" value={selectedTemplate} onChange={(e) => setSelectedTemplate(e.target.value)} className={`${inputClass} h-auto pr-9`}>
                 {templates.map((template) => (
                   <option key={template.id} value={template.id}>{template.name}</option>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
+            {reinstallManualISO && <Alert className="text-xs leading-5">{t('重装将清空系统盘，并挂载 ISO 通过 VNC 手动安装；分区、账号和网络需自行设置，不会注入 SSH 凭据。')}</Alert>}
             {reinstallLinuxTemplate && (
-              <div className="rounded-md border border-gray-200 bg-white px-3 py-3 text-sm">
-                <div className="mb-2 font-medium text-gray-800">登录方式</div>
+              <Card className="px-3 py-3 text-sm">
+                <div className="mb-2 font-medium text-foreground">登录方式</div>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {([
                     ['keep', '保留当前密码'],
@@ -2099,72 +2150,72 @@ export default function ContainerDetail() {
                     ['password', '自定义密码'],
                     ['key', 'SSH Key'],
                   ] as Array<[ReinstallSSHAuthMode, string]>).map(([mode, label]) => (
-                    <button
+                    <Button variant={reinstallAuthMode === mode ? 'default' : 'outline'}
                       key={mode}
                       type="button"
                       onClick={() => setReinstallAuthMode(mode)}
-                      className={`rounded-md border px-3 py-2 text-xs font-medium transition-colors ${reinstallAuthMode === mode ? 'border-black bg-black text-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                      className="h-auto px-3 py-2 text-xs font-medium"
                     >
                       {label}
-                    </button>
+                    </Button>
                   ))}
                 </div>
                 {reinstallAuthMode === 'password' && (
                   <div className="mt-3 flex gap-2">
-                    <input
+                    <Input
                       type="text"
                       value={reinstallPasswordDraft}
                       onChange={(event) => setReinstallPasswordDraft(event.target.value)}
-                      className={inputClass}
+                      className={`${inputClass} h-auto`}
                       placeholder="RootPass123"
                     />
-                    <button
+                    <Button variant="outline"
                       type="button"
                       onClick={() => setReinstallPasswordDraft(generateSSHPassword())}
-                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50"
+                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center p-0"
                       title="生成密码"
                     >
                       <RefreshCw className="h-4 w-4" />
-                    </button>
+                    </Button>
                   </div>
                 )}
                 {reinstallAuthMode === 'key' && (
-                  <textarea
+                  <Textarea
                     value={reinstallPublicKeyDraft}
                     onChange={(event) => setReinstallPublicKeyDraft(event.target.value)}
-                    className={`${inputClass} mt-3 min-h-20 resize-y font-mono text-xs`}
+                    className={`  ${inputClass}  mt-3 min-h-20 resize-y font-mono text-xs`}
                     placeholder="ssh-ed25519 AAAA..."
                   />
                 )}
-              </div>
+              </Card>
             )}
             <div className="flex justify-end gap-3">
-              <button onClick={() => setShowReinstall(false)} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">取消</button>
-              <button onClick={handleReinstall} disabled={reinstalling} className="px-4 py-2 text-sm bg-black text-white rounded-md hover:bg-gray-800 disabled:opacity-50">
+              <Button variant="ghost" onClick={() => setShowReinstall(false)} disabled={reinstalling} className="h-auto px-4 py-2 text-sm">取消</Button>
+              <Button variant="default" onClick={handleReinstall} disabled={reinstalling} className="h-auto px-4 py-2 text-sm">
                 {reinstalling ? '重装中...' : '确认重装'}
-              </button>
+              </Button>
             </div>
           </div>
         </Modal>
       )}
 
       {showExpiryEdit && (
-        <Modal title="修改到期时间" onClose={() => setShowExpiryEdit(false)}>
+        <Modal dismissible={!(savingExpiry)} title="修改到期时间" onClose={() => setShowExpiryEdit(false)}>
           <div className="space-y-4">
-            <p className="text-sm text-gray-500">当前：{formatExpiration(container.expires_at)}</p>
+            <p className="text-sm text-muted-foreground">当前：{formatExpiration(container.expires_at)}</p>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">新到期日期（留空为长期有效）</label>
-              <input
+              <Label className="block text-xs text-muted-foreground mb-1">新到期日期（留空为长期有效）</Label>
+              <Input
                 type="date"
                 value={editExpiry}
                 onChange={(e) => setEditExpiry(e.target.value)}
                 min={new Date().toISOString().slice(0, 10)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-black bg-white"
+                className="w-full px-3 py-2 text-sm h-auto"
               />
             </div>
             <div className="flex justify-end gap-3">
-              <button onClick={() => setShowExpiryEdit(false)} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">取消</button>
-              <button onClick={async () => {
+              <Button variant="ghost" onClick={() => setShowExpiryEdit(false)} disabled={savingExpiry} className="h-auto px-4 py-2 text-sm">取消</Button>
+              <Button variant="default" onClick={async () => {
                 setSavingExpiry(true)
                 try {
                   const expVal = editExpiry ? editExpiry + ' 23:59:59' : ''
@@ -2173,9 +2224,9 @@ export default function ContainerDetail() {
                   fetchContainer()
                 } catch { /* ignore */ }
                 finally { setSavingExpiry(false) }
-              }} disabled={savingExpiry} className="px-4 py-2 text-sm bg-black text-white rounded-md hover:bg-gray-800 disabled:opacity-50">
+              }} disabled={savingExpiry} className="h-auto px-4 py-2 text-sm">
                 {savingExpiry ? '保存中...' : '保存'}
-              </button>
+              </Button>
             </div>
           </div>
         </Modal>
@@ -2183,52 +2234,52 @@ export default function ContainerDetail() {
 
       {/* Resource limit edit modal */}
       {showResourceEdit && (
-        <Modal title="编辑资源限制" onClose={() => setShowResourceEdit(false)}>
+        <Modal dismissible={!(savingResource)} title="编辑资源限制" onClose={() => setShowResourceEdit(false)}>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">vCPU 核数</label>
-                <input type="number" min={0.25} max={maxVCPU} step={0.25} value={resourceEdit.vcpu}
+                <Label className="block text-xs text-muted-foreground mb-1">vCPU 核数</Label>
+                <Input type="number" min={0.25} max={maxVCPU} step={0.25} value={resourceEdit.vcpu}
                   onChange={(e) => setResourceEdit({ ...resourceEdit, vcpu: clampVCPU(Number(e.target.value), maxVCPU) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+                  className="w-full px-3 py-2 text-sm h-auto" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">内存 (MB)</label>
-                <input type="number" min={128} max={maxRAMMB} step={128} value={resourceEdit.ramMb}
+                <Label className="block text-xs text-muted-foreground mb-1">内存 (MB)</Label>
+                <Input type="number" min={128} max={maxRAMMB} step={128} value={resourceEdit.ramMb}
                   onChange={(e) => setResourceEdit({ ...resourceEdit, ramMb: clampResourceInt(Number(e.target.value), 128, maxRAMMB, 128) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+                  className="w-full px-3 py-2 text-sm h-auto" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">下行带宽 (Mbps，0=不限制)</label>
-                <input type="number" min={0} value={resourceEdit.networkDownMbps}
+                <Label className="block text-xs text-muted-foreground mb-1">下行带宽 (Mbps，0=不限制)</Label>
+                <Input type="number" min={0} value={resourceEdit.networkDownMbps}
                   onChange={(e) => setResourceEdit({ ...resourceEdit, networkDownMbps: Math.max(0, Number(e.target.value) || 0) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+                  className="w-full px-3 py-2 text-sm h-auto" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">上行带宽 (Mbps，0=不限制)</label>
-                <input type="number" min={0} value={resourceEdit.networkUpMbps}
+                <Label className="block text-xs text-muted-foreground mb-1">上行带宽 (Mbps，0=不限制)</Label>
+                <Input type="number" min={0} value={resourceEdit.networkUpMbps}
                   onChange={(e) => setResourceEdit({ ...resourceEdit, networkUpMbps: Math.max(0, Number(e.target.value) || 0) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+                  className="w-full px-3 py-2 text-sm h-auto" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">读取 IO (MB/s，0=不限制)</label>
-                <input type="number" min={0} value={resourceEdit.ioReadMbps}
+                <Label className="block text-xs text-muted-foreground mb-1">读取 IO (MB/s，0=不限制)</Label>
+                <Input type="number" min={0} value={resourceEdit.ioReadMbps}
                   onChange={(e) => setResourceEdit({ ...resourceEdit, ioReadMbps: Math.max(0, Number(e.target.value) || 0) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+                  className="w-full px-3 py-2 text-sm h-auto" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">写入 IO (MB/s，0=不限制)</label>
-                <input type="number" min={0} value={resourceEdit.ioWriteMbps}
+                <Label className="block text-xs text-muted-foreground mb-1">写入 IO (MB/s，0=不限制)</Label>
+                <Input type="number" min={0} value={resourceEdit.ioWriteMbps}
                   onChange={(e) => setResourceEdit({ ...resourceEdit, ioWriteMbps: Math.max(0, Number(e.target.value) || 0) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+                  className="w-full px-3 py-2 text-sm h-auto" />
               </div>
             </div>
-            <p className="text-[11px] text-gray-400">磁盘容量不支持动态修改。修改后运行中的容器会立即应用新的 cgroup 限制。</p>
+            <p className="text-[11px] text-muted-foreground">磁盘容量不支持动态修改。修改后运行中的容器会立即应用新的 cgroup 限制。</p>
             <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setShowResourceEdit(false)} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50">取消</button>
-              <button onClick={saveResourceLimit} disabled={savingResource} className="px-4 py-2 text-sm bg-black text-white rounded-md hover:bg-gray-800 disabled:opacity-50">
+              <Button variant="outline" onClick={() => setShowResourceEdit(false)} disabled={savingResource} className="h-auto px-4 py-2 text-sm">取消</Button>
+              <Button variant="default" onClick={saveResourceLimit} disabled={savingResource} className="h-auto px-4 py-2 text-sm">
                 {savingResource ? '保存中...' : '保存'}
-              </button>
+              </Button>
             </div>
           </div>
         </Modal>
@@ -2239,15 +2290,15 @@ export default function ContainerDetail() {
 
 function RangeSwitch({ value, onChange }: { value: StatsRangeKey; onChange: (value: StatsRangeKey) => void }) {
   return (
-    <div className="inline-flex border border-gray-200 rounded-md overflow-hidden bg-white">
+    <div className="inline-flex gap-1">
       {(['30m', '1h', '1d', '1w'] as StatsRangeKey[]).map((item) => (
-        <button
+        <Button variant={value === item ? 'default' : 'outline'}
           key={item}
           onClick={() => onChange(item)}
-          className={`px-3 py-1.5 text-xs ${value === item ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+          className="h-auto px-3 py-1.5 text-xs"
         >
           {item === '30m' ? '30分钟' : item === '1h' ? '1小时' : item === '1d' ? '1天' : '1周'}
-        </button>
+        </Button>
       ))}
     </div>
   )
@@ -2261,44 +2312,28 @@ function FirewallIcon({ className }: { className?: string }) {
   )
 }
 
-function StatusBadge({ running, initializing }: { running: boolean; initializing?: boolean }) {
+function StatusBadge({ running, initializing, status, taskLabel }: { running: boolean; initializing?: boolean; status?: string; taskLabel?: string }) {
+  if (taskLabel) return <WorkloadStatus state="pending" label={taskLabel} loading />
   if (initializing) {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap bg-amber-50 text-amber-700">
-        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-amber-500 animate-pulse"></span>
-        正在初始化
-      </span>
-    )
+    return <WorkloadStatus state="pending" label="正在初始化" loading />
   }
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap ${running ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${running ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-      {running ? '运行中' : '已停止'}
-    </span>
-  )
+  if (status === 'failed' || status === 'error') return <WorkloadStatus state="error" label="运行异常" />
+  return <WorkloadStatus state={running ? 'running' : 'stopped'} label={running ? '运行中' : '已停止'} />
 }
 
-function InfoTag({ color, children }: { color: 'blue' | 'emerald' | 'amber' | 'violet' | 'slate' | 'red'; children: ReactNode }) {
-  const classes = {
-    blue: 'bg-blue-50 text-blue-700 border-blue-100',
-    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-    amber: 'bg-amber-50 text-amber-700 border-amber-100',
-    violet: 'bg-violet-50 text-violet-700 border-violet-100',
-    slate: 'bg-slate-50 text-slate-700 border-slate-100',
-    red: 'bg-red-50 text-red-700 border-red-100',
-  }
-  return <span className={`px-1.5 py-0.5 border rounded text-[11px] whitespace-nowrap ${classes[color]}`}>{children}</span>
+function InfoTag({ children }: { color: 'blue' | 'emerald' | 'amber' | 'violet' | 'slate' | 'red'; children: ReactNode }) {
+  return <Badge variant="secondary" className="max-w-full whitespace-normal px-1.5 py-0.5 text-[11px] [overflow-wrap:anywhere]">{children}</Badge>
 }
 
 function ActionButton({ children, onClick, disabled, dark = false }: { children: ReactNode; onClick: () => void; disabled?: boolean; dark?: boolean }) {
   return (
-    <button
+    <Button variant={dark ? 'default' : 'outline'}
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap ${dark ? 'bg-black text-white hover:bg-gray-800' : 'border border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+      className="inline-flex h-auto min-h-8 min-w-0 items-center gap-1 whitespace-normal px-2.5 py-1.5 text-xs"
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -2311,21 +2346,21 @@ function MetricChart({ icon, title, value, detail, points, percent, color }: { i
   }
   const palette = colors[color]
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4">
+    <Card className="p-4">
       <div className="flex items-center justify-between">
-        <div className={`w-9 h-9 rounded-md ${palette.bg} ${palette.text} flex items-center justify-center`}>{icon}</div>
-        <Cpu className="w-4 h-4 text-gray-300" />
+        <div className={`w-9 h-9 rounded-md  ${palette.bg}   ${palette.text}  flex items-center justify-center`}>{icon}</div>
+        <Cpu className="w-4 h-4 text-muted-foreground" />
       </div>
       <div className="mt-3">
-        <div className="text-xs text-gray-500">{title}</div>
-        <div className="text-lg font-semibold text-black mt-0.5">{value}</div>
-        <div className="text-xs text-gray-400 mt-0.5">{detail}</div>
+        <div className="text-xs text-muted-foreground">{title}</div>
+        <div className="text-lg font-semibold text-foreground mt-0.5">{value}</div>
+        <div className="text-xs text-muted-foreground mt-0.5">{detail}</div>
       </div>
       <MiniChart points={points} stroke={palette.stroke} fill={palette.fill} />
-      <div className="mt-3 h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div className={`h-full ${palette.bar}`} style={{ width: `${Math.max(3, Math.min(percent, 100))}%` }} />
+      <div className="mt-3 h-2 bg-muted rounded-full overflow-hidden">
+        <div className={`h-full  ${palette.bar}`} style={{ width: `${Math.max(3, Math.min(percent, 100))}%` }} />
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -2350,27 +2385,27 @@ function MiniChart({ points, stroke, fill }: { points: number[]; stroke: string;
 
 function Panel({ title, children, extra }: { title: string; children: ReactNode; extra?: ReactNode }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold text-black">{title}</h2>
+    <Card className="min-w-0 p-4 sm:p-5">
+      <div className="mb-4 flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         {extra}
       </div>
-      <div className="space-y-3 text-sm">{children}</div>
-    </div>
+      <div className="min-w-0 space-y-3 text-sm">{children}</div>
+    </Card>
   )
 }
 
 function PlainRow({ label, value, mono = false, copyValue, onCopy, children }: { label: string; value: string; mono?: boolean; copyValue?: string; onCopy?: (value: string) => void; children?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-gray-500">{label}</span>
-      <div className="flex items-center gap-1 min-w-0">
-        <span className={`text-black truncate ${mono ? 'font-mono text-xs' : ''}`}>{value}</span>
+    <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <div className="flex min-w-0 max-w-full items-start gap-1 sm:max-w-[65%]">
+        <span className={`min-w-0 text-foreground [overflow-wrap:anywhere] sm:text-right ${mono ? "font-mono text-xs" : ""}`} title={value}>{value}</span>
         {children}
         {copyValue && onCopy && (
-          <button onClick={() => onCopy(copyValue)} className="p-0.5 text-gray-400 hover:text-black rounded" title="复制">
+          <Button variant="ghost" onClick={() => onCopy(copyValue)} className="h-auto p-0.5" title="复制">
             <Copy className="w-3 h-3" />
-          </button>
+          </Button>
         )}
       </div>
     </div>
@@ -2384,55 +2419,55 @@ function SnapshotTable({ snapshots, busy, onRestore, onDelete }: {
   onDelete: (snapshot: Snapshot) => void
 }) {
   if (snapshots.length === 0) {
-    return <p className="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-400">暂无快照</p>
+    return <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">暂无快照</p>
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200">
-      <table className="w-full min-w-[760px] text-sm">
-        <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
-          <tr>
+    <Card className="overflow-x-auto">
+      <Table className="w-full min-w-[760px] text-sm">
+        <TableHeader className="text-xs text-muted-foreground">
+          <TableRow>
             <TableHead>快照时间</TableHead>
             <TableHead>类型</TableHead>
             <TableHead>创建者</TableHead>
             <TableHead>大小</TableHead>
-            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">操作</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
+            <TableHead className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody className="divide-y divide-border">
           {snapshots.map((snapshot) => (
-            <tr key={snapshot.id}>
-              <td className="px-3 py-2 font-mono text-xs text-gray-800">{snapshot.created_at}</td>
-              <td className="px-3 py-2">
-                <span className={`rounded px-2 py-1 text-xs ${snapshot.scheduled ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>
+            <TableRow key={snapshot.id}>
+              <TableCell className="px-3 py-2 font-mono text-xs text-foreground">{snapshot.created_at}</TableCell>
+              <TableCell className="px-3 py-2">
+                <Badge variant="secondary" className="text-xs">
                   {snapshot.scheduled ? '定时' : '手动'}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-xs text-gray-600">{snapshot.created_by || '-'}</td>
-              <td className="px-3 py-2 font-mono text-xs text-gray-600">{formatBytes(snapshot.size_bytes || 0)}</td>
-              <td className="px-3 py-2">
+                </Badge>
+              </TableCell>
+              <TableCell className="px-3 py-2 text-xs text-muted-foreground">{snapshot.created_by || '-'}</TableCell>
+              <TableCell className="px-3 py-2 font-mono text-xs text-muted-foreground">{formatBytes(snapshot.size_bytes || 0)}</TableCell>
+              <TableCell className="px-3 py-2">
                 <div className="flex justify-end gap-1.5">
-                  <button
+                  <Button variant="outline"
                     onClick={() => onRestore(snapshot)}
                     disabled={!!busy}
-                    className="rounded border border-gray-300 px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    className="h-auto px-2.5 py-1 text-xs"
                   >
                     {busy === snapshot.id ? '处理中...' : '恢复'}
-                  </button>
-                  <button
+                  </Button>
+                  <Button variant="destructive"
                     onClick={() => onDelete(snapshot)}
                     disabled={!!busy}
-                    className="rounded border border-red-200 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    className="h-auto px-2.5 py-1 text-xs"
                   >
                     删除
-                  </button>
+                  </Button>
                 </div>
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+      </Table>
+    </Card>
   )
 }
 
@@ -2459,7 +2494,7 @@ function MappingEditor({
 }) {
   const isEditing = draft.index !== null
   const updateDraft = (patch: Partial<MappingDraft>) => setDraft({ ...draft, ...patch })
-  const disabledInputClass = 'w-full px-3 py-2 border border-gray-200 rounded-md text-sm text-gray-400 bg-gray-50'
+  const disabledInputClass = 'w-full px-3 py-2 text-sm'
 
   const fillRandomPort = async () => {
     try {
@@ -2476,7 +2511,7 @@ function MappingEditor({
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="名称">
-          <input
+          <Input
             value={draft.description}
             disabled={isSubUser}
             onChange={(e) => updateDraft({ description: e.target.value })}
@@ -2487,78 +2522,78 @@ function MappingEditor({
 
         <Field label="协议">
           {isSubUser ? (
-            <input value={draft.protocol.toUpperCase()} disabled className={disabledInputClass} />
+            <Input value={draft.protocol.toUpperCase()} disabled className={`${disabledInputClass} h-auto`} />
           ) : (
-            <select value={draft.protocol} onChange={(e) => updateDraft({ protocol: e.target.value })} className={inputClass}>
+            <NativeSelect wrapperClassName="w-full" value={draft.protocol} onChange={(e) => updateDraft({ protocol: e.target.value })} className={`${inputClass} h-auto pr-9`}>
               <option value="all">全部 (ALL)</option>
               <option value="tcp">TCP</option>
               <option value="udp">UDP</option>
               <option value="tcp+udp">TCP+UDP</option>
               <option value="icmp">ICMP</option>
-            </select>
+            </NativeSelect>
           )}
         </Field>
 
         <Field label="外部端口">
           {isSubUser ? (
-            <input value={draft.host_port} disabled className={disabledInputClass} />
+            <Input value={draft.host_port} disabled className={`${disabledInputClass} h-auto`} />
           ) : (
             <div className="flex gap-1">
-              <input
+              <Input
                 value={draft.host_port}
                 onChange={(e) => updateDraft({ host_port: e.target.value })}
-                className={`${inputClass} flex-1`}
+                className={`  ${inputClass}  flex-1 h-auto`}
                 placeholder="默认同内部"
               />
-              <button
+              <Button variant="outline"
                 type="button"
                 onClick={fillRandomPort}
-                className="rounded-md border border-gray-300 px-2 py-2 text-xs text-gray-500 hover:bg-gray-50"
+                className="h-auto px-2 py-2 text-xs"
                 title="随机空闲端口"
               >
                 随机
-              </button>
+              </Button>
             </div>
           )}
         </Field>
 
         <Field label="Host IPv4">
           {isSubUser ? (
-            <input value={draft.host_ip || 'All IPv4'} disabled className={disabledInputClass} />
+            <Input value={draft.host_ip || 'All IPv4'} disabled className={`${disabledInputClass} h-auto`} />
           ) : (
-            <select value={draft.host_ip} onChange={(e) => updateDraft({ host_ip: e.target.value })} className={inputClass}>
+            <NativeSelect wrapperClassName="w-full" value={draft.host_ip} onChange={(e) => updateDraft({ host_ip: e.target.value })} className={`${inputClass} h-auto pr-9`}>
               <option value="">All assigned IPv4</option>
               {publicIPv4s.map((ip) => (
                 <option key={`${ip.interface}-${ip.address}`} value={ip.address}>
                   {ip.address}{ip.interface ? ` (${ip.interface})` : ''}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           )}
         </Field>
 
         <Field label="内部端口">
-          <input
+          <Input
             value={draft.container_port}
             onChange={(e) => updateDraft({ container_port: e.target.value })}
-            className={inputClass}
+            className={`${inputClass} h-auto`}
             placeholder="例如 80"
           />
         </Field>
       </div>
 
-      <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
-        <button onClick={onCancel} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50">
+      <div className="flex justify-end gap-2 border-t border-border pt-4">
+        <Button variant="outline" onClick={onCancel} disabled={saving} className="h-auto px-4 py-2 text-sm">
           取消
-        </button>
-        <button
+        </Button>
+        <Button variant="default"
           onClick={onSubmit}
           disabled={saving || (!isEditing && !canAddMapping)}
-          className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm bg-black text-white rounded-md hover:bg-gray-800 disabled:opacity-50"
+          className="h-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm"
         >
           <Save className="w-4 h-4" />
           {saving ? '保存中...' : '保存'}
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -2566,69 +2601,69 @@ function MappingEditor({
 
 function MappingTable({ mappings, publicHost, onEdit, onDelete, compact = false, isSubUser = false }: { mappings: PortMapping[]; publicHost: string; onEdit: (pm: PortMapping, index: number) => void; onDelete: (index: number) => void; compact?: boolean; isSubUser?: boolean }) {
   if (mappings.length === 0) {
-    return <p className="text-sm text-gray-400">暂无端口映射</p>
+    return <p className="text-sm text-muted-foreground">暂无端口映射</p>
   }
 
   return (
-    <div className="overflow-x-auto border border-gray-200 rounded-lg">
-      <table className="w-full min-w-[680px]">
-        <thead className="bg-gray-50 border-b border-gray-200">
-          <tr>
+    <Card className="overflow-x-auto">
+      <Table className="w-full min-w-[680px]">
+        <TableHeader >
+          <TableRow>
             <TableHead>名称</TableHead>
             <TableHead>协议</TableHead>
             <TableHead>Host IPv4</TableHead>
             <TableHead>外部端口</TableHead>
             <TableHead>内部端口</TableHead>
-            {!compact && <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">操作</th>}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
+            {!compact && <TableHead className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">操作</TableHead>}
+          </TableRow>
+        </TableHeader>
+        <TableBody className="divide-y divide-border">
           {mappings.map((pm, index) => {
             const isSSH = pm.description === 'SSH' || pm.container_port === 22 || pm.description === 'RDP' || pm.container_port === 3389
             return (
-              <tr key={`${pm.host_port}-${pm.container_port}-${index}`}>
-                <td className="px-3 py-2 text-sm">
-                  <span className="font-medium text-gray-800">{pm.description}</span>
-                  {isSSH && <span className="ml-2 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-xs">默认</span>}
-                </td>
-                <td className="px-3 py-2 text-xs text-gray-500">{pm.protocol.toUpperCase()}</td>
-                <td className="px-3 py-2 font-mono text-xs text-gray-800">{pm.host_ip || publicHost || 'All IPv4'}</td>
-                <td className="px-3 py-2 font-mono text-xs text-gray-800">{pm.host_port}</td>
-                <td className="px-3 py-2 font-mono text-xs text-gray-800">{pm.container_port}</td>
+              <TableRow key={`${pm.host_port}-${pm.container_port}-${index}`}>
+                <TableCell className="px-3 py-2 text-sm">
+                  <span className="font-medium text-foreground">{pm.description}</span>
+                  {isSSH && <Badge variant="secondary" className="ml-2 px-1.5 py-0.5 text-xs">默认</Badge>}
+                </TableCell>
+                <TableCell className="px-3 py-2 text-xs text-muted-foreground">{pm.protocol.toUpperCase()}</TableCell>
+                <TableCell className="px-3 py-2 font-mono text-xs text-foreground">{pm.host_ip || publicHost || 'All IPv4'}</TableCell>
+                <TableCell className="px-3 py-2 font-mono text-xs text-foreground">{pm.host_port}</TableCell>
+                <TableCell className="px-3 py-2 font-mono text-xs text-foreground">{pm.container_port}</TableCell>
                 {!compact && (
-                  <td className="px-3 py-2">
+                  <TableCell className="px-3 py-2">
                     <div className="flex justify-end gap-1">
-                      <button onClick={() => onEdit(pm, index)} className="p-1.5 text-gray-500 hover:text-black hover:bg-gray-100 rounded" title="修改">
+                      <Button variant="ghost" onClick={() => onEdit(pm, index)} className="h-auto p-1.5" title="修改">
                         <Pencil className="w-3.5 h-3.5" />
-                      </button>
+                      </Button>
                       {!isSubUser && (
-                        <button disabled={isSSH} onClick={() => onDelete(index)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded disabled:opacity-30 disabled:cursor-not-allowed" title={isSSH ? '默认 SSH 映射不能删除' : '删除'}>
+                        <Button variant="destructive" disabled={isSSH} onClick={() => onDelete(index)} className="h-auto p-1.5" title={isSSH ? '默认 SSH 映射不能删除' : '删除'}>
                           <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        </Button>
                       )}
                     </div>
-                  </td>
+                  </TableCell>
                 )}
-              </tr>
+              </TableRow>
             )
           })}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+      </Table>
+    </Card>
   )
 }
 
-function TableHead({ children }: { children: ReactNode }) {
-  return <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">{children}</th>
+function TableHead({ children, className }: { children: ReactNode; className?: string }) {
+  return <UITableHead className={className || 'text-left px-3 py-2 text-xs font-medium'}>{children}</UITableHead>
 }
 
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return (
-    <label className="block">
-      <span className="block text-xs font-medium text-gray-600 mb-1.5">{label}</span>
+    <Label className="block">
+      <span className="block text-xs font-medium text-muted-foreground mb-1.5">{label}</span>
       {children}
-      {hint && <span className="block text-[11px] text-gray-400 mt-1">{hint}</span>}
-    </label>
+      {hint && <span className="block text-[11px] text-muted-foreground mt-1">{hint}</span>}
+    </Label>
   )
 }
 
@@ -2639,37 +2674,26 @@ function Segmented({ value, onChange }: { value: IPAssignMode; onChange: (value:
     { value: 'custom', label: '自定义' },
   ]
   return (
-    <div className="grid grid-cols-3 gap-1 rounded-md bg-gray-100 p-1">
+    <div className="grid grid-cols-3 gap-1 rounded-md bg-muted p-1">
       {items.map((item) => (
-        <button
+        <Button variant={value === item.value ? 'default' : 'ghost'}
           key={item.value}
           type="button"
           onClick={() => onChange(item.value)}
-          className={`rounded px-2 py-1.5 text-xs font-medium ${value === item.value ? 'bg-white text-black shadow-sm' : 'text-gray-600 hover:text-black'}`}
+          className="h-auto px-2 py-1.5 text-xs font-medium"
         >
           {item.label}
-        </button>
+        </Button>
       ))}
     </div>
   )
 }
 
-function Modal({ title, children, onClose, wide = false, extra, flush = false }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean; extra?: ReactNode; flush?: boolean }) {
+function Modal({ title, children, onClose, wide = false, extra, flush = false, fullScreen = false, dismissible = true }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean; extra?: ReactNode; flush?: boolean; fullScreen?: boolean; dismissible?: boolean }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className={`bg-white rounded-lg shadow-xl border border-gray-200 w-full ${wide ? 'max-w-5xl' : 'max-w-md'} max-h-[92vh] overflow-hidden flex flex-col`}>
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
-          <h2 className="text-sm font-semibold text-black">{title}</h2>
-          <div className="flex items-center gap-2">
-            {extra}
-            <button onClick={onClose} className="p-1.5 text-gray-500 hover:text-black hover:bg-gray-100 rounded" title="关闭">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-        <div className={flush ? "overflow-hidden" : "p-5 overflow-y-auto"}>{children}</div>
-      </div>
-    </div>
+    <SharedModal title={title} onClose={onClose} maxWidth={wide ? 'max-w-5xl' : 'max-w-md'} extra={extra} flush={flush} fullScreen={fullScreen} dismissible={dismissible} className={fullScreen ? 'max-h-none' : 'max-h-[calc(100dvh-1.5rem)]'} bodyClassName={flush ? 'overflow-hidden' : 'p-4 overflow-y-auto sm:p-5'}>
+      {children}
+    </SharedModal>
   )
 }
 
@@ -2854,32 +2878,28 @@ function TrafficBar({ container }: { container: Container }) {
   const txPct = txLimit > 0 ? Math.min((tx / txLimit) * 100, 100) : 0
 
   if (totalLimit === 0 && rxLimit === 0 && txLimit === 0) {
-    return <div className="text-sm text-gray-400">未设置流量限制</div>
+    return <div className="text-sm text-muted-foreground">未设置流量限制</div>
   }
 
   if (mode === 'in_out') {
     return (
       <div className="space-y-3">
         <div>
-          <div className="flex justify-between text-xs text-gray-500 mb-1">
+          <div className="flex justify-between text-xs text-muted-foreground mb-1">
             <span>入站 (RX)</span>
             <span>{formatBytes(rx)} {rxLimit > 0 ? `/ ${formatBytes(rxLimit)}` : '(不限制)'}</span>
           </div>
           {rxLimit > 0 && (
-            <div className="w-full bg-gray-200 rounded-full h-2.5">
-              <div className="bg-black h-2.5 rounded-full transition-all" style={{ width: `${Math.min(rxPct, 100)}%` }} />
-            </div>
+            <Progress value={Math.min(rxPct, 100)} className="h-2.5 w-full" />
           )}
         </div>
         <div>
-          <div className="flex justify-between text-xs text-gray-500 mb-1">
+          <div className="flex justify-between text-xs text-muted-foreground mb-1">
             <span>出站 (TX)</span>
             <span>{formatBytes(tx)} {txLimit > 0 ? `/ ${formatBytes(txLimit)}` : '(不限制)'}</span>
           </div>
           {txLimit > 0 && (
-            <div className="w-full bg-gray-200 rounded-full h-2.5">
-              <div className="bg-black h-2.5 rounded-full transition-all" style={{ width: `${Math.min(txPct, 100)}%` }} />
-            </div>
+            <Progress value={Math.min(txPct, 100)} className="h-2.5 w-full" />
           )}
         </div>
       </div>
@@ -2888,24 +2908,26 @@ function TrafficBar({ container }: { container: Container }) {
 
   return (
     <div>
-      <div className="flex justify-between text-xs text-gray-500 mb-1">
+      <div className="flex justify-between text-xs text-muted-foreground mb-1">
         <span>已用</span>
         <div className="flex items-center gap-2">
           <span>{formatBytes(total)} / {totalLimit} GB</span>
           {(container.traffic_used_rx > 0 || container.traffic_used_tx > 0) && (
-            <button onClick={async () => {
+            <Button variant="link" onClick={async () => {
               try {
                 await resetTraffic(container.id)
               } catch { /* ignore */ }
-            }} className="text-xs text-gray-400 hover:text-black underline">重置</button>
+            }} className="h-auto text-xs underline p-0">重置</Button>
           )}
         </div>
       </div>
-      <div className="w-full bg-gray-200 rounded-full h-2.5">
-        <div className="bg-black h-2.5 rounded-full transition-all" style={{ width: `${Math.min(totalPct, 100)}%` }} />
-      </div>
+      <Progress value={Math.min(totalPct, 100)} className="h-2.5 w-full" />
     </div>
   )
+}
+
+function isManualISOTemplate(template?: Template) {
+  return template?.manual_install === true || template?.provisioner === 'manual-iso'
 }
 
 function isWindowsTemplate(templateID: string) {
