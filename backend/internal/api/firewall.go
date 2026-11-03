@@ -57,9 +57,12 @@ func updateFirewall(w http.ResponseWriter, r *http.Request, id int) {
 	oldEnabled := c.FirewallEnabled
 	oldDefaultAction := c.FirewallDefaultAction
 	oldRules := append([]config.FirewallRule(nil), c.FirewallRules...)
+	nextEnabled := oldEnabled
+	nextDefaultAction := oldDefaultAction
+	nextRules := c.FirewallRules
 
 	if req.Enabled != nil {
-		c.FirewallEnabled = *req.Enabled
+		nextEnabled = *req.Enabled
 	}
 	if req.DefaultAction != nil {
 		action := normalizeFirewallDefaultAction(*req.DefaultAction)
@@ -67,13 +70,13 @@ func updateFirewall(w http.ResponseWriter, r *http.Request, id int) {
 			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Invalid default action"})
 			return
 		}
-		c.FirewallDefaultAction = action
-	} else if strings.TrimSpace(c.FirewallDefaultAction) == "" {
-		c.FirewallDefaultAction = "DROP"
+		nextDefaultAction = action
+	} else if strings.TrimSpace(nextDefaultAction) == "" {
+		nextDefaultAction = "DROP"
 	}
 	if req.Rules != nil {
 		// Validate and assign IDs to new rules
-		rules := *req.Rules
+		rules := append([]config.FirewallRule{}, (*req.Rules)...)
 		for i := range rules {
 			rules[i].Direction = strings.ToLower(strings.TrimSpace(rules[i].Direction))
 			rules[i].Protocol = strings.ToLower(strings.TrimSpace(rules[i].Protocol))
@@ -119,8 +122,12 @@ func updateFirewall(w http.ResponseWriter, r *http.Request, id int) {
 				}
 			}
 		}
-		c.FirewallRules = rules
+		nextRules = rules
 	}
+	// Commit only after the entire request has passed validation.
+	c.FirewallEnabled = nextEnabled
+	c.FirewallDefaultAction = nextDefaultAction
+	c.FirewallRules = nextRules
 
 	// Apply firewall rules to iptables if container is running
 	if c.Status == "running" {

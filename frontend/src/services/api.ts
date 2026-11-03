@@ -145,6 +145,9 @@ export interface Template {
   variant?: string
   desktop?: string
   description: string
+  provisioner?: string
+  manual_install?: boolean
+  format?: 'iso' | 'qcow2'
 }
 
 export interface CreateContainerRequest {
@@ -578,6 +581,32 @@ export const getContainers = () =>
 export const getContainer = (id: ContainerIdentifier) =>
   api.get<APIResponse<Container>>(`/containers/${id}`)
 
+export interface InstallationMediaImage {
+  id: string
+  name: string
+  distro: string
+  release: string
+  arch: string
+  provisioner: string
+  format: 'iso'
+}
+
+export interface InstallationMediaState {
+  supported: boolean
+  image_id: string
+  image_name: string
+  boot: 'cdrom' | 'disk'
+  manual_install: boolean
+  running: boolean
+  available: InstallationMediaImage[]
+}
+
+export const getInstallationMedia = (id: ContainerIdentifier) =>
+  api.get<APIResponse<InstallationMediaState>>(`/containers/${id}/installation-media`)
+
+export const updateInstallationMedia = (id: ContainerIdentifier, media: { image_id: string; boot: 'cdrom' | 'disk' }) =>
+  api.put<APIResponse<InstallationMediaState>>(`/containers/${id}/installation-media`, media)
+
 export const createContainer = (data: CreateContainerRequest) =>
   api.post<APIResponse>('/containers', data)
 
@@ -840,8 +869,11 @@ export interface ImageInfo {
   error?: string
   size_bytes: number
   manual_path?: string
+  requires_url?: boolean
   desktop?: string
   provisioner?: string
+  format?: 'iso' | 'qcow2'
+  manual_install?: boolean
   custom?: boolean
   sha256?: string
 }
@@ -854,7 +886,7 @@ export interface CustomKVMImageInput {
   release: string
   arch: string
   url: string
-  provisioner?: 'linux-cloud-init' | 'windows-10' | 'windows-11' | 'lxc-rootfs'
+  provisioner?: 'linux-cloud-init' | 'manual-iso' | 'windows-10' | 'windows-11' | 'lxc-rootfs'
   sha256?: string
 }
 

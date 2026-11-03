@@ -308,7 +308,7 @@ export default function Containers() {
             {selected.size > 0 && `，已选 ${selected.size} 个`}
           </p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:justify-end">
           <Button variant="outline"
             onClick={handleRefreshList}
             disabled={refreshing}
@@ -344,8 +344,8 @@ export default function Containers() {
 
       {displayContainers.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-[260px]">
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
+            <div className="relative w-full min-w-0 max-w-full sm:w-[260px]">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={searchText}
@@ -648,7 +648,7 @@ export default function Containers() {
               <div className="text-xs text-muted-foreground">
                 显示 {pageStart + 1}-{Math.min(pageStart + pageSize, filteredContainers.length)} / {filteredContainers.length}
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex max-w-full flex-wrap items-center gap-1">
                 <Button variant="outline"
                   onClick={() => setPage(1)}
                   disabled={currentPage === 1}
@@ -663,7 +663,7 @@ export default function Containers() {
                 >
                   上一页
                 </Button>
-                <span className="px-2 text-xs text-muted-foreground">
+                <span className="shrink-0 whitespace-nowrap px-2 text-xs text-muted-foreground">
                   {currentPage} / {totalPages}
                 </span>
                 <Button variant="outline"

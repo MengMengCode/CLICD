@@ -644,7 +644,7 @@ func isSubUserContainerActionAllowed(action string, method string) bool {
 	switch {
 	case action == "usage" || action == "traffic" || action == "history" || action == "random-port":
 		return method == http.MethodGet
-	case action == "firewall":
+	case action == "firewall" || action == "installation-media":
 		return method == http.MethodGet || method == http.MethodPut
 	case action == "snapshots":
 		return method == http.MethodGet || method == http.MethodPost

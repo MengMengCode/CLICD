@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import AutoTranslate from './AutoTranslate'
 import BrowserDialogTranslator from './BrowserDialogTranslator'
 
-const compactSidebarQuery = '(max-width: 767px)'
+const compactSidebarQuery = '(max-width: 1023px)'
 
 export default function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia(compactSidebarQuery).matches)
@@ -24,7 +24,7 @@ export default function Layout() {
       <BrowserDialogTranslator />
       <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(collapsed => !collapsed)} />
       <main className={`min-w-0 flex-1 transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-60'}`}>
-        <div className="p-6">
+        <div className="p-4 sm:p-6">
           <Outlet />
         </div>
       </main>

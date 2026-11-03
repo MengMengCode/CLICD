@@ -63,18 +63,18 @@ export function Modal({
           event.preventDefault()
           if (returnFocus.current?.isConnected) returnFocus.current.focus({ preventScroll: true })
         }}
-        className={cn('flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0', maxWidth || widths[wide ? '4xl' : size],
-          fullScreen && 'inset-3 left-3 top-3 h-[calc(100dvh-1.5rem)] max-h-none w-[calc(100vw-1.5rem)] max-w-none translate-x-0 translate-y-0', className)}
+        className={cn('flex max-h-[calc(100dvh-1.5rem)] w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden rounded-lg p-0 sm:w-[calc(100%-3rem)]', maxWidth || widths[wide ? '4xl' : size],
+          fullScreen && 'inset-3 left-3 top-3 h-[calc(100dvh-1.5rem)] max-h-none w-[calc(100vw-1.5rem)] max-w-none translate-x-0 translate-y-0 sm:w-[calc(100vw-1.5rem)]', className)}
       >
-        <DialogHeader className="shrink-0 border-b px-5 py-4 text-left">
-          <div className="flex min-w-0 items-center justify-between gap-3 pr-7">
-            <DialogTitle className="min-w-0 text-base leading-6">{title}</DialogTitle>
-            {extra && <div className="flex shrink-0 items-center gap-2">{extra}</div>}
+        <DialogHeader className="shrink-0 border-b px-4 py-4 text-left sm:px-5">
+          <div className="flex min-w-0 flex-col items-start gap-2 pr-7 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <DialogTitle className="min-w-0 text-base leading-6 [overflow-wrap:anywhere]">{title}</DialogTitle>
+            {extra && <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:shrink-0">{extra}</div>}
           </div>
-          {description && <DialogDescription id={descriptionID}>{description}</DialogDescription>}
+          {description && <DialogDescription id={descriptionID} className="[overflow-wrap:anywhere]">{description}</DialogDescription>}
         </DialogHeader>
         <div className={cn('min-h-0 flex-1 overflow-y-auto', flush ? 'p-0' : 'p-5', bodyClassName)}>{children}</div>
-        {footer && <DialogFooter className="shrink-0 border-t px-5 py-4">{footer}</DialogFooter>}
+        {footer && <DialogFooter className="shrink-0 gap-2 border-t px-4 py-3 sm:space-x-0 sm:px-5 sm:py-4">{footer}</DialogFooter>}
       </DialogContent>
     </Dialog>
   )

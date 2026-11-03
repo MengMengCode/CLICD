@@ -19,6 +19,7 @@ import {
   Clock,
   Copy,
   Cpu,
+  Disc3,
   HardDrive,
   Key,
   Maximize2,
@@ -95,6 +96,7 @@ import WebVNCViewer from '../components/WebVNCViewer'
 import { RingStat } from '../components/RingStats'
 import { WorkloadIdentity, WorkloadStatus } from '../components/WorkloadStatus'
 import IPv6PortMappings from '../components/IPv6PortMappings'
+import KVMInstallMedia from '../components/KVMInstallMedia'
 import { copyToClipboard } from '../utils/clipboard'
 import ResourceStatsPanel, {
   ChartPoint,
@@ -146,6 +148,7 @@ export default function ContainerDetail() {
   const { isSubUser } = useAuth()
   const { t } = useLanguage()
   const [container, setContainer] = useState<Container | null>(null)
+  const [manualInstall, setManualInstall] = useState<boolean | null>(null)
   const [hostInfo, setHostInfo] = useState<HostInfo | null>(null)
   const [usage, setUsage] = useState<ContainerUsage | null>(null)
   const [history, setHistory] = useState<MetricPoint[]>(() => readHistory(containerIdentifier))
@@ -155,6 +158,7 @@ export default function ContainerDetail() {
   const [taskStatus, setTaskStatus] = useState('') // current task type for this container
   const [showSSH, setShowSSH] = useState(false)
   const [showVNC, setShowVNC] = useState(false)
+  const [showInstallationMedia, setShowInstallationMedia] = useState(false)
   const vncFullscreenRef = useRef<HTMLDivElement>(null)
   const [vncFullscreen, setVncFullscreen] = useState(false)
   const [showNat, setShowNat] = useState(false)
@@ -213,6 +217,8 @@ export default function ContainerDetail() {
   const [firewallMessage, setFirewallMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [editingFirewallRule, setEditingFirewallRule] = useState<FirewallRule | null>(null)
   const [showFirewallEditor, setShowFirewallEditor] = useState(false)
+
+  useEffect(() => { setManualInstall(null) }, [containerIdentifier])
 
   const fetchContainer = useCallback(async () => {
     if (!containerIdentifier) return
@@ -586,7 +592,8 @@ export default function ContainerDetail() {
 
   const handleReinstall = async () => {
     if (!containerIdentifier || !selectedTemplate) return
-    const linuxTemplate = !isWindowsTemplate(selectedTemplate)
+    const targetTemplate = templates.find((template) => template.id === selectedTemplate)
+    const linuxTemplate = !isManualISOTemplate(targetTemplate) && !isWindowsTemplate(selectedTemplate)
     if (linuxTemplate && reinstallAuthMode === 'password') {
       const validationError = sshPasswordError(reinstallPasswordDraft.trim())
       if (validationError) {
@@ -935,14 +942,18 @@ export default function ContainerDetail() {
   const isRunning = container.status === 'running'
   const isInitializing = container.status === 'initializing'
   const isKVM = (container.virtualization || 'lxc') === 'kvm'
-  const isWindows = container.template?.includes('windows')
-  const reinstallLinuxTemplate = !isWindowsTemplate(selectedTemplate)
+  const isManualInstall = isKVM && manualInstall === true
+  const managedLogin = !isKVM || manualInstall === false
+  const isWindows = !isManualInstall && container.template?.includes('windows')
+  const reinstallManualISO = isManualISOTemplate(templates.find((template) => template.id === selectedTemplate))
+  const reinstallLinuxTemplate = !reinstallManualISO && !isWindowsTemplate(selectedTemplate)
   const canOpenVNC = isKVM && isRunning
   const isExpired = container.expires_at ? new Date(container.expires_at) < new Date() : false
   const publicIPv4s = container.public_ipv4s || []
   const assignedIPv4List = publicIPv4s.map((item) => item.address).filter(Boolean)
   const allocatableIPv4s = mergeIPv4Choices(hostInfo?.network.public_ipv4_addresses || [], publicIPv4s)
-  const publicHost = assignedIPv4List[0] || hostInfo?.network.public_ipv4 || PUBLIC_HOST
+  // The detected egress IP may belong to an upstream NAT router, not this node.
+  const publicHost = assignedIPv4List[0] || PUBLIC_HOST
   const ipv6NATAddress = container.ipv6_nat_address?.trim() || ''
   const hasIPv6NAT = !!ipv6NATAddress
   const ipv6List = (container.ipv6_addresses || [])
@@ -1088,9 +1099,9 @@ export default function ContainerDetail() {
         <div />
       </div>
 
-      <Card className="p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 items-start gap-3">
+      <Card className="p-4 sm:p-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="flex min-w-0 items-start gap-3 xl:flex-1">
             <div className="relative shrink-0">
               <WorkloadIdentity runtime={container.virtualization} name={container.name} size="lg" />
               {getTemplateIcon(container.template || '') && (
@@ -1113,12 +1124,13 @@ export default function ContainerDetail() {
                 ) : (
                   <InfoTag color="amber">IPv4 NAT {hasNATQuota ? `${mappingCount} 条` : '未分配'}</InfoTag>
                 )}
-                <InfoTag color="violet">{isWindows ? 'RDP' : 'SSH'} {publicEndpoint}</InfoTag>
+                {managedLogin && <InfoTag color="violet">{isWindows ? 'RDP' : 'SSH'} {publicEndpoint}</InfoTag>}
+                {isManualInstall && <InfoTag color="violet">{t('VNC 手动安装')}</InfoTag>}
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center xl:max-w-[60%] xl:justify-end">
             {!isRunning ? (
               <ActionButton dark disabled={!!taskStatus || isExpired} onClick={() => handleAction('start')}>
                 <Play className="w-3.5 h-3.5" />
@@ -1134,7 +1146,7 @@ export default function ContainerDetail() {
                   <RefreshCw className="w-3.5 h-3.5" />
                   {isExpired ? '已到期' : taskStatus === 'restart' ? taskActionLabels['restart'] : '重启'}
                 </ActionButton>
-                {!isWindows && (
+                {!isWindows && managedLogin && (
                   <ActionButton dark onClick={() => setShowSSH(true)}>
                     <TerminalSquare className="w-3.5 h-3.5" />
                     WebSSH
@@ -1168,6 +1180,12 @@ export default function ContainerDetail() {
               <Camera className="w-3.5 h-3.5" />
               快照
             </ActionButton>
+            {isKVM && (
+              <ActionButton onClick={() => setShowInstallationMedia(true)}>
+                <Disc3 className="w-3.5 h-3.5" />
+                {t('KVM 安装介质')}
+              </ActionButton>
+            )}
             <ActionButton onClick={openReinstall} disabled={!!taskStatus || isExpired}>
               <RefreshCw className="w-3.5 h-3.5" />
               {isExpired ? '已到期' : taskStatus === 'reinstall' ? taskActionLabels['reinstall'] : '重装'}
@@ -1182,10 +1200,10 @@ export default function ContainerDetail() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 sm:gap-5">
         <Panel
           title="连接信息"
-          extra={!isWindows ? (
+          extra={!isWindows && managedLogin ? (
             <Button variant="ghost"
               onClick={openResetPassword}
               className="h-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs"
@@ -1195,7 +1213,14 @@ export default function ContainerDetail() {
             </Button>
           ) : undefined}
         >
-          {isWindows ? (
+          {isKVM && manualInstall === null ? (
+            <p className="text-xs leading-5 text-muted-foreground">{t('正在读取安装方式…')}</p>
+          ) : isManualInstall ? (
+            <>
+              <PlainRow label={t('控制台')} value="WebVNC" />
+              <p className="text-xs leading-5 text-muted-foreground">{t('系统账号、密码和网络由你在安装程序中设置，面板不会生成初始登录凭据。')}</p>
+            </>
+          ) : isWindows ? (
             <>
               <PlainRow label="RDP 地址" value={publicEndpoint} mono />
               <PlainRow label="用户名" value="Administrator" mono />
@@ -1298,6 +1323,20 @@ export default function ContainerDetail() {
         </Panel>
       </div>
 
+      {isKVM && <KVMInstallMedia
+        key={containerIdentifier}
+        open={showInstallationMedia}
+        onClose={() => setShowInstallationMedia(false)}
+        containerId={containerIdentifier}
+        status={container.status}
+        taskBusy={!!taskStatus || !!actionLoading}
+        isSubUser={isSubUser}
+        canOpenVNC={canOpenVNC}
+        onOpenVNC={() => { setShowInstallationMedia(false); setShowVNC(true) }}
+        onManualInstallChange={setManualInstall}
+        onUpdated={fetchContainer}
+      />}
+
       {(hasIPv6NAT || (container.ipv6_port_mapping_limit || 0) > 0) && (
         <IPv6PortMappings
           key={container.id}
@@ -1310,9 +1349,9 @@ export default function ContainerDetail() {
 
       {/* Container resource ring stats (matching host dashboard style) */}
       {container && (
-        <Card className="p-5">
+        <Card className="p-4 [container-type:inline-size] sm:p-5">
           <h2 className="text-sm font-semibold text-foreground mb-4">状态</h2>
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-6 [@container(min-width:26rem)]:grid-cols-4">
             <RingStat
               value={cpuPct}
               label="CPU"
@@ -2100,6 +2139,7 @@ export default function ContainerDetail() {
                 ))}
               </NativeSelect>
             </Field>
+            {reinstallManualISO && <Alert className="text-xs leading-5">{t('重装将清空系统盘，并挂载 ISO 通过 VNC 手动安装；分区、账号和网络需自行设置，不会注入 SSH 凭据。')}</Alert>}
             {reinstallLinuxTemplate && (
               <Card className="px-3 py-3 text-sm">
                 <div className="mb-2 font-medium text-foreground">登录方式</div>
@@ -2282,7 +2322,7 @@ function StatusBadge({ running, initializing, status, taskLabel }: { running: bo
 }
 
 function InfoTag({ children }: { color: 'blue' | 'emerald' | 'amber' | 'violet' | 'slate' | 'red'; children: ReactNode }) {
-  return <Badge variant="secondary" className="px-1.5 py-0.5 text-[11px] whitespace-nowrap">{children}</Badge>
+  return <Badge variant="secondary" className="max-w-full whitespace-normal px-1.5 py-0.5 text-[11px] [overflow-wrap:anywhere]">{children}</Badge>
 }
 
 function ActionButton({ children, onClick, disabled, dark = false }: { children: ReactNode; onClick: () => void; disabled?: boolean; dark?: boolean }) {
@@ -2290,7 +2330,7 @@ function ActionButton({ children, onClick, disabled, dark = false }: { children:
     <Button variant={dark ? 'default' : 'outline'}
       onClick={onClick}
       disabled={disabled}
-      className="h-auto inline-flex items-center gap-1 px-2.5 py-1.5 text-xs whitespace-nowrap"
+      className="inline-flex h-auto min-h-8 min-w-0 items-center gap-1 whitespace-normal px-2.5 py-1.5 text-xs"
     >
       {children}
     </Button>
@@ -2345,22 +2385,22 @@ function MiniChart({ points, stroke, fill }: { points: number[]; stroke: string;
 
 function Panel({ title, children, extra }: { title: string; children: ReactNode; extra?: ReactNode }) {
   return (
-    <Card className="p-5">
-      <div className="flex items-center justify-between mb-4">
+    <Card className="min-w-0 p-4 sm:p-5">
+      <div className="mb-4 flex min-w-0 flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         {extra}
       </div>
-      <div className="space-y-3 text-sm">{children}</div>
+      <div className="min-w-0 space-y-3 text-sm">{children}</div>
     </Card>
   )
 }
 
 function PlainRow({ label, value, mono = false, copyValue, onCopy, children }: { label: string; value: string; mono?: boolean; copyValue?: string; onCopy?: (value: string) => void; children?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-muted-foreground">{label}</span>
-      <div className="flex items-center gap-1 min-w-0">
-        <span className={`text-foreground truncate  ${mono ? "font-mono text-xs" : ""}`}>{value}</span>
+    <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <div className="flex min-w-0 max-w-full items-start gap-1 sm:max-w-[65%]">
+        <span className={`min-w-0 text-foreground [overflow-wrap:anywhere] sm:text-right ${mono ? "font-mono text-xs" : ""}`} title={value}>{value}</span>
         {children}
         {copyValue && onCopy && (
           <Button variant="ghost" onClick={() => onCopy(copyValue)} className="h-auto p-0.5" title="复制">
@@ -2651,7 +2691,7 @@ function Segmented({ value, onChange }: { value: IPAssignMode; onChange: (value:
 
 function Modal({ title, children, onClose, wide = false, extra, flush = false, fullScreen = false, dismissible = true }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean; extra?: ReactNode; flush?: boolean; fullScreen?: boolean; dismissible?: boolean }) {
   return (
-    <SharedModal title={title} onClose={onClose} maxWidth={wide ? 'max-w-5xl' : 'max-w-md'} extra={extra} flush={flush} fullScreen={fullScreen} dismissible={dismissible} className={fullScreen ? 'max-h-none' : 'max-h-[92vh]'} bodyClassName={flush ? 'overflow-hidden' : 'p-5 overflow-y-auto'}>
+    <SharedModal title={title} onClose={onClose} maxWidth={wide ? 'max-w-5xl' : 'max-w-md'} extra={extra} flush={flush} fullScreen={fullScreen} dismissible={dismissible} className={fullScreen ? 'max-h-none' : 'max-h-[calc(100dvh-1.5rem)]'} bodyClassName={flush ? 'overflow-hidden' : 'p-4 overflow-y-auto sm:p-5'}>
       {children}
     </SharedModal>
   )
@@ -2884,6 +2924,10 @@ function TrafficBar({ container }: { container: Container }) {
       <Progress value={Math.min(totalPct, 100)} className="h-2.5 w-full" />
     </div>
   )
+}
+
+function isManualISOTemplate(template?: Template) {
+  return template?.manual_install === true || template?.provisioner === 'manual-iso'
 }
 
 function isWindowsTemplate(templateID: string) {

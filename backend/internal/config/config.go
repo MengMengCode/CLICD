@@ -112,6 +112,9 @@ type Container struct {
 	LXCName                       string                 `json:"lxc_name,omitempty"`
 	KVMName                       string                 `json:"kvm_name,omitempty"`
 	DiskImage                     string                 `json:"disk_image,omitempty"`
+	ManualInstall                 bool                   `json:"manual_install,omitempty"`
+	InstallationMediaImageID      string                 `json:"installation_media_image_id,omitempty"`
+	InstallationMediaBoot         string                 `json:"installation_media_boot,omitempty"`
 	StoragePoolID                 string                 `json:"storage_pool_id,omitempty"`
 	StoragePath                   string                 `json:"storage_path,omitempty"`
 	MACAddress                    string                 `json:"mac_address,omitempty"`
@@ -821,6 +824,7 @@ type ClicdConfig struct {
 
 const (
 	KVMProvisionerLinuxCloudInit = "linux-cloud-init"
+	KVMProvisionerManualISO      = "manual-iso"
 	KVMProvisionerWindows10      = "windows-10"
 	KVMProvisionerWindows11      = "windows-11"
 )

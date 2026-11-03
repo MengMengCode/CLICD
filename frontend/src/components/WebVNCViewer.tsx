@@ -166,17 +166,17 @@ export default function WebVNCViewer({ containerName, onClose }: WebVNCViewerPro
   }, [containerName])
 
   return (
-    <Card className="flex h-full flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between border-b border-border bg-muted px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <Monitor className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium text-foreground">WebVNC - {containerName}</span>
-          {status === 'connected' && <Badge variant="secondary" className="px-1.5 py-0.5 text-xs">已连接</Badge>}
-          {status === 'connecting' && <Badge variant="secondary" className="px-1.5 py-0.5 text-xs">连接中...</Badge>}
-          {status === 'disconnected' && <Badge variant="secondary" className="px-1.5 py-0.5 text-xs">已断开</Badge>}
-          {status === 'error' && <Badge variant="destructive" className="px-1.5 py-0.5 text-xs">连接失败</Badge>}
+    <Card className="flex h-full min-w-0 flex-col overflow-hidden">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-muted px-4 py-2.5">
+        <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-1">
+          <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground" title={`WebVNC - ${containerName}`}>WebVNC - {containerName}</span>
+          {status === 'connected' && <Badge variant="secondary" className="shrink-0 whitespace-nowrap px-1.5 py-0.5 text-xs">已连接</Badge>}
+          {status === 'connecting' && <Badge variant="secondary" className="shrink-0 whitespace-nowrap px-1.5 py-0.5 text-xs">连接中...</Badge>}
+          {status === 'disconnected' && <Badge variant="secondary" className="shrink-0 whitespace-nowrap px-1.5 py-0.5 text-xs">已断开</Badge>}
+          {status === 'error' && <Badge variant="destructive" className="shrink-0 whitespace-nowrap px-1.5 py-0.5 text-xs">连接失败</Badge>}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           <Button variant="ghost" onClick={() => rfbRef.current?.sendCtrlAltDel()} className="h-auto inline-flex items-center gap-1 px-2 py-1.5 text-xs" title="发送 Ctrl+Alt+Del">
             <Send className="h-3.5 w-3.5" />
             Ctrl+Alt+Del

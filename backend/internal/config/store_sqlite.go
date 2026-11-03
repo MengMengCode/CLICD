@@ -195,6 +195,9 @@ func ensureSchema() error {
 			lxc_name TEXT,
 			kvm_name TEXT,
 			disk_image TEXT,
+			manual_install INTEGER NOT NULL DEFAULT 0,
+			installation_media_image_id TEXT NOT NULL DEFAULT '',
+			installation_media_boot TEXT NOT NULL DEFAULT '',
 			storage_pool_id TEXT,
 			storage_path TEXT,
 			mac_address TEXT,
@@ -469,6 +472,9 @@ func ensureSchemaMigrations() error {
 		{"containers", "allowed_image_ids", "TEXT"},
 		{"containers", "image_limit_configured", "INTEGER NOT NULL DEFAULT 0"},
 		{"containers", "restore_on_host_boot", "INTEGER NOT NULL DEFAULT 0"},
+		{"containers", "manual_install", "INTEGER NOT NULL DEFAULT 0"},
+		{"containers", "installation_media_image_id", "TEXT NOT NULL DEFAULT ''"},
+		{"containers", "installation_media_boot", "TEXT NOT NULL DEFAULT ''"},
 		{"containers", "storage_pool_id", "TEXT"},
 		{"containers", "storage_path", "TEXT"},
 		{"containers", "lan_ipv4_mode", "TEXT"},
@@ -798,8 +804,9 @@ func saveContainers(tx *sql.Tx) error {
 			snapshot_schedule_enabled, snapshot_schedule_interval_hours, snapshot_schedule_time,
 			snapshot_schedule_last_run, snapshot_schedule_next_run, snapshot_schedule_created_by,
 			firewall_enabled, firewall_default_action, firewall_rules, allowed_image_ids, image_limit_configured,
-			ipv6_nat_address, ipv6_port_mappings, ipv6_nat_sync_ipv4, ipv6_port_mapping_limit
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			ipv6_nat_address, ipv6_port_mappings, ipv6_nat_sync_ipv4, ipv6_port_mapping_limit,
+			manual_install, installation_media_image_id, installation_media_boot
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			c.ID, c.UUID, c.Name, c.Virtualization, c.LXCName, c.KVMName, c.DiskImage, c.StoragePoolID, c.StoragePath, c.MACAddress, c.Template,
 			c.VCPU, c.RAMMB, c.DiskGB, c.NetworkBWMbps, c.NetworkDownMbps, c.NetworkUpMbps,
 			c.MonthlyTrafficGB, c.TrafficMode, c.TrafficInGB,
@@ -812,6 +819,7 @@ func saveContainers(tx *sql.Tx) error {
 			c.SnapshotScheduleLastRun, c.SnapshotScheduleNextRun, c.SnapshotScheduleCreatedBy,
 			boolInt(c.FirewallEnabled), normalizeFirewallDefaultAction(c.FirewallDefaultAction), marshalFirewallRules(c.FirewallRules), allowedImageIDs, boolInt(c.ImageLimitConfigured),
 			c.IPv6NATAddress, marshalIPv6PortMappings(c.IPv6PortMappings), boolPtrInt(c.IPv6NATSyncIPv4), c.IPv6PortMappingLimit,
+			boolInt(c.ManualInstall), c.InstallationMediaImageID, c.InstallationMediaBoot,
 		); err != nil {
 			return err
 		}
@@ -976,7 +984,8 @@ func loadContainers() ([]Container, error) {
 		snapshot_schedule_enabled, snapshot_schedule_interval_hours, snapshot_schedule_time,
 		snapshot_schedule_last_run, snapshot_schedule_next_run, snapshot_schedule_created_by,
 		firewall_enabled, firewall_default_action, firewall_rules, allowed_image_ids, image_limit_configured,
-			ipv6_nat_address, ipv6_port_mappings, ipv6_nat_sync_ipv4, ipv6_port_mapping_limit
+			ipv6_nat_address, ipv6_port_mappings, ipv6_nat_sync_ipv4, ipv6_port_mapping_limit,
+		manual_install, installation_media_image_id, installation_media_boot
 		FROM containers ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -986,7 +995,7 @@ func loadContainers() ([]Container, error) {
 	result := []Container{}
 	for rows.Next() {
 		var c Container
-		var scheduleEnabled, firewallEnabled, imageLimitConfigured, restoreOnHostBoot int
+		var scheduleEnabled, firewallEnabled, imageLimitConfigured, restoreOnHostBoot, manualInstall int
 		var firewallDefaultAction string
 		var firewallRulesJSON, allowedImageIDs, ipv6PortMappingsJSON sql.NullString
 		var ipv6NATSyncIPv4 sql.NullInt64
@@ -1007,6 +1016,7 @@ func loadContainers() ([]Container, error) {
 			&c.SnapshotScheduleLastRun, &c.SnapshotScheduleNextRun, &c.SnapshotScheduleCreatedBy,
 			&firewallEnabled, &firewallDefaultAction, &firewallRulesJSON, &allowedImageIDs, &imageLimitConfigured,
 			&c.IPv6NATAddress, &ipv6PortMappingsJSON, &ipv6NATSyncIPv4, &c.IPv6PortMappingLimit,
+			&manualInstall, &c.InstallationMediaImageID, &c.InstallationMediaBoot,
 		); err != nil {
 			return nil, err
 		}
@@ -1027,6 +1037,7 @@ func loadContainers() ([]Container, error) {
 		}
 		c.LANIPv4Gateway = lanIPv4Gateway.String
 		c.SnapshotScheduleEnabled = scheduleEnabled != 0
+		c.ManualInstall = manualInstall != 0
 		c.RestoreOnHostBoot = restoreOnHostBoot != 0
 		c.FirewallEnabled = firewallEnabled != 0
 		c.FirewallDefaultAction = normalizeFirewallDefaultAction(firewallDefaultAction)
