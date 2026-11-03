@@ -39,6 +39,25 @@ http://YOUR_SERVER_IP:8999
 
 首次登录请使用安装脚本输出的管理员账号信息。生产环境建议在防火墙或反向代理层限制访问来源，并尽快修改默认账号和密码。
 
+## 可选的 KVM 恢复/克隆依赖 {#kvm-guestfs}
+
+KVM 完整恢复、完整克隆和实例模板实例化会使用 `virt-customize` 离线更新客户机网络身份。安装器在支持 KVM 的架构上按下列顺序尝试安装，并检查该命令是否实际可用：
+
+| 系统 | 候选包 |
+| --- | --- |
+| Debian / Ubuntu | `guestfs-tools`，未提供命令时回退 `libguestfs-tools`。 |
+| RHEL / Rocky / AlmaLinux / Fedora | `libguestfs-tools`，再尝试 `guestfs-tools`、`libguestfs-tools-c`。 |
+| Alpine | 尝试 `guestfs-tools`、`libguestfs-tools`；仓库/架构不提供时输出明确提示。 |
+
+该依赖缺失不会阻断基本 LXC/KVM 安装，但相应 KVM 恢复/克隆任务会失败，不会跳过身份更新而报告成功。Debian/Ubuntu 的命令由 [guestfs-tools](https://packages.ubuntu.com/en/jammy/arm64/guestfs-tools/filelist) 提供；旧版 RHEL 的包名可参照 [Red Hat 文档](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/7/html/virtualization_deployment_and_administration_guide/sect-guest_virtual_machine_disk_access_with_offline_tools-using_virt_customize)。
+
+```bash
+command -v virt-customize
+virt-customize --version
+```
+
+受管 LXC ext4 loop 磁盘扩容还需要 `e2fsck`、`resize2fs`、`losetup` 和 mount 工具；安装器保留 `e2fsprogs` 等相关依赖。`conntrack` 仍用于 NAT 连接跟踪清理，应保留。
+
 ## 卸载
 
 ```bash

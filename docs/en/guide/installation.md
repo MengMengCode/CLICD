@@ -39,6 +39,25 @@ http://YOUR_SERVER_IP:8999
 
 Use the administrator credentials printed by the installer for the first login. In production, restrict access at the firewall or reverse proxy layer and change the default username and password as soon as possible.
 
+## Optional KVM Restore and Clone Dependencies {#kvm-guestfs}
+
+KVM full restore, full clone and instance-template instantiation use `virt-customize` to update guest network identity offline. On supported KVM architectures, the installer tries these packages in order and checks whether the command is actually available:
+
+| Distribution | Candidate packages |
+| --- | --- |
+| Debian / Ubuntu | `guestfs-tools`, falling back to `libguestfs-tools`. |
+| RHEL / Rocky / AlmaLinux / Fedora | `libguestfs-tools`, then `guestfs-tools` and `libguestfs-tools-c`. |
+| Alpine | Try `guestfs-tools` and `libguestfs-tools`; show a clear notice if unavailable for the repository/architecture. |
+
+A missing dependency does not block basic LXC/KVM installation. The affected KVM restore/clone tasks fail explicitly instead of skipping identity updates. See the Ubuntu [guestfs-tools file list](https://packages.ubuntu.com/en/jammy/arm64/guestfs-tools/filelist) and the [Red Hat package documentation](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/7/html/virtualization_deployment_and_administration_guide/sect-guest_virtual_machine_disk_access_with_offline_tools-using_virt_customize).
+
+```bash
+command -v virt-customize
+virt-customize --version
+```
+
+Growing managed LXC ext4 loop images also requires `e2fsck`, `resize2fs`, `losetup` and mount utilities. The installer retains `e2fsprogs` and related dependencies. Keep `conntrack`, which is still used for NAT connection cleanup.
+
 ## Uninstall
 
 ```bash

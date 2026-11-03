@@ -29,7 +29,9 @@
     "lucide-react": "^0.454.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-is": "19.2.8",
     "react-router": "8.3.0",
+    "recharts": "3.8.0",
     "sonner": "^2.0.8",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7"

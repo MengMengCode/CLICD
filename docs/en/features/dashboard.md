@@ -1,5 +1,7 @@
 # Dashboard
 
+Host and instance metric history is sampled about every 30 seconds and persisted in SQLite for up to 7 days across service restarts. Task records and stage logs are persisted too; see [Tasks and Metric History](./tasks).
+
 The dashboard shows the overall state of the host and virtualization resources.
 
 ## Metrics

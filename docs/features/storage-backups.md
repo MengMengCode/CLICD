@@ -1,0 +1,85 @@
+# 磁盘、完整备份与克隆
+
+实例详情页的磁盘管理和备份操作由管理员执行；子用户可查看自己授权实例的磁盘信息。耗时操作进入[任务队列](./tasks)，返回 `task_id`，应等待任务完成后再进行下一项磁盘或生命周期操作。
+
+## 系统盘扩容
+
+必须先正常关闭实例。后端检查 LXC/libvirt 的实际状态，运行、暂停或冻结状态都不能修改磁盘。
+
+| 类型 | 支持范围 | 扩容后的操作 |
+| --- | --- | --- |
+| KVM | 受管 QCOW2 系统盘和数据盘离线扩容，只增不减。 | 面板只增加虚拟磁盘容量；客户机内的分区、LVM、文件系统需自行扩展。 |
+| LXC | 受管 ext4 loop 镜像离线扩容，执行文件系统检查和 `resize2fs`。 | 成功后启动即可使用；目录型 rootfs、其他文件系统和 quota 后端暂不提供通用扩容。 |
+
+磁盘管理显示实际镜像容量和已分配的宿主机空间，两者可能因稀疏文件而不同。资源限制接口不能替代实际磁盘扩容。
+
+## 数据盘
+
+每台实例最多管理 8 块数据盘。添加时指定名称、容量和可选存储池；LXC 还需指定客户机挂载路径。
+
+- KVM 数据盘使用独立 QCOW2 文件。连接后由客户机自行分区、格式化并配置持久挂载。
+- LXC 数据盘使用独立 ext4 镜像，挂载在宿主机受管目录后绑定进容器。客户机路径仅允许 `/data`、`/mnt`、`/srv` 及其子目录；路径不能交叠、经过符号链接或隐藏已有的非空目录。
+- 添加、扩容、连接、断开和删除均要求实例停止。断开保留文件；删除需要显式确认 `delete_data: true`，会永久删除受管数据文件。
+- 开关机和重装系统盘会保留数据盘配置和数据。完整备份包含连接和已断开的所有受管数据盘。
+
+## 完整备份
+
+完整备份保存系统盘、全部数据盘及必要的实例配置，可以下载为 `.clicd.tar.gz`，再上传到兼容架构的 CLICD 节点恢复。KVM 磁盘会转换为不依赖原镜像 backing file 的独立 QCOW2；LXC 保存独立 ext4 镜像。
+
+创建备份、完整克隆和保存实例模板采用冷复制。运行中的源实例会被暂时关闭，复制后尝试恢复原运行状态；请预留业务中断窗口和足够的存储空间。
+
+当前可移植格式的边界：
+
+- 归档文件和解包后的磁盘文件负载分别最多 **64 GiB**。LXC 使用 raw 镜像，系统盘与数据盘的逻辑容量也会计入这一负载；KVM 的稀疏 QCOW2 虚拟容量可大于 64 GiB，单盘虚拟容量最多 16 TiB。
+- 导入/恢复会校验格式版本、CPU 架构、磁盘清单和每个文件的 SHA-256；不接受缺少数据盘的归档。
+- 压缩率不会绕过解包负载限制；KVM 在停机后估算独立 QCOW2 的实际文件大小，并检查临时复制空间。创建、解包和恢复仍需额外空间。
+
+备份保留客户机账户、密码和磁盘内数据，也可能包含面板保存的 SSH 登录信息。请按敏感数据管理下载的归档。
+
+## 恢复、完整克隆和实例模板
+
+三种操作都会创建新实例，并默认保持 **停止**，不会覆盖原实例：
+
+| 操作 | 来源 |
+| --- | --- |
+| 恢复备份 | 本机创建或上传的完整备份。 |
+| 完整克隆 | 当前实例的独立全盘副本。 |
+| 实例模板实例化 | 从已安装实例保存的完整模板，可重复创建。 |
+
+实例模板页面支持一次创建 1–10 个副本。多个副本使用名称前缀和数字后缀，每个副本有独立任务；部分失败时会保留已提交的任务并显示对应名称的错误。
+
+新实例生成新的 ID、UUID、MAC 和宿主机存储路径。原公网 IPv4/IPv6、端口映射、子用户授权、防火墙策略及计划快照不会直接复制；可按请求分配新的 NAT 管理端口。Linux 客户机还会更新主机名、机器标识、SSH 主机密钥和 DHCP 网络配置；Windows 网络在首次启动时调整为 DHCP。**客户机账户和登录密码保留**，不会伪造新的安装密码。
+
+KVM 恢复、克隆和模板实例化需要宿主机提供 guestfs 的 `virt-customize`、`virt-inspector`、`virt-cat`、`virt-edit` 和 `virt-filesystems`，用于离线更新客户机网络身份。仅支持工具能够识别的单系统安装；加密、多系统和未安装系统的空盘会明确失败。Windows 首次启动网络配置还需要 guestfs 可用的 `rhsrvany` 或 `pvvxsvc` 辅助程序；缺少依赖时不会发布新实例。安装包和排查方式见[安装说明](../guide/installation#kvm-guestfs)。
+
+## 与快照的关系
+
+现有快照仅支持系统盘工作流。实例只要配置了数据盘，创建或恢复旧快照、启用计划快照都会被拒绝，避免漏盘回滚；已断开的数据盘也计入这一判断。添加数据盘前需先关闭现有计划快照。
+
+需要带数据盘回滚或迁移时使用完整备份。快照配额不控制完整备份文件数量，应在备份管理页单独清理不再需要的文件。
+
+## API
+
+```http
+GET /api/v1/containers/{id}/disks
+POST /api/v1/containers/{id}/disks
+PUT /api/v1/containers/{id}/disks/system
+PUT /api/v1/containers/{id}/disks/{disk_id}
+PUT /api/v1/containers/{id}/disks/{disk_id}/attachment
+DELETE /api/v1/containers/{id}/disks/{disk_id}
+POST /api/v1/containers/{id}/backup
+POST /api/v1/containers/{id}/clone
+POST /api/v1/containers/{id}/template
+GET /api/v1/backups
+POST /api/v1/backups
+GET /api/v1/backups/{artifact_id}
+DELETE /api/v1/backups/{artifact_id}
+POST /api/v1/backups/{artifact_id}/restore
+GET /api/v1/instance-templates
+DELETE /api/v1/instance-templates/{artifact_id}
+POST /api/v1/instance-templates/{artifact_id}/instantiate
+```
+
+扩容请求为 `{"size_gb": 20}`，连接状态为 `{"attached": false}`，删除为 `{"delete_data": true}`。数据盘和恢复操作只接受磁盘/归档 ID，不接受任意宿主机路径。
+
+备份上传使用 `multipart/form-data` 的 `file` 字段；可附 `name` 和 `storage_pool_id`。恢复、克隆和模板实例化使用 `{"name":"new-instance","storage_pool_id":"pool-id","assign_nat":true,"port_mapping_count":2}`。异步请求返回 `202` 和 `data.task_id`；上传备份完成返回 `201`，并不自动恢复实例。

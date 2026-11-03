@@ -202,6 +202,8 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
   const manualIPv4s = form.public_ipv4s || []
   const selectedTemplate = templates.find((template) => template.id === form.template_id)
   const manualISO = form.virtualization === 'kvm' && isManualISOTemplate(selectedTemplate)
+  const manualDisk = selectedTemplate?.provisioner === 'manual-disk'
+  const manualMessage = manualDisk ? '预装磁盘保留原系统账号和配置，请通过 VNC 检查网络，不会注入新密码。' : '此 ISO 将通过 VNC 手动安装系统，磁盘分区、账号和网络需要自行设置，不会注入 SSH 密码或云初始化。'
   const maxVCPU = hostInfo?.cpu.cores || 64
   const maxRAMMB = hostInfo?.ram.total_mb ? Number(hostInfo.ram.total_mb) : undefined
   const kvmAvailable = !!hostInfo?.runtime?.kvm_available
@@ -217,7 +219,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
     }
   }, [hostInfo, kvmAvailable, form.virtualization])
   const maxDiskGB = hostInfo?.disk.total_gb ? Math.max(1, Math.floor(hostInfo.disk.total_gb)) : undefined
-  const resourceErrors = validateResourceInputs(form, maxVCPU, maxRAMMB, maxDiskGB, manualISO)
+  const resourceErrors = validateResourceInputs(form, maxVCPU, maxRAMMB, maxDiskGB, manualISO, selectedTemplate?.min_disk_gb)
   const lanIPv4Enabled = form.lan_ipv4_mode === 'dhcp' || form.lan_ipv4_mode === 'static'
   const lanStaticEnabled = form.lan_ipv4_mode === 'static'
   const natEnabled = form.assign_nat !== false && !lanIPv4Enabled
@@ -529,7 +531,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                   )}
                 </Field>
               </FormSection>
-              {manualISO && <Alert className="text-xs leading-5">{t('此 ISO 将通过 VNC 手动安装系统，磁盘分区、账号和网络需要自行设置，不会注入 SSH 密码或云初始化。')}</Alert>}
+              {manualISO && <Alert className="text-xs leading-5">{t(manualMessage)}</Alert>}
               {linuxTemplate && (
                 <FormSection title={t('登录凭据')}>
                   <Field label={t('认证方式')} layout="row"><div className="grid grid-cols-3 gap-2">
@@ -624,7 +626,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                 <Field htmlFor="create-disk" layout="row" label="磁盘 (GB)">
                   <NumberInput id="create-disk"
                     value={form.disk_gb}
-                    min={getTemplateMinDiskGB(form.template_id, form.virtualization, manualISO)}
+                    min={Math.max(getTemplateMinDiskGB(form.template_id, form.virtualization, manualISO), selectedTemplate?.min_disk_gb || 0)}
                     step={form.virtualization === 'lxc' ? 0.25 : 1}
                     max={maxDiskGB}
                     invalid={!!resourceErrors.disk_gb}
@@ -691,7 +693,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                 </NativeSelect>
               )}
 
-            </Field>{manualISO && <Alert className="text-xs leading-5">{t('此 ISO 将通过 VNC 手动安装系统，磁盘分区、账号和网络需要自行设置，不会注入 SSH 密码或云初始化。')}</Alert>}</FormSection>
+            </Field>{manualISO && <Alert className="text-xs leading-5">{t(manualMessage)}</Alert>}</FormSection>
             {templates.length > 0 && <FormSection title={t('重装权限')}><Field layout="row" label="子用户可用镜像">
               <Card className="p-3">
                 <div className="mb-2 text-xs text-muted-foreground">默认勾选当前系统；取消后，子用户也不能重装该系统。</div>
@@ -1190,7 +1192,7 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
             <h3 className="mb-2 text-sm font-semibold text-foreground">{t('镜像与登录')}</h3>
             <dl className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
               <ReviewItem label={t('系统镜像')} value={selectedTemplate?.name || '-'} />
-              {manualISO && <ReviewItem label={t('安装方式')} value={t('ISO / VNC 手动安装，不注入凭据')} />}
+              {manualISO && <ReviewItem label={t('安装方式')} value={t(manualDisk ? '预装磁盘，保留原账号与配置' : 'ISO / VNC 手动安装，不注入凭据')} />}
               <ReviewItem label={t('登录方式')} value={
                 manualISO
                   ? t('通过 VNC 手动安装')
@@ -1388,13 +1390,13 @@ function normalizeLXCDisk(value: number) {
   return Math.max(0.25, Number(rounded.toFixed(2)))
 }
 
-function validateResourceInputs(form: CreateContainerRequest, maxVCPU: number, maxRAMMB?: number, maxDiskGB?: number, manualISO = false) {
+function validateResourceInputs(form: CreateContainerRequest, maxVCPU: number, maxRAMMB?: number, maxDiskGB?: number, manualISO = false, templateMin = 0) {
   const errors: Partial<Record<'vcpu' | 'ram_mb' | 'disk_gb', string>> = {}
   const windows = !manualISO && isWindowsTemplate(form.template_id)
   const windows11 = windows && form.template_id.toLowerCase().includes('windows-11')
   const minVCPU = windows ? 2 : (form.virtualization === 'kvm' ? 1 : 0.25)
   const minRAMMB = manualISO ? 512 : windows11 ? 4096 : windows ? 2048 : 128
-  const minDiskGB = getTemplateMinDiskGB(form.template_id, form.virtualization, manualISO)
+  const minDiskGB = Math.max(getTemplateMinDiskGB(form.template_id, form.virtualization, manualISO), templateMin)
 
   if (!Number.isFinite(form.vcpu)) {
     errors.vcpu = '请输入 vCPU'
@@ -1500,10 +1502,11 @@ function getLANDHCPInterfaces(report: HostProbeReport | null) {
 }
 
 function isManualISOTemplate(template?: Template) {
-  return template?.manual_install === true || template?.provisioner === 'manual-iso'
+  return template?.manual_install === true || template?.provisioner === 'manual-iso' || template?.provisioner === 'manual-disk'
 }
 
 function applyTemplateDefaults(form: CreateContainerRequest, template?: Template): CreateContainerRequest {
+  if (template?.min_disk_gb && form.disk_gb < template.min_disk_gb) form = { ...form, disk_gb: template.min_disk_gb }
   if (isManualISOTemplate(template) || !isWindowsTemplate(form.template_id)) return form
   return {
     ...form,

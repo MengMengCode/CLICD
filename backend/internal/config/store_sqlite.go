@@ -419,7 +419,10 @@ func ensureSchema() error {
 			return fmt.Errorf("failed to create sqlite schema: %v", err)
 		}
 	}
-	return ensureSchemaMigrations()
+	if err := ensureSchemaMigrations(); err != nil {
+		return err
+	}
+	return ensureHistorySchema()
 }
 
 func ensureSchemaMigrations() error {
@@ -475,6 +478,8 @@ func ensureSchemaMigrations() error {
 		{"containers", "manual_install", "INTEGER NOT NULL DEFAULT 0"},
 		{"containers", "installation_media_image_id", "TEXT NOT NULL DEFAULT ''"},
 		{"containers", "installation_media_boot", "TEXT NOT NULL DEFAULT ''"},
+		{"containers", "data_disks", "TEXT NOT NULL DEFAULT '[]'"},
+		{"containers", "standalone", "INTEGER NOT NULL DEFAULT 0"},
 		{"containers", "storage_pool_id", "TEXT"},
 		{"containers", "storage_path", "TEXT"},
 		{"containers", "lan_ipv4_mode", "TEXT"},
@@ -792,6 +797,10 @@ func saveContainers(tx *sql.Tx) error {
 	for _, c := range AppConfig.Containers {
 		NormalizeContainerResourceAliases(&c)
 		allowedImageIDs := encodeStringSlice(c.AllowedImageIDs)
+		dataDisks, err := json.Marshal(c.DataDisks)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`INSERT INTO containers (
 			id, uuid, name, virtualization, lxc_name, kvm_name, disk_image, storage_pool_id, storage_path, mac_address, template,
 			vcpu, ram_mb, disk_gb, network_bw_mbps, network_down_mbps, network_up_mbps,
@@ -805,8 +814,8 @@ func saveContainers(tx *sql.Tx) error {
 			snapshot_schedule_last_run, snapshot_schedule_next_run, snapshot_schedule_created_by,
 			firewall_enabled, firewall_default_action, firewall_rules, allowed_image_ids, image_limit_configured,
 			ipv6_nat_address, ipv6_port_mappings, ipv6_nat_sync_ipv4, ipv6_port_mapping_limit,
-			manual_install, installation_media_image_id, installation_media_boot
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			manual_install, installation_media_image_id, installation_media_boot, data_disks, standalone
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			c.ID, c.UUID, c.Name, c.Virtualization, c.LXCName, c.KVMName, c.DiskImage, c.StoragePoolID, c.StoragePath, c.MACAddress, c.Template,
 			c.VCPU, c.RAMMB, c.DiskGB, c.NetworkBWMbps, c.NetworkDownMbps, c.NetworkUpMbps,
 			c.MonthlyTrafficGB, c.TrafficMode, c.TrafficInGB,
@@ -819,7 +828,7 @@ func saveContainers(tx *sql.Tx) error {
 			c.SnapshotScheduleLastRun, c.SnapshotScheduleNextRun, c.SnapshotScheduleCreatedBy,
 			boolInt(c.FirewallEnabled), normalizeFirewallDefaultAction(c.FirewallDefaultAction), marshalFirewallRules(c.FirewallRules), allowedImageIDs, boolInt(c.ImageLimitConfigured),
 			c.IPv6NATAddress, marshalIPv6PortMappings(c.IPv6PortMappings), boolPtrInt(c.IPv6NATSyncIPv4), c.IPv6PortMappingLimit,
-			boolInt(c.ManualInstall), c.InstallationMediaImageID, c.InstallationMediaBoot,
+			boolInt(c.ManualInstall), c.InstallationMediaImageID, c.InstallationMediaBoot, string(dataDisks), boolInt(c.Standalone),
 		); err != nil {
 			return err
 		}
@@ -985,7 +994,7 @@ func loadContainers() ([]Container, error) {
 		snapshot_schedule_last_run, snapshot_schedule_next_run, snapshot_schedule_created_by,
 		firewall_enabled, firewall_default_action, firewall_rules, allowed_image_ids, image_limit_configured,
 			ipv6_nat_address, ipv6_port_mappings, ipv6_nat_sync_ipv4, ipv6_port_mapping_limit,
-		manual_install, installation_media_image_id, installation_media_boot
+		manual_install, installation_media_image_id, installation_media_boot, data_disks, standalone
 		FROM containers ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -995,7 +1004,8 @@ func loadContainers() ([]Container, error) {
 	result := []Container{}
 	for rows.Next() {
 		var c Container
-		var scheduleEnabled, firewallEnabled, imageLimitConfigured, restoreOnHostBoot, manualInstall int
+		var scheduleEnabled, firewallEnabled, imageLimitConfigured, restoreOnHostBoot, manualInstall, standalone int
+		var dataDisksJSON string
 		var firewallDefaultAction string
 		var firewallRulesJSON, allowedImageIDs, ipv6PortMappingsJSON sql.NullString
 		var ipv6NATSyncIPv4 sql.NullInt64
@@ -1016,7 +1026,7 @@ func loadContainers() ([]Container, error) {
 			&c.SnapshotScheduleLastRun, &c.SnapshotScheduleNextRun, &c.SnapshotScheduleCreatedBy,
 			&firewallEnabled, &firewallDefaultAction, &firewallRulesJSON, &allowedImageIDs, &imageLimitConfigured,
 			&c.IPv6NATAddress, &ipv6PortMappingsJSON, &ipv6NATSyncIPv4, &c.IPv6PortMappingLimit,
-			&manualInstall, &c.InstallationMediaImageID, &c.InstallationMediaBoot,
+			&manualInstall, &c.InstallationMediaImageID, &c.InstallationMediaBoot, &dataDisksJSON, &standalone,
 		); err != nil {
 			return nil, err
 		}
@@ -1038,6 +1048,10 @@ func loadContainers() ([]Container, error) {
 		c.LANIPv4Gateway = lanIPv4Gateway.String
 		c.SnapshotScheduleEnabled = scheduleEnabled != 0
 		c.ManualInstall = manualInstall != 0
+		c.Standalone = standalone != 0
+		if err := json.Unmarshal([]byte(dataDisksJSON), &c.DataDisks); err != nil {
+			return nil, fmt.Errorf("invalid data disks for container %d: %w", c.ID, err)
+		}
 		c.RestoreOnHostBoot = restoreOnHostBoot != 0
 		c.FirewallEnabled = firewallEnabled != 0
 		c.FirewallDefaultAction = normalizeFirewallDefaultAction(firewallDefaultAction)

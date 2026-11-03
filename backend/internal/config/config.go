@@ -112,7 +112,9 @@ type Container struct {
 	LXCName                       string                 `json:"lxc_name,omitempty"`
 	KVMName                       string                 `json:"kvm_name,omitempty"`
 	DiskImage                     string                 `json:"disk_image,omitempty"`
+	DataDisks                     []DataDisk             `json:"data_disks"`
 	ManualInstall                 bool                   `json:"manual_install,omitempty"`
+	Standalone                    bool                   `json:"standalone,omitempty"`
 	InstallationMediaImageID      string                 `json:"installation_media_image_id,omitempty"`
 	InstallationMediaBoot         string                 `json:"installation_media_boot,omitempty"`
 	StoragePoolID                 string                 `json:"storage_pool_id,omitempty"`
@@ -2012,8 +2014,9 @@ func AddAuditLogFull(action, target, detail, user, ip, userAgent string, success
 
 // SaveTasks persists the task queue to config
 func SaveTasks(tasks []SavedTask) {
-	AppConfig.Tasks = tasks
-	SaveConfig()
+	if err := saveTaskQueueCompatibility(tasks); err != nil && err != ErrHistoryStoreUnavailable {
+		fmt.Printf("Task queue persistence failed: %v\n", err)
+	}
 }
 
 // AddLoginLog persists a login log entry

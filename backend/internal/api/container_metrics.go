@@ -36,6 +36,7 @@ const (
 
 func StartContainerMetricSampler() {
 	containerMetricSamplerOnce.Do(func() {
+		restoreContainerMetricHistory()
 		go func() {
 			sampleAllContainerMetrics()
 			ticker := time.NewTicker(containerMetricSampleInterval)
@@ -126,6 +127,7 @@ func appendContainerMetricPoint(c config.Container, usage map[string]interface{}
 		DiskIO:    diskRead + diskWrite,
 	}
 	cutoff := time.Now().Add(-hostMetricRetention).UnixMilli()
+	persistMetricPoint("container", key, point.TS, point)
 
 	containerMetricMu.Lock()
 	defer containerMetricMu.Unlock()
@@ -139,7 +141,12 @@ func appendContainerMetricPoint(c config.Container, usage map[string]interface{}
 		copy(history, history[keepFrom:])
 		history = history[:len(history)-keepFrom]
 	}
-	containerMetricHistory[key] = append(history, point)
+	if len(history) > 0 && history[len(history)-1].TS/30_000 == point.TS/30_000 {
+		history[len(history)-1] = point
+		containerMetricHistory[key] = history
+	} else {
+		containerMetricHistory[key] = append(history, point)
+	}
 }
 
 func getContainerMetricHistory(c *config.Container) []ContainerMetricPoint {

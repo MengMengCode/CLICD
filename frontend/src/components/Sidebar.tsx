@@ -19,6 +19,9 @@ import {
   Server,
   Sun,
   UserCog,
+  Archive,
+  Boxes,
+  ListChecks,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
@@ -90,6 +93,9 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     { path: '/containers', label: '容器管理', icon: Server, active: location.pathname.startsWith('/container'), admin: false },
     { path: '/images', label: '镜像管理', icon: Package, active: location.pathname.startsWith('/images'), admin: true },
     { path: '/snapshots', label: '快照管理', icon: Camera, active: location.pathname.startsWith('/snapshots'), admin: true },
+    { path: '/backups', label: '备份与恢复', icon: Archive, active: location.pathname.startsWith('/backups'), admin: true },
+    { path: '/instance-templates', label: '实例模板', icon: Boxes, active: location.pathname.startsWith('/instance-templates'), admin: true },
+    { path: '/tasks', label: '任务中心', icon: ListChecks, active: location.pathname.startsWith('/tasks'), admin: false },
     { path: '/routing', label: '路由管理', icon: Route, active: location.pathname.startsWith('/routing'), admin: true },
     { path: '/storage', label: '存储管理', icon: HardDrive, active: location.pathname.startsWith('/storage'), admin: true },
     { path: '/audit-logs', label: '操作日志', icon: ScrollText, active: location.pathname.startsWith('/audit-logs'), admin: true },

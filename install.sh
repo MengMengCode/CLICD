@@ -232,6 +232,7 @@ tr_msg() {
         -e 's/，请检查 qemu-utils\/qemu-img 安装。/. Check the qemu-utils\/qemu-img installation./g' \
         -e 's/，请检查 cloud-image-utils\/cloud-utils 安装。/. Check the cloud-image-utils\/cloud-utils installation./g' \
         -e 's/可选依赖未安装：/Optional dependency was not installed: /g' \
+        -e 's/未检测到 virt-customize；KVM 完整恢复、克隆和模板实例化需要 guestfs-tools 或 libguestfs-tools，基本安装将继续。/virt-customize was not found; KVM full restore, clone, and template instantiation need guestfs-tools or libguestfs-tools. Basic installation will continue./g' \
         -e 's/当前系统 /Current system /g' \
         -e 's/ 未找到 dnf\/yum，无法安装依赖。/ does not have dnf\/yum; cannot install dependencies./g' \
         -e 's/Windows KVM 初始化需要 genisoimage、mkisofs 或 xorriso 中任意一个。/Windows KVM initialization requires one of genisoimage, mkisofs, or xorriso./g' \
@@ -1038,6 +1039,28 @@ case "$ACTION" in
         ;;
 esac
 
+# Guest identity reset is required for portable KVM restore/clone. Keep this
+# optional so a distribution without libguestfs can still run basic LXC/KVM.
+install_guestfs_tools() {
+    kvm_supported_arch || return 0
+    has_cmd virt-customize && return 0
+    guestfs_package_manager="$1"
+    case "$guestfs_package_manager" in
+        apt-get|apk) guestfs_candidates="guestfs-tools libguestfs-tools" ;;
+        dnf|yum) guestfs_candidates="libguestfs-tools guestfs-tools libguestfs-tools-c" ;;
+        *) return 0 ;;
+    esac
+    for guestfs_package in $guestfs_candidates; do
+        if [ "$guestfs_package_manager" = apk ]; then
+            apk add --no-cache "$guestfs_package" >/dev/null 2>&1 || true
+        else
+            "$guestfs_package_manager" install -y "$guestfs_package" >/dev/null 2>&1 || true
+        fi
+        has_cmd virt-customize && return 0
+    done
+    warn "未检测到 virt-customize；KVM 完整恢复、克隆和模板实例化需要 guestfs-tools 或 libguestfs-tools，基本安装将继续。"
+}
+
 install_apk() {
     log "正在使用 apk 安装依赖..."
     apk update
@@ -1075,6 +1098,7 @@ install_apk() {
     for pkg in lxcfs shadow conntrack-tools quota-tools e2fsprogs xfsprogs cloud-utils genisoimage xorriso smartmontools "$(qemu_efi_package_apk)"; do
         apk add --no-cache "$pkg" >/dev/null 2>&1 || warn "可选依赖未安装：$pkg"
     done
+    install_guestfs_tools apk
 }
 
 install_apt() {
@@ -1120,6 +1144,7 @@ install_apt() {
         warn_kvm_unsupported_arch
         apt-get install -y qemu-utils genisoimage xorriso smartmontools >/dev/null 2>&1 || true
     fi
+    install_guestfs_tools apt-get
 }
 
 enable_el_repos() {
@@ -1176,6 +1201,7 @@ install_dnf() {
     for pkg in lxcfs xorriso "$(qemu_efi_package_rpm)" smartmontools; do
         dnf install -y "$pkg" >/dev/null 2>&1 || warn "可选依赖未安装：$pkg"
     done
+    install_guestfs_tools dnf
 }
 
 install_yum() {
@@ -1219,6 +1245,7 @@ install_yum() {
     for pkg in lxcfs xorriso "$(qemu_efi_package_rpm)" smartmontools; do
         yum install -y "$pkg" >/dev/null 2>&1 || warn "可选依赖未安装：$pkg"
     done
+    install_guestfs_tools yum
 }
 
 install_dependencies() {

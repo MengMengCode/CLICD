@@ -289,6 +289,9 @@ print(resp.json())
 | POST | `/api/v1/containers/{id}/reinstall` | 重装 |
 | DELETE | `/api/v1/containers/{id}/delete` | 删除 |
 | GET | `/api/v1/containers/{id}/usage` | 资源用量 |
+| GET | `/api/v1/containers/{id}/history` | 持久化资源历史，最多 7 天 |
+| GET | `/api/v1/containers/{id}/installation-media` | KVM 安装介质、启动方式及可选 ISO |
+| PUT | `/api/v1/containers/{id}/installation-media` | 停止状态下挂载/更换/弹出 ISO 与设置启动方式 |
 | GET | `/api/v1/containers/{id}/traffic` | 流量统计 |
 | POST | `/api/v1/containers/{id}/traffic-reset` | 重置流量 |
 | PUT | `/api/v1/containers/{id}/traffic-limit` | 调整流量限制 |
@@ -315,6 +318,32 @@ print(resp.json())
 | POST | `/api/v1/containers/{id}/snapshots/schedule` | 计划快照 |
 | PUT | `/api/v1/containers/{id}/snapshots/quota` | 快照配额 |
 
+### 磁盘、完整备份与实例模板
+
+磁盘修改需管理员和 `container:resize` 权限，子用户仅可读取自己实例的磁盘清单。完整备份、恢复、克隆和模板接口需管理员权限（外部 API Key 需 `admin:access`）。支持边界与请求示例见[磁盘、备份与克隆](./storage-backups)。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v1/containers/{id}/disks` | 真实容量、已分配空间与编辑能力 |
+| POST | `/api/v1/containers/{id}/disks` | 添加受管数据盘 |
+| PUT | `/api/v1/containers/{id}/disks/system` | 离线扩容系统盘，只增不减 |
+| PUT | `/api/v1/containers/{id}/disks/{disk_id}` | 离线扩容数据盘 |
+| PUT | `/api/v1/containers/{id}/disks/{disk_id}/attachment` | 连接/断开数据盘 |
+| DELETE | `/api/v1/containers/{id}/disks/{disk_id}` | 永久删除数据盘，需 `delete_data: true` |
+| POST | `/api/v1/containers/{id}/backup` | 创建完整备份 |
+| POST | `/api/v1/containers/{id}/clone` | 完整克隆为新停止实例 |
+| POST | `/api/v1/containers/{id}/template` | 保存已安装实例模板 |
+| GET | `/api/v1/backups` | 完整备份列表 |
+| POST | `/api/v1/backups` | 上传 `.clicd.tar.gz` 完整备份 |
+| GET | `/api/v1/backups/{artifact_id}` | 下载完整备份 |
+| DELETE | `/api/v1/backups/{artifact_id}` | 删除备份文件 |
+| POST | `/api/v1/backups/{artifact_id}/restore` | 恢复为新停止实例 |
+| GET | `/api/v1/instance-templates` | 已安装实例模板列表 |
+| DELETE | `/api/v1/instance-templates/{artifact_id}` | 删除实例模板 |
+| POST | `/api/v1/instance-templates/{artifact_id}/instantiate` | 从模板创建新停止实例 |
+
+磁盘修改及备份/恢复/克隆/模板操作返回 `202` 和 `data.task_id`；持续查询 `GET /api/v1/tasks`，查看最终状态、阶段日志和结果。上传备份本身返回 `201`，不会自动恢复。计划快照与带数据盘工作流互斥。
+
 ### 平台管理
 
 | 方法 | 路径 | 说明 |
@@ -328,6 +357,8 @@ print(resp.json())
 | POST | `/api/v1/images/cancel` | 取消镜像下载 |
 | DELETE | `/api/v1/images/delete` | 删除镜像缓存 |
 | PUT | `/api/v1/images/toggle` | 启用/禁用镜像 |
+| POST | `/api/v1/images/upload` | 本地 ISO/QCOW2 上传，`multipart/form-data`，文件最多 32 GiB |
+| GET | `/api/v1/host-history` | 持久化主机历史指标，最多 7 天 |
 | GET | `/api/v1/swap` | Swap 信息 |
 | POST | `/api/v1/swap` | 调整 Swap |
 | GET | `/api/v1/language` | 当前面板语言 |

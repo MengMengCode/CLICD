@@ -24,30 +24,31 @@ import (
 
 // ImageInfo represents a template image with its download/enable status.
 type ImageInfo struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Type            string `json:"type"`
-	Distro          string `json:"distro"`
-	Release         string `json:"release"`
-	Arch            string `json:"arch"`
-	Description     string `json:"description"`
-	Downloaded      bool   `json:"downloaded"`
-	Enabled         bool   `json:"enabled"`
-	Downloading     bool   `json:"downloading"`
-	Progress        int    `json:"progress"`
-	DownloadedBytes int64  `json:"downloaded_bytes"`
-	TotalBytes      int64  `json:"total_bytes"`
-	Stage           string `json:"stage,omitempty"`
-	Error           string `json:"error,omitempty"`
-	SizeBytes       int64  `json:"size_bytes"`
-	ManualPath      string `json:"manual_path,omitempty"`
-	Desktop         string `json:"desktop,omitempty"`
-	Provisioner     string `json:"provisioner,omitempty"`
-	Format          string `json:"format,omitempty"`
-	ManualInstall   bool   `json:"manual_install,omitempty"`
-	RequiresURL     bool   `json:"requires_url,omitempty"`
-	Custom          bool   `json:"custom,omitempty"`
-	SHA256          string `json:"sha256,omitempty"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	Type            string  `json:"type"`
+	Distro          string  `json:"distro"`
+	Release         string  `json:"release"`
+	Arch            string  `json:"arch"`
+	Description     string  `json:"description"`
+	Downloaded      bool    `json:"downloaded"`
+	Enabled         bool    `json:"enabled"`
+	Downloading     bool    `json:"downloading"`
+	Progress        int     `json:"progress"`
+	DownloadedBytes int64   `json:"downloaded_bytes"`
+	TotalBytes      int64   `json:"total_bytes"`
+	Stage           string  `json:"stage,omitempty"`
+	Error           string  `json:"error,omitempty"`
+	SizeBytes       int64   `json:"size_bytes"`
+	ManualPath      string  `json:"manual_path,omitempty"`
+	Desktop         string  `json:"desktop,omitempty"`
+	Provisioner     string  `json:"provisioner,omitempty"`
+	Format          string  `json:"format,omitempty"`
+	ManualInstall   bool    `json:"manual_install,omitempty"`
+	RequiresURL     bool    `json:"requires_url,omitempty"`
+	Custom          bool    `json:"custom,omitempty"`
+	SHA256          string  `json:"sha256,omitempty"`
+	MinDiskGB       float64 `json:"min_disk_gb,omitempty"`
 }
 
 var customImageFieldPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -491,7 +492,8 @@ func HandleImages(w http.ResponseWriter, r *http.Request) {
 			Desktop:         t.Desktop,
 			Provisioner:     t.EffectiveProvisioner(),
 			Format:          kvm.ImageFormat(t),
-			ManualInstall:   t.IsManualISO(),
+			ManualInstall:   t.IsManualISO() || t.IsManualDisk(),
+			MinDiskGB:       kvm.GetKVMImageMinDiskGB(t.ID),
 			RequiresURL:     strings.TrimSpace(t.URL) == "",
 			Custom:          t.Custom,
 			SHA256:          t.SHA256,
@@ -1211,7 +1213,8 @@ func HandleEnabledImages(w http.ResponseWriter, r *http.Request) {
 				result = append(result, map[string]interface{}{
 					"id": t.ID, "name": t.Name, "distro": t.Distro, "release": t.Release, "arch": t.Arch,
 					"description": t.Description, "type": config.VirtualizationKVM, "desktop": t.Desktop,
-					"provisioner": t.EffectiveProvisioner(), "format": kvm.ImageFormat(t), "manual_install": t.IsManualISO(),
+					"provisioner": t.EffectiveProvisioner(), "format": kvm.ImageFormat(t), "manual_install": t.IsManualISO() || t.IsManualDisk(),
+					"min_disk_gb": kvm.GetKVMImageMinDiskGB(t.ID),
 				})
 			}
 		}

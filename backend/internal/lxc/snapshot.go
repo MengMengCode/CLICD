@@ -24,6 +24,9 @@ func (m *Manager) CreateSnapshot(id int, createdBy string, scheduled bool, rotat
 	if c == nil {
 		return config.Snapshot{}, fmt.Errorf("container not found: %d", id)
 	}
+	if len(c.DataDisks) > 0 {
+		return config.Snapshot{}, fmt.Errorf("snapshots with data disks are not supported; use a full backup to include all disks")
+	}
 	if scheduled && rotateLimit > 0 {
 		for {
 			existing := config.ContainerSnapshots(id)
@@ -142,6 +145,9 @@ func (m *Manager) RestoreSnapshot(id string) error {
 	if c == nil {
 		return fmt.Errorf("container not found: %d", snapshot.ContainerID)
 	}
+	if len(c.DataDisks) > 0 {
+		return fmt.Errorf("snapshots with data disks are not supported; use a full backup to include all disks")
+	}
 	lxcName := c.LxcName()
 	containerDir := filepath.Join(m.LxcPath, lxcName)
 	if err := safePathUnder(containerDir, m.LxcPath); err != nil {
@@ -176,9 +182,14 @@ func (m *Manager) RestoreSnapshot(id string) error {
 }
 
 func (m *Manager) SetSnapshotSchedule(id int, enabled bool, intervalHours int, scheduleTime string, createdBy string) (*config.Container, error) {
+	dataDiskMu.Lock()
+	defer dataDiskMu.Unlock()
 	c := config.FindContainer(id)
 	if c == nil {
 		return nil, fmt.Errorf("container not found: %d", id)
+	}
+	if enabled && len(c.DataDisks) > 0 {
+		return nil, fmt.Errorf("scheduled snapshots with data disks are not supported; use full backups to include all disks")
 	}
 	if intervalHours < 24 {
 		return nil, fmt.Errorf("snapshot schedule interval cannot be less than 24 hours")

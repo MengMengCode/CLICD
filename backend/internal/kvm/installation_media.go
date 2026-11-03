@@ -128,7 +128,17 @@ func withInstallationMedia(xml, iso, boot string) string {
 	return xml
 }
 
-func (m *Manager) containerDomainXML(c *config.Container) (string, error) {
+func (m *Manager) baseContainerDomainXML(c *config.Container) (string, error) {
+	if c.Standalone {
+		switch c.Template {
+		case "standalone-windows":
+			return withInstallationMedia(windowsDomainXML(c.VirshName(), int(c.VCPU), c.RAMMB, c.DiskImage, "", "", c.MACAddress, c.IOReadMBps, c.IOWriteMBps, c.NetworkDownMbps, c.NetworkUpMbps), "", "disk"), nil
+		case "standalone-manual":
+			return manualDomainXML(c.VirshName(), int(c.VCPU), c.RAMMB, c.DiskImage, "", c.MACAddress, c.IOReadMBps, c.IOWriteMBps, c.NetworkDownMbps, c.NetworkUpMbps, "disk"), nil
+		default:
+			return withInstallationMedia(domainXML(c.VirshName(), int(c.VCPU), c.RAMMB, c.DiskImage, "", c.MACAddress, c.IOReadMBps, c.IOWriteMBps, c.NetworkDownMbps, c.NetworkUpMbps, false), "", "disk"), nil
+		}
+	}
 	imageID, boot := InstallationMedia(c)
 	iso := ""
 	if imageID != "" {
@@ -213,6 +223,7 @@ func (m *Manager) SetInstallationMedia(id int, imageID, boot string) error {
 // and resource updates keep the existing media selection (including eject).
 func resetReinstalledMedia(current, next *config.Container) {
 	current.Template = next.Template
+	current.Standalone = next.Standalone
 	current.ManualInstall = next.ManualInstall
 	current.InstallationMediaImageID = next.InstallationMediaImageID
 	current.InstallationMediaBoot = next.InstallationMediaBoot

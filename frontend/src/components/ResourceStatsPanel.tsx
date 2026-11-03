@@ -1,23 +1,14 @@
-import { Card } from './ui/card'
-import { Button } from './ui/button'
-import { ReactNode, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useId, useMemo } from 'react'
 import { RefreshCw } from 'lucide-react'
-import { calculateChartLayout, type ChartLayout } from '../lib/chart-layout'
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts'
+import { useLanguage } from '../contexts/LanguageContext'
+import { Button } from './ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from './ui/chart'
 
 export type StatsRangeKey = '30m' | '1h' | '1d' | '1w'
-
-export type ChartPoint = {
-  ts: number
-  value: number
-}
-
-export type ResourceChartSeries = {
-  label: string
-  points: ChartPoint[]
-  current?: number
-  color?: string
-}
-
+export type ChartPoint = { ts: number; value: number }
+export type ResourceChartSeries = { label: string; points: ChartPoint[]; current?: number; color?: string }
 export type ResourceChartConfig = {
   title: string
   icon: ReactNode
@@ -29,370 +20,207 @@ export type ResourceChartConfig = {
   unitLabel?: string
   formatValue: (value: number) => string
 }
-
-const chartPalette = ['#2563eb', '#16a34a', '#d97706', '#dc2626']
-
-const rangeLabels: Record<StatsRangeKey, string> = {
-  '30m': '30分钟',
-  '1h': '1小时',
-  '1d': '1天',
-  '1w': '1周',
-}
-
+const rangeLabels: Record<StatsRangeKey, string> = { '30m': '30分钟', '1h': '1小时', '1d': '1天', '1w': '1周' }
 export const statsRanges: Record<StatsRangeKey, number> = {
-  '30m': 30 * 60 * 1000,
-  '1h': 60 * 60 * 1000,
-  '1d': 24 * 60 * 60 * 1000,
-  '1w': 7 * 24 * 60 * 60 * 1000,
+  '30m': 30 * 60 * 1000, '1h': 60 * 60 * 1000, '1d': 24 * 60 * 60 * 1000, '1w': 7 * 24 * 60 * 60 * 1000,
 }
+const palette = [1, 2, 3, 4, 5].map(n => `hsl(var(--chart-${n}))`)
 
-export default function ResourceStatsPanel({
-  range,
-  onRangeChange,
-  onRefresh,
-  charts,
-}: {
-  range: StatsRangeKey
-  onRangeChange: (range: StatsRangeKey) => void
-  onRefresh: () => void
-  charts: ResourceChartConfig[]
+export default function ResourceStatsPanel({ range, onRangeChange, onRefresh, charts }: {
+  range: StatsRangeKey; onRangeChange: (range: StatsRangeKey) => void; onRefresh: () => void; charts: ResourceChartConfig[]
 }) {
+  const { t } = useLanguage()
   return (
-    <Card className="overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-background">
-        <h2 className="text-sm font-semibold text-foreground">统计信息</h2>
-        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
-          <div className="inline-flex flex-wrap gap-0.5">
-            {(Object.keys(rangeLabels) as StatsRangeKey[]).map((item) => (
-              <Button variant={range === item ? 'default' : 'ghost'}
-                key={item}
-                onClick={() => onRangeChange(item)}
-                className="h-7 px-3 text-xs"
-                aria-pressed={range === item}
-              >
-                {rangeLabels[item]}
-              </Button>
+    <section className="min-w-0 space-y-4" aria-label={t('统计信息')}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-foreground">{t('统计信息')}</h2>
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+          <div className="inline-flex flex-wrap items-center rounded-lg border bg-muted/30 p-1" role="group" aria-label={t('统计信息')}>
+            {(Object.keys(rangeLabels) as StatsRangeKey[]).map(item => (
+              <Button key={item} variant={range === item ? 'secondary' : 'ghost'} size="sm"
+                onClick={() => onRangeChange(item)} aria-pressed={range === item}
+                className="h-7 whitespace-nowrap px-2.5 text-xs">{t(rangeLabels[item])}</Button>
             ))}
           </div>
-          <Button variant="outline"
-            size="icon"
-            onClick={onRefresh}
-            className="h-8 w-8"
-            title="刷新"
-          >
-            <RefreshCw className="w-4 h-4" />
+          <Button variant="outline" size="icon" onClick={onRefresh} className="h-9 w-9 shrink-0" title={t('刷新')} aria-label={t('刷新')}>
+            <RefreshCw className="h-4 w-4" />
           </Button>
         </div>
       </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-2">
-        {charts.map((chart, index) => (
-          <DetailedChart key={chart.title} chart={chart} range={range} className={chartBorderClass(index)} />
-        ))}
+      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
+        {charts.map(chart => <ResourceChart key={chart.title} chart={chart} range={range} />)}
       </div>
+    </section>
+  )
+}
+
+function ResourceChart({ chart, range }: { chart: ResourceChartConfig; range: StatsRangeKey }) {
+  const { t, language } = useLanguage()
+  const id = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+  const now = useMemo(() => Date.now(), [chart, range])
+  const start = now - statsRanges[range]
+  const locale = language === 'en' ? 'en-US' : 'zh-CN'
+  const series = useMemo(() => {
+    const source = chart.series?.length ? chart.series : [{ label: chart.title, points: chart.points, current: chart.current }]
+    return source.map((item, index) => {
+      const samples = new Map<number, number>()
+      for (const point of item.points) {
+        if (Number.isFinite(point.ts) && Number.isFinite(point.value) && point.ts >= start && point.ts <= now) samples.set(point.ts, point.value)
+      }
+      const points = Array.from(samples, ([ts, value]) => ({ ts, value })).sort((a, b) => a.ts - b.ts)
+      const current = Number.isFinite(item.current) ? Number(item.current) : source.length === 1 ? finite(chart.current) : 0
+      return { ...item, points, current, key: `metric${index}`, color: item.color || palette[index % palette.length] }
+    })
+  }, [chart, start, now])
+  const config = Object.fromEntries(series.map(item => [item.key, { label: t(item.label), color: item.color }])) satisfies ChartConfig
+  const statistics = series.map(item => getSeriesStats(item))
+  const { data, ceiling, sampleCount } = useMemo(() => {
+    const rows = new Map<number, ChartDatum>()
+    let ceiling = Math.max(finite(chart.max), 1)
+    let sampleCount = 0
+    for (const item of series) {
+      for (const point of item.points) {
+        const row = rows.get(point.ts) || { ts: point.ts }
+        row[item.key] = point.value
+        rows.set(point.ts, row)
+        ceiling = Math.max(ceiling, point.value)
+        sampleCount++
+      }
+    }
+    // Timestamp anchors keep the selected window without inventing samples.
+    if (!rows.has(start)) rows.set(start, { ts: start })
+    if (!rows.has(now)) rows.set(now, { ts: now })
+    const data = sampleChartRows(Array.from(rows.values()).sort((a, b) => a.ts - b.ts), series.map(item => item.key))
+    return { data, ceiling, sampleCount }
+  }, [chart.max, series, start, now])
+  const timeFormat = useMemo(() => new Intl.DateTimeFormat(locale, range === '1w'
+    ? { month: 'numeric', day: 'numeric' } : { hour: '2-digit', minute: '2-digit', hour12: false }), [locale, range])
+  const tooltipFormat = useMemo(() => new Intl.DateTimeFormat(locale, {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }), [locale])
+  // Integer byte-rate formatting can give 0.5 B/s and 1 B/s the same label.
+  const yTicks = [0, ceiling / 2, ceiling].filter((tick, index, ticks) =>
+    !ticks.slice(index + 1).some(next => chart.formatValue(next) === chart.formatValue(tick)))
+
+  return (
+    <Card className="min-w-0" data-resource-chart={chart.title}>
+      <CardHeader className="space-y-2 p-4 pb-4">
+        <CardTitle className="flex min-w-0 items-center gap-2 text-sm leading-5" id={`resource-title-${id}`}>
+          <span className="shrink-0 text-muted-foreground [&_svg]:h-4 [&_svg]:w-4">{chart.icon}</span>
+          <span className="min-w-0 break-words">{t(chart.title)}</span>
+        </CardTitle>
+        {chart.detail && <CardDescription className="text-xs leading-5">{t(chart.detail)}</CardDescription>}
+      </CardHeader>
+      <CardContent className="min-w-0 space-y-5 p-4 pt-0">
+        {series.length === 1 ? (
+          <div className="grid min-w-0 grid-cols-3 gap-2" data-chart-summary>
+            <Stat label={t('当前')} value={chart.formatValue(statistics[0].current)} prominent />
+            <Stat label={t('平均')} value={chart.formatValue(statistics[0].avg)} />
+            <Stat label={t('峰值')} value={chart.formatValue(statistics[0].peak)} />
+          </div>
+        ) : (
+          <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-x-4 gap-y-4" data-chart-summary>
+            {series.map((item, index) => (
+              <div key={item.key} className="min-w-0 space-y-2" data-chart-series-summary={item.label}>
+                <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ backgroundColor: item.color }} />
+                  <span className="min-w-0 break-words">{t(item.label)}</span>
+                </div>
+                <div className="whitespace-nowrap text-base font-semibold leading-6 tracking-tight tabular-nums" data-chart-stat="current">
+                  {chart.formatValue(statistics[index].current)}
+                </div>
+                <dl className="grid gap-1 text-[11px] leading-4 text-muted-foreground">
+                  <SummaryRow label={t('平均')} value={chart.formatValue(statistics[index].avg)} kind="average" />
+                  <SummaryRow label={t('峰值')} value={chart.formatValue(statistics[index].peak)} kind="peak" />
+                </dl>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="relative min-w-0">
+          <ChartContainer config={config} className="aspect-auto h-[200px] min-h-[200px] w-full min-w-0"
+            aria-labelledby={`resource-title-${id}`} data-chart-container>
+            <AreaChart accessibilityLayer data={data} margin={{ top: 8, right: 20, left: 12, bottom: 0 }}>
+              <defs>
+                {series.map(item => (
+                  <linearGradient key={item.key} id={`resource-fill-${id}-${item.key}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={`var(--color-${item.key})`} stopOpacity={0.2} />
+                    <stop offset="100%" stopColor={`var(--color-${item.key})`} stopOpacity={0.02} />
+                  </linearGradient>
+                ))}
+              </defs>
+              <CartesianGrid vertical={false} />
+              <XAxis dataKey="ts" type="number" scale="time" domain={[start, now]} allowDataOverflow
+                ticks={[start, start + statsRanges[range] / 2, now]} tickLine={false} axisLine={false}
+                tickMargin={10} minTickGap={24} interval="preserveStartEnd" height={32}
+                tick={{ fontSize: 11 }} tickFormatter={ts => timeFormat.format(Number(ts))} />
+              <YAxis width="auto" domain={[0, ceiling]} ticks={yTicks} allowDataOverflow
+                tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 11 }} tickFormatter={chart.formatValue} />
+              <ChartTooltip cursor={false} isAnimationActive={false} content={
+                <ChartTooltipContent className="min-w-48 max-w-[calc(100vw-2rem)]" indicator="dot"
+                  labelFormatter={(_, payload) => tooltipFormat.format(Number(payload[0]?.payload.ts))}
+                  formatter={(value, name, item) => <>
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ backgroundColor: item.color }} />
+                    <span className="min-w-0 flex-1 text-muted-foreground">{config[String(name)]?.label || String(name)}</span>
+                    <span className="shrink-0 whitespace-nowrap font-mono font-medium text-foreground tabular-nums">{chart.formatValue(Number(value))}</span>
+                  </>} />
+              } />
+              {series.map(item => (
+                <Area key={item.key} dataKey={item.key} type="monotone" connectNulls
+                  stroke={`var(--color-${item.key})`} strokeWidth={2} fill={`url(#resource-fill-${id}-${item.key})`}
+                  dot={item.points.length === 1 ? { r: 3, fill: `var(--color-${item.key})`, strokeWidth: 0 } : false}
+                  activeDot={{ r: 4 }} isAnimationActive={false} />
+              ))}
+            </AreaChart>
+          </ChartContainer>
+          {sampleCount === 0 && <div className="pointer-events-none absolute inset-0 flex items-center justify-center pb-8 text-xs text-muted-foreground">{t('暂无数据')}</div>}
+        </div>
+      </CardContent>
     </Card>
   )
 }
 
-function DetailedChart({ chart, range, className }: { chart: ResourceChartConfig; range: StatsRangeKey; className: string }) {
-  const series = chart.series?.length
-    ? chart.series
-    : [{ label: chart.title, points: chart.points, current: chart.current }]
-  const primaryStats = getSeriesStats(series[0], chart.current)
-
-  return (
-    <div className={`min-w-0 p-4 ${className}`} data-resource-chart={chart.title}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between mb-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-            <span className="text-muted-foreground">{chart.icon}</span>
-            <span>{chart.title}</span>
-          </div>
-          {chart.detail && <p className="mt-0.5 text-[11px] text-muted-foreground [overflow-wrap:anywhere]">{chart.detail}</p>}
-        </div>
-        {series.length > 1 ? (
-          <div className="grid min-w-0 max-w-full grid-cols-2 gap-x-4 gap-y-1 text-right sm:shrink-0">
-            {series.map((item, index) => (
-              <SeriesStat
-                key={item.label}
-                color={item.color || chartPalette[index % chartPalette.length]}
-                label={item.label}
-                stats={getSeriesStats(item, item.current)}
-                formatValue={chart.formatValue}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="grid min-w-0 max-w-full grid-cols-3 gap-3 text-right sm:shrink-0">
-            <Stat label="当前" value={chart.formatValue(primaryStats.current)} />
-            <Stat label="平均" value={chart.formatValue(primaryStats.avg)} />
-            <Stat label="峰值" value={chart.formatValue(primaryStats.peak)} />
-          </div>
-        )}
-      </div>
-      <LineAreaChart
-        label={chart.title}
-        series={series}
-        range={range}
-        max={chart.max}
-        formatValue={chart.formatValue}
-        unitLabel={chart.unitLabel}
-      />
-    </div>
-  )
+function Stat({ label, value, prominent }: { label: string; value: string; prominent?: boolean }) {
+  return <div className="min-w-0 space-y-1">
+    <div className="text-xs text-muted-foreground">{label}</div>
+    <div className={`${prominent ? 'text-lg font-semibold' : 'text-base font-medium'} whitespace-nowrap leading-7 tracking-tight tabular-nums text-foreground`} data-chart-stat={label}>{value}</div>
+  </div>
+}
+function SummaryRow({ label, value, kind }: { label: string; value: string; kind: string }) {
+  return <div className="flex min-w-0 items-baseline justify-between gap-x-2">
+    <dt className="shrink-0">{label}</dt><dd className="shrink-0 whitespace-nowrap tabular-nums" data-chart-stat={kind}>{value}</dd>
+  </div>
+}
+function finite(value?: number) { return Number.isFinite(value) ? Number(value) : 0 }
+function getSeriesStats(series: ResourceChartSeries) {
+  const current = finite(series.current)
+  let total = 0; let peak = Math.max(0, current)
+  for (const point of series.points) { total += point.value; peak = Math.max(peak, point.value) }
+  return { current, avg: series.points.length ? total / series.points.length : current, peak }
 }
 
-function SeriesStat({
-  color,
-  label,
-  stats,
-  formatValue,
-}: {
-  color: string
-  label: string
-  stats: { current: number; avg: number; peak: number }
-  formatValue: (value: number) => string
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="flex items-center justify-end gap-1 text-[10px] text-muted-foreground">
-        <span className="h-0.5 w-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />
-        <span className="[overflow-wrap:anywhere]">{label}</span>
-      </div>
-      <div className="text-xs font-medium text-foreground tabular-nums [overflow-wrap:anywhere]">
-        {formatValue(stats.current)}
-      </div>
-      <div className="text-[10px] text-muted-foreground tabular-nums [overflow-wrap:anywhere]">
-        均 {formatValue(stats.avg)} / 峰 {formatValue(stats.peak)}
-      </div>
-    </div>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <div className="text-[10px] text-muted-foreground">{label}</div>
-      <div className="text-xs font-medium text-foreground tabular-nums [overflow-wrap:anywhere]">{value}</div>
-    </div>
-  )
-}
-
-function getSeriesStats(series: ResourceChartSeries, fallbackCurrent = 0) {
-  const values = series.points
-    .map((point) => point.value)
-    .filter((value) => Number.isFinite(value))
-  const current = Number.isFinite(series.current) ? Number(series.current) : fallbackCurrent
-  const samples = values.length > 0 ? values : [current]
-  const avg = samples.reduce((sum, value) => sum + value, 0) / samples.length
-  const peak = Math.max(current, ...samples, 0)
-  return { current, avg, peak }
-}
-
-function LineAreaChart({
-  label,
-  series,
-  range,
-  max,
-  formatValue,
-  unitLabel,
-}: {
-  label: string
-  series: ResourceChartSeries[]
-  range: StatsRangeKey
-  max?: number
-  formatValue: (value: number) => string
-  unitLabel?: string
-}) {
-  const chartId = `resource-chart-${useId().replace(/:/g, '')}`
-  const containerRef = useRef<HTMLDivElement>(null)
-  const measureRef = useRef<SVGTextElement>(null)
-  const [layout, setLayout] = useState<ChartLayout | null>(null)
-  const now = useMemo(() => Date.now(), [series, range])
-  const chartSeries = series.map((item) => {
-    const validPoints = item.points.filter((point) => Number.isFinite(point.ts) && Number.isFinite(point.value))
-    return {
-      ...item,
-      points: validPoints.length > 0
-        ? validPoints
-        : [{ ts: now, value: Number.isFinite(item.current) ? Number(item.current) : 0 }],
-    }
-  })
-  const allPoints = chartSeries.flatMap((item) => item.points)
-  const maxValue = Math.max(max || 0, ...allPoints.map((point) => point.value), 1)
-  const minTs = now - statsRanges[range]
-  const span = Math.max(statsRanges[range], 1)
-  const yLabelKey = JSON.stringify([1, 0.5, 0].map((tick) => formatValue(maxValue * tick)))
-  const xLabelKey = JSON.stringify([0, 0.5, 1].map((tick) => formatTime(minTs + tick * span)))
-
-  useLayoutEffect(() => {
-    const container = containerRef.current
-    const textNode = measureRef.current
-    if (!container || !textNode) return
-    let disposed = false
-    let frame = 0
-    const measure = (text: string) => {
-      textNode.textContent = text
-      return textNode.getComputedTextLength()
-    }
-    const update = () => {
-      if (disposed) return
-      const width = container.getBoundingClientRect().width
-      if (width <= 0) return
-      const yLabels: string[] = JSON.parse(yLabelKey)
-      const xLabels: string[] = JSON.parse(xLabelKey)
-      let fontTop = 0
-      let fontBottom = 0
-      // Real SVG metrics include tabular figures and any translated fallback font.
-      for (const text of [...yLabels, ...xLabels, unitLabel || '', '0123456789Mg']) {
-        measure(text)
-        const box = textNode.getBBox()
-        fontTop = Math.min(fontTop, box.y)
-        fontBottom = Math.max(fontBottom, box.y + box.height)
+type ChartDatum = { ts: number; [key: string]: number | null }
+// Only drawing is sampled: retain real extrema/endpoints from each bucket.
+// Current/average/peak above continue to use every original history sample.
+function sampleChartRows(rows: ChartDatum[], keys: string[], limit = 1200): ChartDatum[] {
+  if (rows.length <= limit) return rows
+  const bucketCount = Math.max(1, Math.floor((limit - 2) / (keys.length * 2 + 2)))
+  const selected = new Set<number>([0, rows.length - 1])
+  for (let bucket = 0; bucket < bucketCount; bucket++) {
+    const first = Math.floor(bucket * rows.length / bucketCount)
+    const end = Math.floor((bucket + 1) * rows.length / bucketCount)
+    selected.add(first); selected.add(end - 1)
+    for (const key of keys) {
+      let minIndex = -1; let maxIndex = -1
+      for (let index = first; index < end; index++) {
+        const value = rows[index][key]
+        if (typeof value !== 'number') continue
+        if (minIndex < 0 || value < Number(rows[minIndex][key])) minIndex = index
+        if (maxIndex < 0 || value > Number(rows[maxIndex][key])) maxIndex = index
       }
-      const next = calculateChartLayout({
-        width, yLabels, xLabels, unitLabel, measure, fontTop,
-        fontHeight: Math.max(1, fontBottom - fontTop),
-      })
-      setLayout((previous) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next)
+      if (minIndex >= 0) selected.add(minIndex)
+      if (maxIndex >= 0) selected.add(maxIndex)
     }
-    const schedule = () => {
-      if (disposed) return
-      cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(update)
-    }
-    const observer = new ResizeObserver(schedule)
-    observer.observe(container)
-    document.fonts.ready.then(schedule)
-    document.fonts.addEventListener('loadingdone', schedule)
-    update()
-    return () => {
-      disposed = true
-      cancelAnimationFrame(frame)
-      observer.disconnect()
-      document.fonts.removeEventListener('loadingdone', schedule)
-    }
-  }, [yLabelKey, xLabelKey, unitLabel])
-
-  const gridStroke = 'hsl(var(--border))'
-  const axisStroke = 'hsl(var(--muted-foreground))'
-  const lineStroke = 'hsl(var(--foreground))'
-  const plot = layout?.plot
-  const primaryLine = plot
-    ? buildLine(chartSeries[0]?.points || [], minTs, span, plot.left, plot.top, plot.width, plot.height, maxValue)
-    : ''
-  const area = plot ? `${plot.left},${plot.top + plot.height} ${primaryLine} ${plot.left + plot.width},${plot.top + plot.height}` : ''
-  const textBaseline = (center: number, lines: string[]) => layout
-    ? center - (layout.fontHeight + (lines.length - 1) * layout.lineHeight) / 2 - layout.fontTop
-    : center
-
-  return (
-    <div ref={containerRef} className="min-w-0 w-full" data-chart-container>
-      <svg
-        viewBox={`0 0 ${layout?.width || 1} ${layout?.height || 140}`}
-        className="block w-full overflow-hidden text-[10px] tabular-nums"
-        style={{ height: layout?.height || 140 }}
-        role="img"
-        aria-label={label}
-      >
-        <text ref={measureRef} visibility="hidden" aria-hidden="true" />
-        {layout && plot && <>
-          <defs>
-            <linearGradient id={`${chartId}-fill`} x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor={lineStroke} stopOpacity="0.07" />
-              <stop offset="100%" stopColor={lineStroke} stopOpacity="0.005" />
-            </linearGradient>
-            <clipPath id={`${chartId}-clip`} clipPathUnits="userSpaceOnUse">
-              <rect x={plot.left} y={plot.top} width={plot.width} height={plot.height} data-chart-plot />
-            </clipPath>
-          </defs>
-
-          {layout.yLabels.map(({ tick, lines }) => {
-            const y = plot.top + (1 - tick) * plot.height
-            return (
-              <g key={tick}>
-                <line x1={plot.left} y1={y} x2={plot.left + plot.width} y2={y} stroke={gridStroke} strokeWidth="0.75" strokeOpacity="0.7" />
-                <text x={plot.left - 8} y={textBaseline(y, lines)} textAnchor="end" fill={axisStroke} data-chart-y-label>
-                  {lines.map((line, index) => <tspan key={index} x={plot.left - 8} dy={index === 0 ? 0 : layout.lineHeight}>{line}</tspan>)}
-                </text>
-              </g>
-            )
-          })}
-
-          {layout.xLabels.map(({ tick, lines }) => {
-            const x = plot.left + tick * plot.width
-            return (
-              <g key={tick}>
-                <line x1={x} y1={plot.top} x2={x} y2={plot.top + plot.height} stroke={gridStroke} strokeWidth="0.75" strokeOpacity="0.35" />
-                <text x={x} y={plot.top + plot.height + 8 - layout.fontTop} textAnchor={tick === 0 ? 'start' : tick === 1 ? 'end' : 'middle'} fill={axisStroke} data-chart-x-label>
-                  {lines.map((line, index) => <tspan key={index} x={x} dy={index === 0 ? 0 : layout.lineHeight}>{line}</tspan>)}
-                </text>
-              </g>
-            )
-          })}
-
-          {layout.unitLines.length > 0 && (
-            <text x={4} y={4 - layout.fontTop} fill={axisStroke} data-chart-unit-label>
-              {layout.unitLines.map((line, index) => <tspan key={index} x={4} dy={index === 0 ? 0 : layout.lineHeight}>{line}</tspan>)}
-            </text>
-          )}
-
-          <g clipPath={`url(#${chartId}-clip)`} data-chart-series>
-            {chartSeries.length === 1 && <polygon points={area} fill={`url(#${chartId}-fill)`} />}
-            {chartSeries.map((item, index) => (
-              <polyline
-                key={item.label || index}
-                points={buildLine(item.points, minTs, span, plot.left, plot.top, plot.width, plot.height, maxValue)}
-                fill="none"
-                stroke={item.color || (chartSeries.length === 1 ? lineStroke : chartPalette[index % chartPalette.length])}
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            ))}
-          </g>
-        </>}
-      </svg>
-    </div>
-  )
-}
-
-function buildLine(
-  points: ChartPoint[],
-  minTs: number,
-  span: number,
-  left: number,
-  top: number,
-  innerWidth: number,
-  innerHeight: number,
-  maxValue: number,
-) {
-  const coords = points.map((point) => {
-    const x = left + ((point.ts - minTs) / span) * innerWidth
-    const y = top + innerHeight - (point.value / maxValue) * innerHeight
-    return `${Number.isFinite(x) ? x : left},${Number.isFinite(y) ? y : top + innerHeight}`
-  })
-  if (coords.length > 1) return coords.join(' ')
-
-  const [, yText] = (coords[0] || `${left},${top + innerHeight}`).split(',')
-  const y = Number(yText)
-  const safeY = Number.isFinite(y) ? y : top + innerHeight
-  return `${left},${safeY} ${left + innerWidth},${safeY}`
-}
-
-function chartBorderClass(index: number) {
-  const right = index % 2 === 0 ? 'xl:border-r' : ''
-  const top = index > 1 ? 'border-t' : ''
-  return `${right} ${top} border-border`
-}
-
-function formatTime(ts: number) {
-  return new Date(ts).toLocaleString('zh-CN', {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
+  }
+  return Array.from(selected).sort((a, b) => a - b).map(index => rows[index])
 }

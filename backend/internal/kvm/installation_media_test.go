@@ -227,6 +227,24 @@ func TestExplicitReinstallUsesNewTemplateMediaAfterEjectOrRescueMount(t *testing
 	}
 }
 
+func TestReinstallReplacesStandaloneProvisioningMode(t *testing.T) {
+	_, original := manualISOFixture(t)
+	current := *original
+	current.Template, current.Standalone, current.ManualInstall = "standalone-linux", true, false
+	next := config.Container{Template: "kvm-debian-12"}
+	resetReinstalledMedia(&current, &next)
+	xml, err := NewManager().containerDomainXML(&current)
+	if err != nil || current.Standalone || !strings.Contains(xml, "seed.iso") {
+		t.Fatalf("reinstall of a restored VM lost its new cloud-init medium: %v", err)
+	}
+	next = config.Container{Template: "manual-test", Standalone: true, ManualInstall: true, InstallationMediaBoot: "disk"}
+	resetReinstalledMedia(&current, &next)
+	xml, err = NewManager().containerDomainXML(&current)
+	if err != nil || !current.Standalone || strings.Contains(xml, "seed.iso") {
+		t.Fatalf("preinstalled disk reinstall inherited a provisioning medium: %v", err)
+	}
+}
+
 func TestPersistedManualModeDoesNotRequireSourceRegistryOrCloudTools(t *testing.T) {
 	_, c := manualISOFixture(t)
 	c.InstallationMediaImageID = ""

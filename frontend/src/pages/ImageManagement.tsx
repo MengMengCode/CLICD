@@ -27,6 +27,7 @@ import {
   CloudDownload,
   Disc3,
   Search,
+  Upload,
 } from 'lucide-react'
 import {
   getImages,
@@ -44,6 +45,7 @@ import {
 import { useDialog } from '../components/Dialog'
 import { useLanguage } from '../contexts/LanguageContext'
 import './ImageManagement.css'
+import ImageUploadModal from '../components/ImageUploadModal'
 
 export default function ImageManagement() {
   const dialog = useDialog()
@@ -57,6 +59,7 @@ export default function ImageManagement() {
   const [storageLoading, setStorageLoading] = useState(true)
   const [customModalOpen, setCustomModalOpen] = useState<'lxc' | 'kvm' | null>(null)
   const [downloadModalOpen, setDownloadModalOpen] = useState(false)
+  const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [catalogType, setCatalogType] = useState<'lxc' | 'kvm'>('lxc')
   const [customPreset, setCustomPreset] = useState<ImageInfo | null>(null)
 
@@ -224,6 +227,7 @@ export default function ImageManagement() {
           <Button variant="outline" size="sm" onClick={() => { setCustomPreset(null); setCustomModalOpen(catalogType) }} disabled={storageLoading || !imageStorageReady} title={!imageStorageReady ? t('请先在存储管理中开启镜像缓存存储') : undefined}>
             <Plus className="h-3.5 w-3.5" />{t('第三方镜像')}
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setUploadModalOpen(true)} disabled={storageLoading || !imageStorageReady}><Upload className="h-3.5 w-3.5" />{t('上传镜像')}</Button>
           <Button size="sm" onClick={() => setDownloadModalOpen(true)}>
             <Download className="h-3.5 w-3.5" />{t('下载镜像')}
           </Button>
@@ -283,6 +287,7 @@ export default function ImageManagement() {
           {...imageActions}
         />
       )}
+      {uploadModalOpen && <ImageUploadModal arch={images.find(image => image.type === 'kvm')?.arch || 'amd64'} pools={storageInfo?.pools || []} onClose={() => setUploadModalOpen(false)} onUploaded={fetchImages} />}
       {downloadModalOpen && (
         <DownloadImagesModal
           images={images}

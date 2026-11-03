@@ -8,11 +8,13 @@ After installation, CLICD runs as a systemd service. Runtime configuration and t
 | --- | --- |
 | Web port | Defaults to `8999`, listening on `0.0.0.0:8999`. |
 | Administrator account | Used to log in to the web panel and manage API keys. |
-| Database | SQLite storage for container metadata, sub-users, audit logs, API keys, and more. |
+| Database | SQLite storage for instance/data-disk metadata, sub-users, audit logs, API keys, task stage logs and metric history. |
 | NAT port range | Used for random ports and port mapping allocation. |
 | IPv6 prefixes | Used when the host has routable IPv6 prefixes. |
 
 ## Service Commands
+
+Terminal task history is retained for up to 30 days/1,000 records and metric history for up to 7 days. Full instance backups contain guest disks and instance settings; back up the database separately for panel accounts, API keys, grants and history.
 
 ```bash
 systemctl status clicd

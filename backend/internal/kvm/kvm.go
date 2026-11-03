@@ -453,7 +453,7 @@ func (m *Manager) CreateContainer(cfg lxc.ContainerConfig) error {
 	if cfg.VCPU < 1 || cfg.VCPU != float64(int(cfg.VCPU)) {
 		return fmt.Errorf("KVM vCPU must be a whole number and at least 1")
 	}
-	if IsWindowsImage(image.ID) && cfg.DiskGB < 30 {
+	if !image.IsManualDisk() && IsWindowsImage(image.ID) && cfg.DiskGB < 30 {
 		cfg.DiskGB = 30
 	} else if image.Desktop != "" && cfg.DiskGB < 20 {
 		cfg.DiskGB = 20
@@ -523,7 +523,7 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 	sshPassword := ""
 	sshPublicKey := ""
 	sshAuthMode := ""
-	if !IsWindowsImage(image.ID) && !image.IsManualISO() {
+	if !IsWindowsImage(image.ID) && !image.IsManualISO() && !image.IsManualDisk() {
 		sshAccess, err := lxc.ResolveCreateSSHAccess(cfg)
 		if err != nil {
 			return nil, err
@@ -553,7 +553,20 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 
 	var xml string
 	winAdminPassword := ""
-	if image.IsManualISO() {
+	if image.IsManualDisk() {
+		cfg.ReportProgress("disk", "Copy independent preinstalled disk")
+		if err := flattenTransferDisk(context.Background(), ImagePath(image.ID), diskPath); err != nil {
+			return nil, err
+		}
+		if output, err := exec.Command("qemu-img", "resize", diskPath, fmt.Sprintf("%dM", int64(math.Ceil(cfg.DiskGB*1024)))).CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("grow copied preinstalled disk: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		if image.IsWindows() {
+			xml = withInstallationMedia(windowsDomainXML(vmName, int(cfg.VCPU), cfg.RAMMB, diskPath, "", "", mac, cfg.IOReadMBps, cfg.IOWriteMBps, cfg.NetworkDownMbps, cfg.NetworkUpMbps), "", "disk")
+		} else {
+			xml = withInstallationMedia(domainXML(vmName, int(cfg.VCPU), cfg.RAMMB, diskPath, "", mac, cfg.IOReadMBps, cfg.IOWriteMBps, cfg.NetworkDownMbps, cfg.NetworkUpMbps, false), "", "disk")
+		}
+	} else if image.IsManualISO() {
 		cfg.ReportProgress("disk", "Create blank KVM disk")
 		if err := createEmptyDisk(diskPath, cfg.DiskGB); err != nil {
 			return nil, err
@@ -710,7 +723,15 @@ func (m *Manager) defineContainer(id int, vmName string, cfg lxc.ContainerConfig
 		CreatedAt:            now,
 		ExpiresAt:            cfg.ExpiresAt,
 	}
-	if image.IsManualISO() {
+	if image.IsManualDisk() {
+		container.Standalone = true
+		container.ManualInstall = true
+		container.InstallationMediaBoot = "disk"
+		container.Template = "standalone-linux"
+		if image.IsWindows() {
+			container.Template = "standalone-windows"
+		}
+	} else if image.IsManualISO() {
 		container.ManualInstall = true
 		container.InstallationMediaImageID = image.ID
 		container.InstallationMediaBoot = "cdrom"
@@ -737,7 +758,7 @@ func (m *Manager) StartContainerContext(ctx context.Context, id int) error {
 	// Config deletion compacts the container slice. Never keep its element
 	// pointer across guest polling or external commands.
 	c := *stored
-	if err := m.validateHost(c.Template, c.ManualInstall); err != nil {
+	if err := m.validateHost(c.Template, c.ManualInstall || c.Standalone); err != nil {
 		return err
 	}
 	lxc.EnsureAssignedPublicIPv4s(c.PublicIPv4s)
@@ -761,7 +782,7 @@ func (m *Manager) StartContainerContext(ctx context.Context, id int) error {
 	}
 	_ = exec.CommandContext(ctx, "virsh", "dommemstat", name, "--period", "10", "--live").Run()
 	_ = exec.CommandContext(ctx, "virsh", "dommemstat", name, "--period", "10", "--config").Run()
-	if c.ManualInstall || IsManualISOImage(c.Template) || c.InstallationMediaBoot == "cdrom" {
+	if c.ManualInstall || c.Standalone || IsManualISOImage(c.Template) || c.InstallationMediaBoot == "cdrom" {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -1024,6 +1045,9 @@ func (m *Manager) DestroyContainer(id int) error {
 			return fmt.Errorf("failed to undefine KVM VM %s: %w", name, err)
 		}
 	}
+	if err := m.CleanupDataDisks(&container); err != nil {
+		return err
+	}
 	removeKVMIPv6Runtime(&container)
 	if err := os.RemoveAll(instanceDir); err != nil {
 		return err
@@ -1246,6 +1270,9 @@ func (m *Manager) CreateSnapshot(id int, createdBy string, scheduled bool, rotat
 	if !c.IsKVM() {
 		return config.Snapshot{}, fmt.Errorf("container is not a KVM VM: %d", id)
 	}
+	if len(c.DataDisks) > 0 {
+		return config.Snapshot{}, fmt.Errorf("snapshots with data disks are not supported; use a full backup to include all disks")
+	}
 	if scheduled && rotateLimit > 0 {
 		for {
 			existing := config.ContainerSnapshots(id)
@@ -1369,6 +1396,9 @@ func (m *Manager) RestoreSnapshot(id string) error {
 	if !c.IsKVM() {
 		return fmt.Errorf("container is not a KVM VM: %d", c.ID)
 	}
+	if len(c.DataDisks) > 0 {
+		return fmt.Errorf("snapshots with data disks are not supported; use a full backup to include all disks")
+	}
 	name := c.VirshName()
 	instanceDir := m.instanceDir(name)
 	instanceParent := filepath.Dir(instanceDir)
@@ -1412,9 +1442,14 @@ func (m *Manager) RestoreSnapshot(id string) error {
 }
 
 func (m *Manager) SetSnapshotSchedule(id int, enabled bool, intervalHours int, scheduleTime string, createdBy string) (*config.Container, error) {
+	installationMediaMu.Lock()
+	defer installationMediaMu.Unlock()
 	c := config.FindContainer(id)
 	if c == nil {
 		return nil, fmt.Errorf("container not found: %d", id)
+	}
+	if enabled && len(c.DataDisks) > 0 {
+		return nil, fmt.Errorf("scheduled snapshots with data disks are not supported; use full backups to include all disks")
 	}
 	if intervalHours < 24 {
 		return nil, fmt.Errorf("snapshot schedule interval cannot be less than 24 hours")
@@ -1887,7 +1922,7 @@ func (m *Manager) validateHost(imageID string, manualInstall ...bool) error {
 }
 
 func validateProvisioningTools(imageID string, manualInstall bool) error {
-	if manualInstall || IsManualISOImage(imageID) {
+	if manualInstall || IsManualISOImage(imageID) || IsManualDiskImage(imageID) {
 		// Manual installation needs no seed or unattended ISO tools.
 	} else if IsWindowsImage(imageID) {
 		if runtime.GOARCH != "amd64" {
@@ -2212,20 +2247,24 @@ func windowsMinimumResources(imageID string) (float64, int, int) {
 
 // GetKVMImageMinDiskGB returns the minimum required disk size in GB for a KVM image.
 func GetKVMImageMinDiskGB(imageID string) float64 {
-	if IsManualISOImage(imageID) {
-		return 1
-	}
-	if IsWindowsImage(imageID) {
+	minimum := float64(5)
+	if IsManualISOImage(imageID) || IsManualDiskImage(imageID) {
+		minimum = 1
+	} else if IsWindowsImage(imageID) {
 		if IsWindows11Image(imageID) {
-			return 64
+			minimum = 64
+		} else {
+			minimum = 30
 		}
-		return 30
 	}
 	img := FindImage(imageID)
 	if img != nil && img.Desktop != "" {
-		return 20
+		minimum = 20
 	}
-	return 5
+	if virtualGB := ImageVirtualDiskGB(imageID); virtualGB > minimum {
+		minimum = virtualGB
+	}
+	return minimum
 }
 
 func sanitizeWindowsComputerName(name string) string {

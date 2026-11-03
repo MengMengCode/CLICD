@@ -51,6 +51,8 @@ When reinstalling a Linux system, you may pass `ssh_auth_mode`, `ssh_password`, 
 
 The container details page supports resource usage, traffic limit changes, resource limit changes, and expiration changes.
 
+Use disk management in instance details for system-disk growth and data disks while the instance is stopped. See [Disks, Backups and Clones](./storage-backups) for full backup, restore, full clone and instance templates, and [Tasks](./tasks) for progress and errors.
+
 ```http
 GET /api/v1/containers/{id}/usage
 GET /api/v1/containers/{id}/traffic
