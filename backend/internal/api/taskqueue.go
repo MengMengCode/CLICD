@@ -26,25 +26,35 @@ const (
 )
 
 type Task struct {
-	ID              string              `json:"id"`
-	Type            TaskType            `json:"type"`
-	ContainerID     int                 `json:"container_id"`
-	ContainerName   string              `json:"container_name"`
-	Status          string              `json:"status"`
-	Error           string              `json:"error,omitempty"`
-	Stage           string              `json:"stage,omitempty"`
-	StageDetail     string              `json:"stage_detail,omitempty"`
-	CreatedAt       string              `json:"created_at"`
-	TemplateID      string              `json:"template_id,omitempty"`
-	Config          lxc.ContainerConfig `json:"config,omitempty"`
-	Name            string              `json:"name,omitempty"`
-	User            string              `json:"user,omitempty"` // who created this task
-	IP              string              `json:"ip,omitempty"`
-	UserAgent       string              `json:"user_agent,omitempty"`
-	activeKey       string
-	ctx             context.Context
-	cancel          context.CancelFunc
-	deleteRequested bool
+	ID                string              `json:"id"`
+	Type              TaskType            `json:"type"`
+	ContainerID       int                 `json:"container_id"`
+	ContainerName     string              `json:"container_name"`
+	ContainerUUID     string              `json:"container_uuid,omitempty"`
+	Status            string              `json:"status"`
+	Error             string              `json:"error,omitempty"`
+	Stage             string              `json:"stage,omitempty"`
+	StageDetail       string              `json:"stage_detail,omitempty"`
+	CreatedAt         string              `json:"created_at"`
+	StartedAt         string              `json:"started_at,omitempty"`
+	FinishedAt        string              `json:"finished_at,omitempty"`
+	DurationMS        int64               `json:"duration_ms,omitempty"`
+	Logs              []TaskEvent         `json:"logs,omitempty"`
+	Result            json.RawMessage     `json:"result,omitempty"`
+	Payload           json.RawMessage     `json:"-"`
+	AdditionalTargets []string            `json:"-"`
+	TemplateID        string              `json:"template_id,omitempty"`
+	Config            lxc.ContainerConfig `json:"config,omitempty"`
+	Name              string              `json:"name,omitempty"`
+	User              string              `json:"user,omitempty"` // who created this task
+	IP                string              `json:"ip,omitempty"`
+	UserAgent         string              `json:"user_agent,omitempty"`
+	activeKey         string
+	activeKeys        []string
+	revision          uint64
+	ctx               context.Context
+	cancel            context.CancelFunc
+	deleteRequested   bool
 }
 
 type taskRuntime struct {
@@ -67,6 +77,7 @@ type TaskQueue struct {
 	runningTasks   map[*Task]bool
 	stop           chan struct{}
 	runtime        taskRuntime
+	historySaved   map[string]uint64
 }
 
 type TaskQueueSettings struct {
@@ -86,6 +97,7 @@ func init() {
 func newTaskQueue(concurrency int) *TaskQueue {
 	q := &TaskQueue{
 		tasks:          make(map[string]*Task),
+		historySaved:   make(map[string]uint64),
 		maxConcurrency: config.NormalizeTaskConcurrency(concurrency),
 		activeTargets:  make(map[string]bool),
 		runningTasks:   make(map[*Task]bool),
@@ -131,10 +143,20 @@ func (q *TaskQueue) signalDispatchers() {
 func (q *TaskQueue) enqueueTask(task *Task) {
 	if task.ContainerID > 0 && config.AppConfig != nil {
 		if c := config.FindContainer(task.ContainerID); c != nil {
+			if task.ContainerUUID != "" && task.ContainerUUID != c.UUID {
+				task.Status = "failed"
+				task.Error = "operation target identity changed"
+				task.FinishedAt = time.Now().Format(time.RFC3339Nano)
+				addTaskEvent(task, "failed", task.Error)
+				q.tasks[task.ID] = task
+				return
+			}
 			task.ContainerName = c.Name
+			task.ContainerUUID = c.UUID
 		}
 	}
 	q.tasks[task.ID] = task
+	addTaskEvent(task, task.Stage, task.StageDetail)
 	if task.Type == TaskDelete {
 		q.cancelTasksForDelete(task)
 	} else {
@@ -182,6 +204,8 @@ func cancelPendingTaskForDelete(task *Task) {
 	task.Error = "cancelled because container deletion was requested"
 	task.Stage = "failed"
 	task.StageDetail = "已取消，等待删除"
+	task.FinishedAt = time.Now().Format(time.RFC3339Nano)
+	addTaskEvent(task, task.Stage, task.Error)
 	if task.Type == TaskCreate {
 		name := task.Config.Name
 		if name == "" {
@@ -223,8 +247,7 @@ func (q *TaskQueue) EnqueueWithAudit(containerID int, containerName string, task
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	id := q.nextID
-	q.nextID++
+	id := q.allocateTaskID()
 	task := &Task{
 		ID:            fmt.Sprintf("task-%d", id),
 		Type:          taskType,
@@ -307,8 +330,7 @@ func (q *TaskQueue) enqueueBatchCreateList(configs []lxc.ContainerConfig, user s
 	for _, cfg := range configs {
 		cfgCopy := cfg
 		cfgCopy.NormalizeResourceAliases()
-		id := q.nextID
-		q.nextID++
+		id := q.allocateTaskID()
 		task := &Task{
 			ID:            fmt.Sprintf("task-%d", id),
 			Type:          TaskCreate,
@@ -339,8 +361,7 @@ func (q *TaskQueue) enqueueSingleWithUser(containerID int, containerName string,
 }
 
 func (q *TaskQueue) enqueueSingleWithAudit(containerID int, containerName string, taskType TaskType, templateID string, user string, ip string, userAgent string) string {
-	id := q.nextID
-	q.nextID++
+	id := q.allocateTaskID()
 	task := &Task{
 		ID:            fmt.Sprintf("task-%d", id),
 		Type:          taskType,
@@ -421,10 +442,15 @@ func (q *TaskQueue) takeNextTask(create bool) *Task {
 				task.Error = ""
 				task.Stage = "preparing"
 				task.StageDetail = "准备初始化环境"
+				task.StartedAt = time.Now().Format(time.RFC3339Nano)
+				addTaskEvent(task, task.Stage, task.StageDetail)
 				task.activeKey = taskConcurrencyKey(task)
+				task.activeKeys = taskConcurrencyKeys(task)
 				task.ctx, task.cancel = context.WithCancel(context.Background())
 				q.runningTasks[task] = true
-				q.activeTargets[task.activeKey] = true
+				for _, key := range task.activeKeys {
+					q.activeTargets[key] = true
+				}
 				q.activeTasks++
 				q.persistTasks()
 				return task
@@ -436,7 +462,7 @@ func (q *TaskQueue) takeNextTask(create bool) *Task {
 
 func runnableDeleteTaskIndex(queue []*Task, activeTargets map[string]bool) int {
 	for index, task := range queue {
-		if task.Type == TaskDelete && !activeTargets[taskConcurrencyKey(task)] {
+		if task.Type == TaskDelete && !taskTargetsActive(task, activeTargets) {
 			return index
 		}
 	}
@@ -445,7 +471,7 @@ func runnableDeleteTaskIndex(queue []*Task, activeTargets map[string]bool) int {
 
 func runnableTaskIndex(queue []*Task, activeTargets map[string]bool) int {
 	for index, task := range queue {
-		if !activeTargets[taskConcurrencyKey(task)] {
+		if !taskTargetsActive(task, activeTargets) {
 			return index
 		}
 	}
@@ -478,8 +504,15 @@ func (q *TaskQueue) finishTask(task *Task, status string, taskErr error) {
 		task.cancel = nil
 	}
 	task.Status = status
+	task.FinishedAt = time.Now().Format(time.RFC3339Nano)
+	if started := taskTime(task.StartedAt); !started.IsZero() {
+		task.DurationMS = max(0, time.Since(started).Milliseconds())
+	}
 	if taskErr != nil {
 		task.Error = taskErr.Error()
+		if len(task.Error) > 8192 {
+			task.Error = task.Error[:8192]
+		}
 		if task.Type == TaskCreate {
 			task.Stage = "failed"
 			task.StageDetail = "初始化失败"
@@ -491,6 +524,20 @@ func (q *TaskQueue) finishTask(task *Task, status string, taskErr error) {
 			task.StageDetail = "初始化完成"
 		}
 	}
+	if status == "failed" {
+		task.Stage = "failed"
+		if taskErr != nil {
+			task.StageDetail = taskErr.Error()
+		}
+	} else {
+		task.Stage = "completed"
+		task.StageDetail = "操作完成"
+	}
+	addTaskEvent(task, task.Stage, task.StageDetail)
+	for _, key := range task.activeKeys {
+		delete(q.activeTargets, key)
+	}
+	task.activeKeys = nil
 	if task.activeKey != "" {
 		delete(q.activeTargets, task.activeKey)
 		task.activeKey = ""
@@ -506,8 +553,8 @@ func (q *TaskQueue) finishTask(task *Task, status string, taskErr error) {
 
 func (q *TaskQueue) updateTaskStage(task *Task, stage, detail string) {
 	q.mu.Lock()
-	task.Stage = stage
-	task.StageDetail = detail
+	addTaskEvent(task, stage, detail)
+	q.persistTaskHistoryOnly()
 	q.mu.Unlock()
 }
 
@@ -561,10 +608,11 @@ func (q *TaskQueue) runCreateTask(task *Task) {
 
 	// FindContainer returns a slice-backed pointer. Another container's removal
 	// can shift that slice while startup waits, so never retain it for cleanup.
-	containerID, containerName := c.ID, c.Name
+	containerID, containerName, containerUUID := c.ID, c.Name, c.UUID
 	q.mu.Lock()
 	task.ContainerID = containerID
 	task.ContainerName = containerName
+	task.ContainerUUID = containerUUID
 	q.mu.Unlock()
 	startDetail := "启动容器并等待网络就绪"
 	if strings.EqualFold(cfg.Virtualization, config.VirtualizationKVM) {
@@ -588,7 +636,10 @@ func (q *TaskQueue) runCreateTask(task *Task) {
 
 func (q *TaskQueue) runOperationTask(task *Task) {
 	q.mu.Lock()
-	err := resolveTaskContainer(task)
+	var err error
+	if builtInTask(task.Type) || task.ContainerID > 0 {
+		err = resolveTaskContainer(task)
+	}
 	ctx := task.ctx
 	if ctx == nil {
 		ctx = context.Background()
@@ -626,6 +677,19 @@ func (q *TaskQueue) runOperationTask(task *Task) {
 			} else {
 				err = reinstallByRuntime(task.ContainerID, task.TemplateID)
 			}
+		default:
+			if handler := operationHandler(task.Type); handler != nil {
+				ctx = context.WithValue(ctx, operationResultKey{}, func(result json.RawMessage) error {
+					q.mu.Lock()
+					defer q.mu.Unlock()
+					task.Result = append(json.RawMessage(nil), result...)
+					task.revision++
+					return q.persistTaskHistoryOnly()
+				})
+				err = handler(ctx, task.ContainerID, task.Payload, func(stage, detail string) { q.updateTaskStage(task, stage, detail) })
+			} else {
+				err = fmt.Errorf("operation handler unavailable: %s", task.Type)
+			}
 		}
 	}
 
@@ -656,11 +720,17 @@ func resolveTaskContainer(task *Task) error {
 	}
 	if task.ContainerID > 0 {
 		if c := config.FindContainer(task.ContainerID); c != nil {
+			if task.ContainerUUID != "" && c.UUID != task.ContainerUUID {
+				return fmt.Errorf("container identity changed: %d", task.ContainerID)
+			}
 			if task.ContainerName == "" {
 				task.ContainerName = c.Name
 			}
 			return nil
 		}
+	}
+	if task.ContainerUUID != "" {
+		return fmt.Errorf("container no longer exists: %s", task.ContainerUUID)
 	}
 	if task.ContainerName != "" {
 		if c := config.FindContainerByName(task.ContainerName); c != nil {
@@ -673,31 +743,8 @@ func resolveTaskContainer(task *Task) error {
 	return fmt.Errorf("container not found: %d", task.ContainerID)
 }
 
-func (q *TaskQueue) persistTasks() {
-	saved := make([]config.SavedTask, 0)
-	for _, t := range q.tasks {
-		// Only persist pending and running tasks to avoid
-		// re-queuing already completed/failed tasks after restart.
-		if t.Status != "pending" && t.Status != "running" {
-			continue
-		}
-		cfgJSON, _ := json.Marshal(t.Config)
-		saved = append(saved, config.SavedTask{
-			ID:            t.ID,
-			Type:          string(t.Type),
-			ContainerID:   t.ContainerID,
-			ContainerName: t.ContainerName,
-			Status:        t.Status,
-			Error:         t.Error,
-			CreatedAt:     t.CreatedAt,
-			TemplateID:    t.TemplateID,
-			Config:        string(cfgJSON),
-			User:          t.User,
-			IP:            t.IP,
-			UserAgent:     t.UserAgent,
-		})
-	}
-	config.SaveTasks(saved)
+func (q *TaskQueue) persistTasks() error {
+	return q.persistTaskState()
 }
 
 func (q *TaskQueue) GetTasks() []*Task {
@@ -707,6 +754,11 @@ func (q *TaskQueue) GetTasks() []*Task {
 	// Collect all task IDs, sort by creation time (extracted from ID number)
 	for _, t := range q.tasks {
 		copyTask := *t
+		copyTask.Logs = append([]TaskEvent(nil), t.Logs...)
+		copyTask.Result = append(json.RawMessage(nil), t.Result...)
+		if t.Status == "running" && !taskTime(t.StartedAt).IsZero() {
+			copyTask.DurationMS = max(0, time.Since(taskTime(t.StartedAt)).Milliseconds())
+		}
 		result = append(result, &copyTask)
 	}
 	// Stable sort by ID number (task-N where N is sequential)
@@ -1070,12 +1122,23 @@ func HandleTaskDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	globalQueue.mu.Lock()
 	task := globalQueue.tasks[taskID]
-	if task != nil && !isTaskAllowedForRequest(r, task) {
+	if task != nil && !isHistoricalTaskAllowed(r, task) {
 		globalQueue.mu.Unlock()
 		jsonResponse(w, http.StatusForbidden, APIResponse{Success: false, Message: "Access denied to this task"})
 		return
 	}
+	if task != nil && task.Status == "running" {
+		globalQueue.mu.Unlock()
+		jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "A running task cannot be removed"})
+		return
+	}
+	if err := config.DeleteTaskHistory(taskID); err != nil && err != config.ErrHistoryStoreUnavailable {
+		globalQueue.mu.Unlock()
+		jsonResponse(w, http.StatusInternalServerError, APIResponse{Success: false, Message: "Failed to remove task history"})
+		return
+	}
 	delete(globalQueue.tasks, taskID)
+	delete(globalQueue.historySaved, taskID)
 	// Also remove from both queues if pending
 	newCreate := make([]*Task, 0, len(globalQueue.createQueue))
 	for _, t := range globalQueue.createQueue {
@@ -1109,64 +1172,19 @@ func HandleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tasks := globalQueue.GetTasks()
-	tasks = filterTasksForRequest(r, tasks)
+	filtered := make([]*Task, 0, len(tasks))
+	for _, task := range tasks {
+		if isHistoricalTaskAllowed(r, task) {
+			filtered = append(filtered, task)
+		}
+	}
+	tasks = filtered
 	jsonResponse(w, http.StatusOK, APIResponse{Success: true, Data: tasks})
 }
 
 // RestoreTasks restores task queue from config
 func RestoreTasks() {
-	globalQueue.mu.Lock()
-	defer globalQueue.mu.Unlock()
-	for _, st := range config.AppConfig.Tasks {
-		// Retired alert automation must not replay shutdowns saved by older versions.
-		if st.Type == string(TaskStop) && st.User == "system:security" {
-			continue
-		}
-		var cfg lxc.ContainerConfig
-		if st.Config != "" {
-			json.Unmarshal([]byte(st.Config), &cfg)
-		}
-		containerName := st.ContainerName
-		if containerName == "" {
-			containerName = cfg.Name
-		}
-		if cfg.Name == "" {
-			cfg.Name = containerName
-		}
-		cfg.NormalizeResourceAliases()
-		containerID := st.ContainerID
-		if containerID <= 0 && containerName != "" {
-			if c := config.FindContainerByName(containerName); c != nil {
-				containerID = c.ID
-			}
-		}
-		globalQueue.tasks[st.ID] = &Task{
-			ID:            st.ID,
-			Type:          TaskType(st.Type),
-			ContainerID:   containerID,
-			ContainerName: containerName,
-			Status:        st.Status,
-			Error:         st.Error,
-			Stage:         "queued",
-			StageDetail:   "排队等待",
-			CreatedAt:     st.CreatedAt,
-			TemplateID:    st.TemplateID,
-			Config:        cfg,
-			User:          st.User,
-			IP:            st.IP,
-			UserAgent:     st.UserAgent,
-		}
-		if st.Status == "pending" || st.Status == "running" {
-			// Reset running tasks back to pending so they get retried
-			globalQueue.tasks[st.ID].Status = "pending"
-			globalQueue.enqueueTask(globalQueue.tasks[st.ID])
-		}
-		if num := parseIDNum(st.ID); num >= globalQueue.nextID {
-			globalQueue.nextID = num + 1
-		}
-	}
-	// Clear persisted tasks from disk (they're now in memory)
-	config.SaveTasks([]config.SavedTask{})
+	globalQueue.restoreTaskState()
 }
 
 func parseIDNum(id string) int {

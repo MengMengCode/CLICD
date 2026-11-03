@@ -302,6 +302,7 @@ func detectRuntimeProbeQuick() HostRuntimeProbe {
 
 func StartHostMetricSampler() {
 	hostMetricSamplerOnce.Do(func() {
+		restoreHostMetricHistory()
 		appendHostMetricPoint(getHostInfoWithNetworkDetails(false))
 		go func() {
 			ticker := time.NewTicker(hostMetricSampleInterval)
@@ -335,6 +336,7 @@ func appendHostMetricPoint(info HostInfo) {
 		DiskUsagePct: diskUsagePct,
 	}
 	cutoff := time.Now().Add(-hostMetricRetention).UnixMilli()
+	persistMetricPoint("host", "host", point.TS, point)
 
 	hostMetricMu.Lock()
 	defer hostMetricMu.Unlock()
@@ -347,7 +349,11 @@ func appendHostMetricPoint(info HostInfo) {
 		copy(hostMetricHistory, hostMetricHistory[keepFrom:])
 		hostMetricHistory = hostMetricHistory[:len(hostMetricHistory)-keepFrom]
 	}
-	hostMetricHistory = append(hostMetricHistory, point)
+	if len(hostMetricHistory) > 0 && hostMetricHistory[len(hostMetricHistory)-1].TS/30_000 == point.TS/30_000 {
+		hostMetricHistory[len(hostMetricHistory)-1] = point
+	} else {
+		hostMetricHistory = append(hostMetricHistory, point)
+	}
 }
 
 func getHostMetricHistory() []HostMetricPoint {

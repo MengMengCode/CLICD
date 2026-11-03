@@ -88,6 +88,15 @@ func listContainerSnapshots(w http.ResponseWriter, r *http.Request, containerID 
 }
 
 func createContainerSnapshot(w http.ResponseWriter, r *http.Request, containerID int) {
+	c := config.FindContainer(containerID)
+	if c == nil {
+		jsonResponse(w, http.StatusNotFound, APIResponse{Success: false, Message: "Container not found"})
+		return
+	}
+	if len(c.DataDisks) > 0 {
+		jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "Instances with data disks require full backup and restore; system-disk snapshots are unavailable"})
+		return
+	}
 	user := requestUser(r)
 	var req struct {
 		StoragePoolID string `json:"storage_pool_id"`
@@ -104,7 +113,6 @@ func createContainerSnapshot(w http.ResponseWriter, r *http.Request, containerID
 		return
 	}
 	if isSubUserRequest(r) {
-		c := config.FindContainer(containerID)
 		limit := config.ContainerSnapshotLimit(c)
 		if len(config.ContainerSnapshots(containerID)) >= limit {
 			jsonResponse(w, http.StatusForbidden, APIResponse{Success: false, Message: "Snapshot quota reached. Delete an old snapshot first."})
@@ -217,6 +225,15 @@ func restoreContainerSnapshot(w http.ResponseWriter, r *http.Request, containerI
 	snapshot := config.FindSnapshot(snapshotID)
 	if snapshot == nil || snapshot.ContainerID != containerID {
 		jsonResponse(w, http.StatusNotFound, APIResponse{Success: false, Message: "Snapshot not found"})
+		return
+	}
+	c := config.FindContainer(containerID)
+	if c == nil {
+		jsonResponse(w, http.StatusNotFound, APIResponse{Success: false, Message: "Container not found"})
+		return
+	}
+	if len(c.DataDisks) > 0 {
+		jsonResponse(w, http.StatusConflict, APIResponse{Success: false, Message: "Instances with data disks require full backup and restore; system-disk snapshots are unavailable"})
 		return
 	}
 	user := requestUser(r)

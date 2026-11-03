@@ -9,6 +9,7 @@ import ResourceStatsPanel, {
   statsRanges,
 } from '../components/ResourceStatsPanel'
 import { DashboardStats, getDashboard, getHostHistory, getHostInfo, HostInfo, HostMetricPoint as HostMetricSample } from '../services/api'
+import { formatMetricRate } from '../lib/format-metrics'
 
 type HostMetricPoint = {
   ts: number
@@ -112,11 +113,10 @@ export default function Dashboard() {
       current: networkBps,
       points: toChartPoints(filtered, 'network'),
       series: [
-        { label: '入', points: toChartPoints(filtered, 'networkRx'), current: networkRxBps, color: '#2563eb' },
-        { label: '出', points: toChartPoints(filtered, 'networkTx'), current: networkTxBps, color: '#16a34a' },
+        { label: '入', points: toChartPoints(filtered, 'networkRx'), current: networkRxBps, color: 'hsl(var(--chart-1))' },
+        { label: '出', points: toChartPoints(filtered, 'networkTx'), current: networkTxBps, color: 'hsl(var(--chart-2))' },
       ],
       formatValue: formatRate,
-      detail: `入 ${formatRate(networkRxBps)} / 出 ${formatRate(networkTxBps)}`,
     },
     {
       title: '磁盘IO',
@@ -124,11 +124,10 @@ export default function Dashboard() {
       current: diskIOBps,
       points: toChartPoints(filtered, 'diskIO'),
       series: [
-        { label: '读', points: toChartPoints(filtered, 'diskRead'), current: diskReadBps, color: '#d97706' },
-        { label: '写', points: toChartPoints(filtered, 'diskWrite'), current: diskWriteBps, color: '#dc2626' },
+        { label: '读', points: toChartPoints(filtered, 'diskRead'), current: diskReadBps, color: 'hsl(var(--chart-3))' },
+        { label: '写', points: toChartPoints(filtered, 'diskWrite'), current: diskWriteBps, color: 'hsl(var(--chart-4))' },
       ],
       formatValue: formatRate,
-      detail: `读 ${formatRate(diskReadBps)} / 写 ${formatRate(diskWriteBps)}`,
     },
   ]
 
@@ -160,7 +159,7 @@ export default function Dashboard() {
         />
       )}
 
-      <ResourceStatsPanel range={range} onRangeChange={setRange} onRefresh={fetchData} charts={charts} />
+      <ResourceStatsPanel range={range} onRangeChange={setRange} onRefresh={() => { void fetchData(); void fetchHistory() }} charts={charts} />
     </div>
   )
 }
@@ -244,12 +243,6 @@ function formatMB(mb: number) {
   return `${Math.round(mb)} MB`
 }
 
-function formatBytes(value: number) {
-  if (value < 1024) return `${value.toFixed(0)} B`
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(2)} KB`
-  return `${(value / 1024 / 1024).toFixed(2)} MB`
-}
-
 function formatRate(value: number) {
-  return `${formatBytes(value)}/s`
+  return formatMetricRate(value, 2)
 }

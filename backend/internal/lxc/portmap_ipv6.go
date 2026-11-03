@@ -391,11 +391,7 @@ func persistIPv6MappingChange(m *Manager, current *config.Container, candidate c
 			return fmt.Errorf("IPv6 mapping configuration saved, but applying it failed: %w", err)
 		}
 	}
-	_, host, _, _ := nat6PortEndpoint(&previous)
-	oldMappings, _ := effectiveIPv6Mappings(&previous, host)
-	for _, mapping := range oldMappings {
-		clearIPv6PortMappingConntrack(mapping)
-	}
+	clearChangedIPv6Mappings(&previous, &candidate)
 	return nil
 }
 
@@ -436,10 +432,7 @@ func (m *Manager) ApplyIPv6PortMappings(id int) error {
 	if err := validateIPv6MappingInventory(c); err != nil {
 		return err
 	}
-	if err := cleanIPv6PortMappingsLocked(id); err != nil {
-		return err
-	}
-	if err := applyIPv6PortMappingsLocked(c); err != nil {
+	if _, err := reconcileIPv6PortMappingsLocked(c); err != nil {
 		return err
 	}
 	return applyFirewallRulesLocked(id)
@@ -453,25 +446,63 @@ func applyIPv6PortMappingsLocked(c *config.Container) error {
 	if c.Status != "running" {
 		return nil
 	}
+	_, err := reconcileIPv6PortMappingsLocked(c)
+	return err
+}
+
+func ipv6MappingRules(c *config.Container) ([]mappingRule, error) {
 	guest, host, _, enabled := nat6PortEndpoint(c)
-	if !enabled {
-		return nil
+	if !enabled || c.Status != "running" {
+		return nil, nil
 	}
 	if err := validateIPv6MappingInventory(c); err != nil {
-		return err
+		return nil, err
 	}
 	mappings, err := effectiveIPv6Mappings(c, host)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var rules []mappingRule
 	for _, mapping := range mappings {
 		for _, args := range ipv6PortMappingRuleArgs(c.ID, guest, host, mapping) {
-			if out, err := runIPv6PortMappingCommand("ip6tables", args...); err != nil {
-				return errors.Join(fmt.Errorf("apply IPv6 NAT port %d/%s: %w: %s", mapping.HostPort, mapping.Protocol, err, strings.TrimSpace(string(out))), cleanIPv6PortMappingsLocked(c.ID))
+			table, start := "filter", 2
+			if args[start] == "-t" {
+				table = args[start+1]
+				start += 2
 			}
+			rules = append(rules, mappingRule{table, args[start+1], args[start+3:]})
 		}
 	}
-	return nil
+	return rules, nil
+}
+
+func reconcileIPv6PortMappingsLocked(c *config.Container) (bool, error) {
+	rules, err := ipv6MappingRules(c)
+	if err != nil {
+		return false, err
+	}
+	return reconcileMappingRules("ip6tables", "clicd-"+clicdTag(c.ID)+"-nat6-port-",
+		[]mappingRule{{table: "nat", chain: "PREROUTING"}, {table: "nat", chain: "OUTPUT"}, {table: "filter", chain: "FORWARD"}}, rules, runIPv6PortMappingCommand)
+}
+
+func clearChangedIPv6Mappings(previous, current *config.Container) {
+	old, err := ipv6MappingRules(previous)
+	if err != nil {
+		return
+	}
+	next, err := ipv6MappingRules(current)
+	if err != nil {
+		return
+	}
+	wanted := map[string]bool{}
+	for _, rule := range next {
+		wanted[mappingRuleKey(rule)] = true
+	}
+	for _, rule := range old {
+		if !wanted[mappingRuleKey(rule)] {
+			clearMappingRuleConntrack("ip6tables", rule, runIPv6PortMappingCommand)
+		}
+	}
 }
 
 func ipv6PortMappingRuleArgs(id int, guest, host string, mapping config.PortMapping) [][]string {
@@ -511,48 +542,18 @@ func cleanIPv6PortMappingsLocked(id int) error {
 		for _, args := range taggedRuleSpecifications(out, marker) {
 			if output, err := runIPv6PortMappingCommand("ip6tables", append([]string{"-w", "5", "-t", target.table}, args...)...); err != nil && !isIPTablesRuleNotFoundError(string(output)) {
 				cleanupErrors = append(cleanupErrors, fmt.Errorf("remove IPv6 NAT rule: %w: %s", err, strings.TrimSpace(string(output))))
+			} else {
+				clearMappingRuleConntrack("ip6tables", mappingRule{target.table, target.chain, args[2:]}, runIPv6PortMappingCommand)
 			}
 		}
 	}
 	if c := config.FindContainer(id); c != nil {
 		snapshot := *c
 		c = &snapshot
-		_, host, _, _ := nat6PortEndpoint(c)
-		mappings, _ := effectiveIPv6Mappings(c, host)
-		for _, mapping := range mappings {
-			clearIPv6PortMappingConntrack(mapping)
+		rules, _ := ipv6MappingRules(c)
+		for _, rule := range rules {
+			clearMappingRuleConntrack("ip6tables", rule, runIPv6PortMappingCommand)
 		}
 	}
 	return errors.Join(cleanupErrors...)
-}
-
-func ipv6PortMappingConntrackDeleteArgs(mapping config.PortMapping) []string {
-	if mapping.HostPort < 1 || mapping.HostPort > 65535 || (mapping.Protocol != "tcp" && mapping.Protocol != "udp") {
-		return nil
-	}
-	args := []string{"-D", "-f", "ipv6", "-p", mapping.Protocol, "--dport", strconv.Itoa(mapping.HostPort)}
-	if mapping.HostIP != "" {
-		args = append(args, "--dst", mapping.HostIP)
-	}
-	return args
-}
-
-func clearIPv6PortMappingConntrack(mapping config.PortMapping) {
-	// An unavailable uplink must not turn an exact cleanup into a global
-	// deletion of unrelated IPv6 services using the same port.
-	if mapping.HostIP == "" {
-		return
-	}
-	if args := ipv6PortMappingConntrackDeleteArgs(mapping); len(args) > 0 {
-		_, _ = runIPv6PortMappingCommand("conntrack", args...)
-	}
-}
-
-func clearSynchronizedIPv6Conntrack(c *config.Container, mapping config.PortMapping) {
-	if !ipv6MappingsSyncIPv4(c) || c.IPv6NATAddress == "" {
-		return
-	}
-	_, host, _, _ := nat6PortEndpoint(c)
-	mapping.HostIP = host
-	clearIPv6PortMappingConntrack(mapping)
 }

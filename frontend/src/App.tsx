@@ -15,6 +15,8 @@ import Routing from './pages/Routing'
 import Storage from './pages/Storage'
 import SubUserManagement from './pages/SubUserManagement'
 import Layout from './components/Layout'
+import PortableLibrary from './pages/PortableLibrary'
+import Tasks from './pages/Tasks'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -61,6 +63,9 @@ function App() {
         <Route path="container/:id" element={<ContainerDetail />} />
 
         <Route path="snapshots" element={<Snapshots />} />
+        <Route path="backups" element={<PortableLibrary kind="backup" />} />
+        <Route path="instance-templates" element={<PortableLibrary kind="template" />} />
+        <Route path="tasks" element={<Tasks />} />
         <Route path="routing" element={<Routing />} />
         <Route path="storage" element={<Storage />} />
         <Route path="audit-logs" element={<AuditLogs />} />

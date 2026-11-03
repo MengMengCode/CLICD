@@ -20,6 +20,7 @@ import {
   Copy,
   Cpu,
   Disc3,
+  Archive,
   HardDrive,
   Key,
   Maximize2,
@@ -97,6 +98,8 @@ import { RingStat } from '../components/RingStats'
 import { WorkloadIdentity, WorkloadStatus } from '../components/WorkloadStatus'
 import IPv6PortMappings from '../components/IPv6PortMappings'
 import KVMInstallMedia from '../components/KVMInstallMedia'
+import DiskManagerModal from '../components/DiskManagerModal'
+import InstanceTransferModal from '../components/InstanceTransferModal'
 import { copyToClipboard } from '../utils/clipboard'
 import ResourceStatsPanel, {
   ChartPoint,
@@ -105,6 +108,7 @@ import ResourceStatsPanel, {
   statsRanges,
 } from '../components/ResourceStatsPanel'
 import { generateSSHPassword, sshPasswordError, sshPublicKeyError, type ReinstallSSHAuthMode } from '../utils/sshAuth'
+import { formatMetricRate } from '../lib/format-metrics'
 
 const PUBLIC_HOST = window.location.hostname
 const inputClass = 'w-full px-3 py-2 text-sm'
@@ -159,6 +163,8 @@ export default function ContainerDetail() {
   const [showSSH, setShowSSH] = useState(false)
   const [showVNC, setShowVNC] = useState(false)
   const [showInstallationMedia, setShowInstallationMedia] = useState(false)
+  const [showDisks, setShowDisks] = useState(false)
+  const [showTransfer, setShowTransfer] = useState(false)
   const vncFullscreenRef = useRef<HTMLDivElement>(null)
   const [vncFullscreen, setVncFullscreen] = useState(false)
   const [showNat, setShowNat] = useState(false)
@@ -963,6 +969,7 @@ export default function ContainerDetail() {
   const maxVCPU = hostInfo?.cpu.cores || 64
   const maxRAMMB = hostInfo?.ram.total_mb ? Number(hostInfo.ram.total_mb) : undefined
   const hasIndependentIPv4 = assignedIPv4List.length > 0
+  const hasDataDisks = (container.data_disks?.length || 0) > 0
   const hasIndependentIPv6 = ipv6List.length > 0
   const defaultConnPort = isWindows ? 3389 : 22
   const snapshotStoragePools = (storageInfo?.pools || []).filter((pool) =>
@@ -1066,11 +1073,11 @@ export default function ContainerDetail() {
       current: networkBps,
       points: toChartPoints(filtered, 'network'),
       series: [
-        { label: '入', points: toChartPoints(filtered, 'networkRx'), current: networkRxBps, color: '#2563eb' },
-        { label: '出', points: toChartPoints(filtered, 'networkTx'), current: networkTxBps, color: '#16a34a' },
+        { label: '入', points: toChartPoints(filtered, 'networkRx'), current: networkRxBps, color: 'hsl(var(--chart-1))' },
+        { label: '出', points: toChartPoints(filtered, 'networkTx'), current: networkTxBps, color: 'hsl(var(--chart-2))' },
       ],
       formatValue: formatRate,
-      detail: `入 ${formatRate(networkRxBps)} / 出 ${formatRate(networkTxBps)}，限速占用 ${netPct.toFixed(1)}%，累计 ${formatBytes((usage?.network_rx_bytes || 0) + (usage?.network_tx_bytes || 0))}`,
+      detail: `限速占用 ${netPct.toFixed(1)}%，累计 ${formatBytes((usage?.network_rx_bytes || 0) + (usage?.network_tx_bytes || 0))}`,
     },
     {
       title: '磁盘IO',
@@ -1078,11 +1085,11 @@ export default function ContainerDetail() {
       current: diskIOBps,
       points: toChartPoints(filtered, 'diskIO'),
       series: [
-        { label: '读', points: toChartPoints(filtered, 'diskRead'), current: diskReadBps, color: '#d97706' },
-        { label: '写', points: toChartPoints(filtered, 'diskWrite'), current: diskWriteBps, color: '#dc2626' },
+        { label: '读', points: toChartPoints(filtered, 'diskRead'), current: diskReadBps, color: 'hsl(var(--chart-3))' },
+        { label: '写', points: toChartPoints(filtered, 'diskWrite'), current: diskWriteBps, color: 'hsl(var(--chart-4))' },
       ],
       formatValue: formatRate,
-      detail: `读 ${formatRate(diskReadBps)} / 写 ${formatRate(diskWriteBps)}，限速占用 ${diskIOPct.toFixed(1)}%，累计 ${formatBytes((usage?.disk_read_bytes || 0) + (usage?.disk_write_bytes || 0))}，容量 ${diskPct.toFixed(1)}%`,
+      detail: `限速占用 ${diskIOPct.toFixed(1)}%，累计 ${formatBytes((usage?.disk_read_bytes || 0) + (usage?.disk_write_bytes || 0))}，容量 ${diskPct.toFixed(1)}%`,
     },
   ]
 
@@ -1180,6 +1187,8 @@ export default function ContainerDetail() {
               <Camera className="w-3.5 h-3.5" />
               快照
             </ActionButton>
+            <ActionButton onClick={() => setShowDisks(true)}><HardDrive className="w-3.5 h-3.5" />{t('磁盘管理')}</ActionButton>
+            {!isSubUser && <ActionButton onClick={() => setShowTransfer(true)} disabled={!!taskStatus}><Archive className="w-3.5 h-3.5" />{t('备份、克隆与模板')}</ActionButton>}
             {isKVM && (
               <ActionButton onClick={() => setShowInstallationMedia(true)}>
                 <Disc3 className="w-3.5 h-3.5" />
@@ -1323,6 +1332,8 @@ export default function ContainerDetail() {
         </Panel>
       </div>
 
+      {showDisks && <DiskManagerModal containerId={containerIdentifier} runtime={container.virtualization || 'lxc'} readOnly={isSubUser} onClose={() => setShowDisks(false)} onUpdated={fetchContainer} />}
+      {showTransfer && !isSubUser && <InstanceTransferModal containerId={containerIdentifier} containerName={container.name} runtime={container.virtualization || 'lxc'} onClose={() => setShowTransfer(false)} onUpdated={fetchContainer} />}
       {isKVM && <KVMInstallMedia
         key={containerIdentifier}
         open={showInstallationMedia}
@@ -1455,7 +1466,7 @@ export default function ContainerDetail() {
         </Modal>
       )}
 
-      <ResourceStatsPanel range={range} onRangeChange={setRange} onRefresh={() => { fetchContainer(); fetchUsage() }} charts={charts} />
+      <ResourceStatsPanel range={range} onRangeChange={setRange} onRefresh={() => { void fetchContainer(); void fetchUsage(); void fetchMetricHistory() }} charts={charts} />
 
       {showResetPassword && (
         <Modal dismissible={!(resetPasswordSaving)} title="重置 SSH 密码" onClose={() => setShowResetPassword(false)}>
@@ -1569,7 +1580,7 @@ export default function ContainerDetail() {
             <div className="flex items-center gap-2">
               <Button variant={snapshotSchedule?.enabled ? 'default' : 'outline'}
                 onClick={openSnapshotSchedule}
-                disabled={!!snapshotBusy || storageLoading || !snapshotStorageReady}
+                disabled={!!snapshotBusy || storageLoading || !snapshotStorageReady || hasDataDisks}
                 className="h-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
               >
                 <Clock className="w-3.5 h-3.5" />
@@ -1577,7 +1588,7 @@ export default function ContainerDetail() {
               </Button>
               <Button variant="default"
                 onClick={handleCreateSnapshot}
-                disabled={!!snapshotBusy || storageLoading || !snapshotStorageReady || (isSubUser && snapshots.length >= snapshotQuota)}
+                disabled={!!snapshotBusy || storageLoading || !snapshotStorageReady || hasDataDisks || (isSubUser && snapshots.length >= snapshotQuota)}
                 className="h-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
               >
                 <Camera className="w-3.5 h-3.5" />
@@ -1587,6 +1598,7 @@ export default function ContainerDetail() {
           }
         >
           <div className="space-y-4">
+            {hasDataDisks && <Alert className="text-xs leading-5">{t('此实例包含独立数据盘，请使用完整备份保护全部磁盘。')} {!isSubUser && <Button variant="link" className="h-auto p-0 text-xs" onClick={() => { setShowSnapshots(false); setShowTransfer(true) }}>{t('创建完整备份')}</Button>}</Alert>}
             {storageLoading && !isSubUser && (
               <Card className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground">
                 <RefreshCw className="h-4 w-4 animate-spin" />
@@ -2274,7 +2286,7 @@ export default function ContainerDetail() {
                   className="w-full px-3 py-2 text-sm h-auto" />
               </div>
             </div>
-            <p className="text-[11px] text-muted-foreground">磁盘容量不支持动态修改。修改后运行中的容器会立即应用新的 cgroup 限制。</p>
+            <p className="text-[11px] leading-5 text-muted-foreground">{t('磁盘容量请在“磁盘管理”中离线扩容。CPU、内存与 I/O 设置按实例运行时规则应用。')}</p>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowResourceEdit(false)} disabled={savingResource} className="h-auto px-4 py-2 text-sm">取消</Button>
               <Button variant="default" onClick={saveResourceLimit} disabled={savingResource} className="h-auto px-4 py-2 text-sm">
@@ -2855,9 +2867,7 @@ function formatScheduleInterval(hours: number): string {
 }
 
 function formatRate(bytesPerSecond: number): string {
-  if (bytesPerSecond < 1024) return `${bytesPerSecond.toFixed(0)} B/s`
-  if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`
-  return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`
+  return formatMetricRate(bytesPerSecond, 1)
 }
 
 function TrafficBar({ container }: { container: Container }) {

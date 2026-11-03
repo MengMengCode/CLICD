@@ -43,7 +43,7 @@ func createByRuntime(cfg lxc.ContainerConfig) error {
 }
 
 func validateCreateSSHAuth(cfg lxc.ContainerConfig) error {
-	if cfg.Virtualization == config.VirtualizationKVM && (kvm.IsWindowsImage(cfg.TemplateID) || kvm.IsManualISOImage(cfg.TemplateID)) {
+	if cfg.Virtualization == config.VirtualizationKVM && (kvm.IsWindowsImage(cfg.TemplateID) || kvm.IsManualISOImage(cfg.TemplateID) || kvm.IsManualDiskImage(cfg.TemplateID)) {
 		return nil
 	}
 	_, err := lxc.ResolveCreateSSHAccess(cfg)
@@ -51,7 +51,7 @@ func validateCreateSSHAuth(cfg lxc.ContainerConfig) error {
 }
 
 func validateReinstallSSHAuth(c *config.Container, templateID string, cfg lxc.ContainerConfig) error {
-	if c != nil && c.IsKVM() && (kvm.IsWindowsImage(templateID) || kvm.IsManualISOImage(templateID)) {
+	if c != nil && c.IsKVM() && (kvm.IsWindowsImage(templateID) || kvm.IsManualISOImage(templateID) || kvm.IsManualDiskImage(templateID)) {
 		return nil
 	}
 	currentPassword := ""

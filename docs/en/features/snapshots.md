@@ -1,5 +1,7 @@
 # Snapshot Management
 
+Instances with data disks cannot create/restore existing snapshots or enable scheduled snapshots. Detached disks count too. Disable an active snapshot schedule before adding a data disk. Use [full backups](./storage-backups) for rollback, migration or cloning that includes the system disk and all data disks.
+
 Snapshots save the current state of a container so it can be rolled back before upgrades, configuration changes, or delivery.
 
 ## Global Overview

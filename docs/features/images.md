@@ -2,6 +2,8 @@
 
 镜像管理用于维护可创建容器或虚拟机的模板。
 
+主页面显示本地已下载和正在下载的镜像；预设目录从下载按钮打开。可将本地 ISO/QCOW2 文件上传为 KVM 镜像，也可维护第三方下载源。
+
 ## 支持的模板类型
 
 项目内置了常见 Linux 发行版模板，例如 Debian、Ubuntu、Alpine、CentOS、Fedora、Arch Linux、Rocky Linux 等。KVM 模板会使用对应发行版的云镜像资源。
@@ -15,6 +17,7 @@ POST /api/v1/images/download
 POST /api/v1/images/cancel
 DELETE /api/v1/images/delete
 PUT /api/v1/images/toggle
+POST /api/v1/images/upload
 ```
 
 - `templates` 返回可用模板定义。
@@ -23,8 +26,17 @@ PUT /api/v1/images/toggle
 - `cancel` 取消下载任务。
 - `delete` 删除本地镜像缓存。
 - `toggle` 控制模板是否对创建流程可用。
+- `upload` 使用 `multipart/form-data` 上传 `file`，可附 `name`、`description`、`arch`、`sha256`、`provisioner`、`distro`、`release`；单文件最多 **32 GiB**，存储池通过查询参数 `storage_pool_id` 指定。
 
 镜像源创建、下载、取消、删除和启用管理需要管理员权限。使用外部 API Key 时，需同时授予 `admin:access` 和对应的 `image:*` 操作权限。
+
+## 本地镜像与通用 ISO
+
+上传会检查文件内容、可选 SHA-256 及磁盘格式，扩展名本身不能证明文件有效。QCOW2 必须是独立磁盘，不能依赖外部 backing/data file，也不能带加密或内嵌快照。只会在上传和验证全部成功后注册镜像。
+
+`provisioner=manual-iso` 用于 Linux、Windows 或其他系统的手动安装：创建空白系统盘并挂载 ISO，通过 WebVNC 安装，不强制生成 Windows 无人值守盘或等待 SSH。详情页顶部的“KVM 安装介质”按钮打开介质弹窗，支持停止状态下选择已下载 ISO、设置从光盘/磁盘启动或弹出 ISO；界面不接受任意宿主机路径。介质选择及弹出状态持久化，开关机和修改资源不会重新挂回已弹出的 ISO；主动重装则按新选模板重新准备安装介质。
+
+预装 QCOW2 默认使用 `manual-disk`，保留镜像内已有账户和网络设置；具备 cloud-init 的 Linux 镜像可明确选择 `linux-cloud-init`。上传的架构必须与宿主机匹配。完整实例模板（含数据盘）使用[完整备份与克隆](./storage-backups)的模板工作流。
 
 ## 私网镜像源
 

@@ -254,6 +254,15 @@ func (image Image) IsManualISO() bool {
 	return strings.EqualFold(strings.TrimSpace(image.Provisioner), config.KVMProvisionerManualISO)
 }
 
+func (image Image) IsManualDisk() bool {
+	return strings.EqualFold(strings.TrimSpace(image.Provisioner), "manual-disk")
+}
+
+func IsManualDiskImage(id string) bool {
+	image := FindImage(id)
+	return image != nil && image.IsManualDisk()
+}
+
 func IsManualISOImage(id string) bool {
 	image := FindImage(id)
 	return image != nil && image.IsManualISO()

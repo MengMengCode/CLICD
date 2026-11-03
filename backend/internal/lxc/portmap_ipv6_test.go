@@ -125,8 +125,8 @@ func TestIPv6NATRuleAndConntrackFamilies(t *testing.T) {
 	if forward := strings.Join(rules[2], " "); !strings.Contains(forward, "--ctstate DNAT") || !strings.Contains(forward, "--dport 8080") || !strings.Contains(forward, "-d fd00::2/128") {
 		t.Fatalf("translated ingress was not restricted to the actual guest service: %s", forward)
 	}
-	want := []string{"-D", "-f", "ipv6", "-p", "tcp", "--dport", "30080", "--dst", "2001:db8::10"}
-	if got := ipv6PortMappingConntrackDeleteArgs(mapping); !reflect.DeepEqual(got, want) {
+	want := []string{"-D", "-f", "ipv6", "--dst-nat", "--reply-src", "fd00::2", "-p", "tcp", "--dport", "30080", "--dst", "2001:db8::10/128", "--reply-port-src", "8080"}
+	if got := mappingRuleConntrackArgs("ip6tables", mappingRule{"nat", "PREROUTING", rules[0][7:]}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("IPv6 cleanup could target another family: %v", got)
 	}
 	c := &config.Container{IPv6NATAddress: "fd00::2"}
@@ -260,7 +260,7 @@ func TestIPv6StoppedMappingsAndUnavailableConntrackHaveNoSideEffects(t *testing.
 	if err := applyIPv6PortMappingsLocked(c); err != nil {
 		t.Fatal(err)
 	}
-	clearIPv6PortMappingConntrack(config.PortMapping{HostPort: 30080, Protocol: "tcp"})
+	clearMappingRuleConntrack("ip6tables", mappingRule{"nat", "PREROUTING", []string{"-j", "DNAT", "--to-destination", ""}}, runIPv6PortMappingCommand)
 	if calls != 0 {
 		t.Fatal("stopped guest installed DNAT or unavailable host triggered global conntrack deletion")
 	}

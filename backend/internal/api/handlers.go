@@ -97,6 +97,10 @@ func HandleSingleContainer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case action == "disks" || strings.HasPrefix(action, "disks/"):
+		HandleContainerDisks(w, r, id, action)
+	case action == "backup" || action == "clone" || action == "template":
+		HandleContainerTransfer(w, r, id, action)
 	case action == "installation-media":
 		handleInstallationMedia(w, r, id)
 	case action == "start" && r.Method == http.MethodPost:
@@ -234,7 +238,20 @@ func HandleSingleContainer(w http.ResponseWriter, r *http.Request) {
 func listContainers(w http.ResponseWriter, r *http.Request) {
 	containers, _ := listByRuntime()
 	containers = filterContainersForRequest(r, containers)
-	jsonResponse(w, http.StatusOK, APIResponse{Success: true, Data: containers})
+	public := make([]config.Container, len(containers))
+	for i, c := range containers {
+		public[i] = containerResponse(c)
+	}
+	jsonResponse(w, http.StatusOK, APIResponse{Success: true, Data: public})
+}
+
+// Disk paths belong to persistence and portable manifests, never public DTOs.
+func containerResponse(c config.Container) config.Container {
+	c.DataDisks = append([]config.DataDisk(nil), c.DataDisks...)
+	for i := range c.DataDisks {
+		c.DataDisks[i].Path = ""
+	}
+	return c
 }
 
 func createContainer(w http.ResponseWriter, r *http.Request) {
@@ -360,7 +377,7 @@ func getContainer(w http.ResponseWriter, r *http.Request, id int) {
 		_, _ = kvmManager.RefreshVNCPort(c.ID)
 		_, _ = kvmManager.RefreshNetwork(c.ID)
 	}
-	jsonResponse(w, http.StatusOK, APIResponse{Success: true, Data: c})
+	jsonResponse(w, http.StatusOK, APIResponse{Success: true, Data: containerResponse(*c)})
 }
 
 func getUsage(w http.ResponseWriter, r *http.Request, id int) {
@@ -438,6 +455,7 @@ func updateTrafficLimit(w http.ResponseWriter, r *http.Request, id int) {
 
 func updateResourceLimit(w http.ResponseWriter, r *http.Request, id int) {
 	var req struct {
+		DiskGB          *float64 `json:"disk_gb"`
 		VCPU            *float64 `json:"vcpu"`
 		RAMMB           *int     `json:"ram_mb"`
 		IOMBps          *int     `json:"io_speed_mbps"`
@@ -454,6 +472,10 @@ func updateResourceLimit(w http.ResponseWriter, r *http.Request, id int) {
 	c := config.FindContainer(id)
 	if c == nil {
 		jsonResponse(w, http.StatusNotFound, APIResponse{Success: false, Message: "Container not found"})
+		return
+	}
+	if req.DiskGB != nil && *req.DiskGB != c.DiskGB {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "请通过磁盘管理接口离线扩容，资源设置不能修改磁盘容量"})
 		return
 	}
 

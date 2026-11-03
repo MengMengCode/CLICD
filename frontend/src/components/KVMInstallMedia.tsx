@@ -156,7 +156,7 @@ export default function KVMInstallMedia({ open, onClose, containerId, status, ta
           <span className="min-w-0 max-w-full [overflow-wrap:anywhere]">{t('当前介质')}：<span className="font-medium text-foreground">{state.image_name || t('未挂载 ISO')}</span></span>
           <span className="flex max-w-full flex-wrap items-center gap-1">{t('启动顺序')}：<Badge variant="secondary">{state.boot === 'cdrom' ? t('光驱优先') : t('磁盘优先')}</Badge></span>
         </div>
-        {state.manual_install && <Alert className="text-xs leading-5">{t('此 ISO 将通过 VNC 手动安装系统，磁盘分区、账号和网络需要自行设置，不会注入 SSH 密码或云初始化。')}</Alert>}
+        {state.manual_install && <Alert className="text-xs leading-5">{t(state.image_id ? '此 ISO 将通过 VNC 手动安装系统，磁盘分区、账号和网络需要自行设置，不会注入 SSH 密码或云初始化。' : '此系统保留原有账号和网络配置，请通过 VNC 检查，不会注入新密码。')}</Alert>}
         {(!canEdit && !saving) && <p className="text-xs leading-5 text-muted-foreground">{t('更改安装介质前请先关闭虚拟机并等待当前任务结束；面板不会自动关机或重启。')}</p>}
         <div className="grid min-w-0 gap-4 [@container(min-width:440px)]:grid-cols-[minmax(0,2fr)_minmax(160px,1fr)]">
           <div className="min-w-0 space-y-1.5">

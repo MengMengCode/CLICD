@@ -289,6 +289,9 @@ print(resp.json())
 | POST | `/api/v1/containers/{id}/reinstall` | Reinstall |
 | DELETE | `/api/v1/containers/{id}/delete` | Delete |
 | GET | `/api/v1/containers/{id}/usage` | Resource usage |
+| GET | `/api/v1/containers/{id}/history` | Persisted resource history, up to 7 days |
+| GET | `/api/v1/containers/{id}/installation-media` | KVM media, boot mode and available ISOs |
+| PUT | `/api/v1/containers/{id}/installation-media` | Mount/change/eject ISO and set boot mode while stopped |
 | GET | `/api/v1/containers/{id}/traffic` | Traffic statistics |
 | POST | `/api/v1/containers/{id}/traffic-reset` | Reset traffic |
 | PUT | `/api/v1/containers/{id}/traffic-limit` | Update traffic limits |
@@ -315,6 +318,32 @@ print(resp.json())
 | POST | `/api/v1/containers/{id}/snapshots/schedule` | Schedule snapshots |
 | PUT | `/api/v1/containers/{id}/snapshots/quota` | Snapshot quota |
 
+### Disks, Full Backups and Instance Templates
+
+Disk mutations require administrator access and `container:resize`; sub-users can only read their assigned instances' disk inventory. Full backup, restore, clone and template endpoints require administrator access (`admin:access` for external API keys). See [storage limits and request examples](./storage-backups).
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/api/v1/containers/{id}/disks` | Actual capacity, allocated space and editing capabilities |
+| POST | `/api/v1/containers/{id}/disks` | Add a managed data disk |
+| PUT | `/api/v1/containers/{id}/disks/system` | Grow the system disk offline; no shrinking |
+| PUT | `/api/v1/containers/{id}/disks/{disk_id}` | Grow a data disk offline |
+| PUT | `/api/v1/containers/{id}/disks/{disk_id}/attachment` | Attach/detach a data disk |
+| DELETE | `/api/v1/containers/{id}/disks/{disk_id}` | Permanently delete a data disk; requires `delete_data: true` |
+| POST | `/api/v1/containers/{id}/backup` | Create a full backup |
+| POST | `/api/v1/containers/{id}/clone` | Full clone to a new stopped instance |
+| POST | `/api/v1/containers/{id}/template` | Save an installed-instance template |
+| GET | `/api/v1/backups` | List full backups |
+| POST | `/api/v1/backups` | Upload a `.clicd.tar.gz` full backup |
+| GET | `/api/v1/backups/{artifact_id}` | Download a full backup |
+| DELETE | `/api/v1/backups/{artifact_id}` | Delete a backup artifact |
+| POST | `/api/v1/backups/{artifact_id}/restore` | Restore a new stopped instance |
+| GET | `/api/v1/instance-templates` | List installed-instance templates |
+| DELETE | `/api/v1/instance-templates/{artifact_id}` | Delete an instance template |
+| POST | `/api/v1/instance-templates/{artifact_id}/instantiate` | Create a new stopped instance from a template |
+
+Disk mutations and backup/restore/clone/template operations return `202` with `data.task_id`. Poll `GET /api/v1/tasks` for final status, stage logs and results. A backup upload itself returns `201` and does not start a restore. Scheduled snapshots and instances with data disks are mutually exclusive workflows.
+
 ### Platform Management
 
 | Method | Path | Description |
@@ -328,6 +357,8 @@ print(resp.json())
 | POST | `/api/v1/images/cancel` | Cancel image download |
 | DELETE | `/api/v1/images/delete` | Delete image cache |
 | PUT | `/api/v1/images/toggle` | Enable or disable image |
+| POST | `/api/v1/images/upload` | Local ISO/QCOW2 upload, `multipart/form-data`, at most 32 GiB |
+| GET | `/api/v1/host-history` | Persisted host metrics, up to 7 days |
 | GET | `/api/v1/swap` | Swap information |
 | POST | `/api/v1/swap` | Adjust Swap |
 | GET | `/api/v1/language` | Current panel language |

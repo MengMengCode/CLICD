@@ -44,3 +44,5 @@ Back up regularly:
 - SQLite database.
 - Container configuration.
 - Snapshots or external data backups for important containers.
+
+[Full instance backups](../features/storage-backups) include the system disk and all managed data disks and support download/import. They do not replace configuration/database backups; task and metric history remains in the panel SQLite database. Use full backups for instances with data disks instead of existing system-disk snapshots.

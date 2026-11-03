@@ -11,6 +11,8 @@ CLICD is a lightweight virtualization management panel for LXC and KVM. It bring
 - Open WebSSH or WebVNC from the browser.
 - Manage image downloads, enablement, and local cache.
 - Create, restore, and delete snapshots, plus scheduled snapshots and quotas.
+- Grow managed disks offline, add data disks, and use full backup/import, independent clones and reusable installed-instance templates.
+- Inspect persisted task stages and resource history across panel restarts.
 - Keep operation audit logs and login logs.
 - Create sub-user access links for specific containers.
 - Integrate automation through API keys and `/api/v1`.

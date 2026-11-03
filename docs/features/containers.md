@@ -51,6 +51,8 @@ DELETE /api/v1/containers/{id}/delete
 
 容器详情页支持查看资源用量，调整流量限制、资源限制和到期时间。
 
+系统盘扩容和数据盘管理从详情页的磁盘管理入口操作，要求实例停止。完整备份、恢复、克隆及保存实例模板见[磁盘、备份与克隆](./storage-backups)。运行进度与错误可在[任务页面](./tasks)查看。
+
 ```http
 GET /api/v1/containers/{id}/usage
 GET /api/v1/containers/{id}/traffic

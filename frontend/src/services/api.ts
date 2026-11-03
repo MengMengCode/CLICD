@@ -119,6 +119,8 @@ export interface Container {
   vnc_port: number
   ssh_port: number
   ssh_password: string
+  data_disks?: { id: string; name: string; size_gb: number; attached: boolean; mount_path?: string }[]
+  standalone?: boolean
   port_mappings: PortMapping[]
   port_mapping_limit: number
   firewall_enabled: boolean
@@ -148,6 +150,7 @@ export interface Template {
   provisioner?: string
   manual_install?: boolean
   format?: 'iso' | 'qcow2'
+  min_disk_gb?: number
 }
 
 export interface CreateContainerRequest {
@@ -1020,6 +1023,12 @@ export interface Task {
   created_at: string
   template_id?: string
   config?: CreateContainerRequest
+  container_uuid?: string
+  started_at?: string
+  finished_at?: string
+  duration_ms?: number
+  logs?: { time: string; stage: string; detail: string }[]
+  result?: unknown
 }
 
 export const getTasks = () =>

@@ -2178,6 +2178,9 @@ func (m *Manager) StartContainer(id int) error {
 	}
 	EnsureAssignedPublicIPv4s(c.PublicIPv4s)
 
+	if err := m.PrepareDataDisks(&initialIPv6); err != nil {
+		return err
+	}
 	logFile, consoleLog, output, err := m.startLXCContainerDaemon(lxcName)
 	if err != nil {
 		config.UpdateContainerStatus(id, "stopped")
@@ -2412,6 +2415,9 @@ func (m *Manager) StopContainer(id int) error {
 		m.CleanPortMappings(id)
 		CleanFirewallRules(id)
 		m.cleanupBandwidthLimit(lxcName)
+		if err := m.UnmountDataDisks(&ipv6Snapshot); err != nil {
+			return err
+		}
 		return m.cleanupIPv6NAT(&ipv6Snapshot)
 	}
 
@@ -2424,6 +2430,9 @@ func (m *Manager) StopContainer(id int) error {
 	if err != nil {
 		if strings.Contains(string(output), "not running") {
 			config.UpdateContainerStatusAndRestore(id, "stopped", false)
+			if err := m.UnmountDataDisks(&ipv6Snapshot); err != nil {
+				return err
+			}
 			return m.cleanupIPv6NAT(&ipv6Snapshot)
 		}
 		return fmt.Errorf("failed to stop container: %v, output: %s", err, string(output))
@@ -2431,6 +2440,9 @@ func (m *Manager) StopContainer(id int) error {
 
 	config.UpdateContainerStatusAndRestore(id, "stopped", false)
 	fmt.Printf("Container %d (%s) stopped\n", id, c.Name)
+	if err := m.UnmountDataDisks(&ipv6Snapshot); err != nil {
+		return err
+	}
 	return m.cleanupIPv6NAT(&ipv6Snapshot)
 }
 
@@ -2599,6 +2611,7 @@ func (m *Manager) DestroyContainer(id int) error {
 		return fmt.Errorf("container not found: %d", id)
 	}
 	lxcName := c.LxcName()
+	diskSnapshot := *c
 	if hasLXCIPv6(c) {
 		c.NormalizeNetworkAssignments()
 		for _, assignment := range c.IPv6Addresses {
@@ -2672,6 +2685,9 @@ func (m *Manager) DestroyContainer(id int) error {
 		}
 	}
 
+	if err := m.CleanupDataDisks(&diskSnapshot); err != nil {
+		return err
+	}
 	if !config.RemoveContainer(id) {
 		return fmt.Errorf("container destroyed but config entry was not removed: %d", id)
 	}
@@ -3638,11 +3654,22 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...Co
 	}
 
 	lxcName := c.LxcName()
+	dataDiskSnapshot := *c
 
 	// Stop the container first
 	status, _ := m.GetContainerStatus(lxcName)
 	if status == "running" {
-		m.StopContainer(id)
+		if err := m.StopContainer(id); err != nil {
+			return err
+		}
+	}
+	if len(c.DataDisks) > 0 {
+		if err := m.requireDiskStopped(c); err != nil {
+			return err
+		}
+		if err := m.UnmountDataDisks(c); err != nil {
+			return err
+		}
 	}
 
 	// Clean port mappings temporarily
@@ -3722,6 +3749,9 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...Co
 	if err := m.ensureDiskImageMounted(lxcName); err != nil {
 		c.Status = "stopped"
 		config.SaveConfig()
+		return err
+	}
+	if err := m.PrepareDataDisks(&dataDiskSnapshot); err != nil {
 		return err
 	}
 	logFile, consoleLog, output, err := m.startLXCContainerDaemon(lxcName)
