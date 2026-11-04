@@ -737,7 +737,7 @@ export default function ContainerDetail() {
       host_port: String(pm.host_port),
       host_ip: pm.host_ip || '',
       container_port: String(pm.container_port),
-      protocol: pm.protocol || 'all',
+      protocol: pm.protocol || 'tcp',
     })
     setShowNat(true)
     setShowMappingEditor(true)
@@ -770,7 +770,7 @@ export default function ContainerDetail() {
     if (isSubUser && draft.index !== null && container?.port_mappings?.[draft.index]) {
       const orig = container.port_mappings[draft.index]
       hostPortVal = orig.host_port
-      protocolVal = orig.protocol || 'all'
+      protocolVal = orig.protocol || 'tcp'
     }
 
     const payload: PortMapping = {
@@ -2537,11 +2537,8 @@ function MappingEditor({
             <Input value={draft.protocol.toUpperCase()} disabled className={`${disabledInputClass} h-auto`} />
           ) : (
             <NativeSelect wrapperClassName="w-full" value={draft.protocol} onChange={(e) => updateDraft({ protocol: e.target.value })} className={`${inputClass} h-auto pr-9`}>
-              <option value="all">全部 (ALL)</option>
               <option value="tcp">TCP</option>
               <option value="udp">UDP</option>
-              <option value="tcp+udp">TCP+UDP</option>
-              <option value="icmp">ICMP</option>
             </NativeSelect>
           )}
         </Field>

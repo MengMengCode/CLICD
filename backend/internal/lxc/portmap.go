@@ -423,7 +423,7 @@ func (m *Manager) AddPortMapping(id int, pm config.PortMapping) ([]config.PortMa
 		return nil, err
 	}
 	c.PortMappings = candidate.PortMappings
-	if err := persistAndReloadMappings(m, c); err != nil {
+	if err := persistAndReloadMappings(m, c, &previous); err != nil {
 		return nil, err
 	}
 	clearChangedIPv4Mappings(&previous, c)
@@ -458,7 +458,7 @@ func (m *Manager) UpdatePortMapping(id int, index int, pm config.PortMapping) ([
 		return nil, err
 	}
 	c.PortMappings = candidate.PortMappings
-	if err := persistAndReloadMappings(m, c); err != nil {
+	if err := persistAndReloadMappings(m, c, &previous); err != nil {
 		return nil, err
 	}
 	clearChangedIPv4Mappings(&previous, c)
@@ -483,7 +483,7 @@ func (m *Manager) DeletePortMapping(id int, index int) ([]config.PortMapping, er
 	}
 	previous := *c
 	c.PortMappings = append(append([]config.PortMapping(nil), c.PortMappings[:index]...), c.PortMappings[index+1:]...)
-	if err := persistAndReloadMappings(m, c); err != nil {
+	if err := persistAndReloadMappings(m, c, &previous); err != nil {
 		return nil, err
 	}
 	clearChangedIPv4Mappings(&previous, c)
@@ -491,13 +491,33 @@ func (m *Manager) DeletePortMapping(id int, index int) ([]config.PortMapping, er
 	return c.PortMappings, nil
 }
 
-func persistAndReloadMappings(m *Manager, c *config.Container) error {
-	syncContainerSSHPort(c)
-	config.SaveConfig()
-	if c.Status == "running" && (c.IP != "" || c.IPv6NATAddress != "") {
-		return m.ApplyPortMappings(c.ID)
+func persistAndReloadMappings(m *Manager, c, previous *config.Container) error {
+	if c == nil || previous == nil {
+		return fmt.Errorf("container mapping state is required")
 	}
+	syncContainerSSHPort(c)
+	running := c.Status == "running" && (c.IP != "" || c.IPv6NATAddress != "")
+	if running {
+		if err := m.ApplyPortMappings(c.ID); err != nil {
+			restorePortMappingState(c, previous)
+			if rollbackErr := m.ApplyPortMappings(c.ID); rollbackErr != nil {
+				return errors.Join(err, fmt.Errorf("restore previous port mappings: %w", rollbackErr))
+			}
+			return err
+		}
+	}
+	// Preserve the historical best-effort save behavior. A failed kernel apply is
+	// handled above before this point, so invalid mappings cannot be persisted.
+	_ = config.SaveConfig()
 	return nil
+}
+
+func restorePortMappingState(c, previous *config.Container) {
+	if c == nil || previous == nil {
+		return
+	}
+	c.PortMappings = append([]config.PortMapping(nil), previous.PortMappings...)
+	c.SSHPort = previous.SSHPort
 }
 
 func syncContainerSSHPort(c *config.Container) {
@@ -578,6 +598,9 @@ func normalizePortMapping(c *config.Container, skipIndex int, pm config.PortMapp
 		pm.Protocol = "tcp"
 	}
 	pm.Protocol = strings.ToLower(strings.TrimSpace(pm.Protocol))
+	if pm.Protocol != "tcp" && pm.Protocol != "udp" {
+		return pm, fmt.Errorf("protocol must be tcp or udp")
+	}
 	pm.HostIP = strings.TrimSpace(pm.HostIP)
 	if pm.HostIP != "" {
 		addr, err := netip.ParseAddr(pm.HostIP)

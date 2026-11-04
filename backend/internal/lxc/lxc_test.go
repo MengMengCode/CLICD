@@ -1,6 +1,7 @@
 package lxc
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -236,6 +237,47 @@ func TestUpdateSSHPortMappingKeepsIdentityAndSynchronizesSSHPort(t *testing.T) {
 	}
 	if _, err := manager.DeletePortMapping(12, 0); err == nil {
 		t.Fatal("updated SSH mapping became deletable")
+	}
+}
+
+func TestNormalizePortMappingRejectsNonTransportProtocols(t *testing.T) {
+	c := &config.Container{}
+	for _, protocol := range []string{"all", "tcp+udp", "icmp"} {
+		if _, err := normalizePortMapping(c, -1, config.PortMapping{
+			HostPort: 30080, ContainerPort: 80, Protocol: protocol,
+		}); err == nil || !strings.Contains(err.Error(), "protocol must be tcp or udp") {
+			t.Fatalf("protocol %q was accepted: %v", protocol, err)
+		}
+	}
+}
+
+func TestUpdatePortMappingRestoresStateWhenApplyFails(t *testing.T) {
+	previousConfig := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = previousConfig })
+	previousRun := runPortMappingCommand
+	t.Cleanup(func() { runPortMappingCommand = previousRun })
+
+	config.AppConfig = &config.ClicdConfig{
+		NATPortStart: 30000,
+		NATPortEnd:   65535,
+		Containers: []config.Container{{
+			ID: 12, Name: "ct-test", Status: "running", IP: "192.0.2.12", SSHPort: 30022,
+			PortMappings: []config.PortMapping{{HostPort: 30022, ContainerPort: 22, Protocol: "tcp", Description: "SSH"}},
+		}},
+	}
+	runPortMappingCommand = func(string, ...string) ([]byte, error) {
+		return nil, errors.New("iptables unavailable")
+	}
+
+	_, err := NewManager().UpdatePortMapping(12, 0, config.PortMapping{
+		HostPort: 31022, ContainerPort: 22, Protocol: "tcp", Description: "renamed",
+	})
+	if err == nil {
+		t.Fatal("expected apply failure")
+	}
+	container := config.FindContainer(12)
+	if container == nil || len(container.PortMappings) != 1 || container.PortMappings[0].HostPort != 30022 || container.SSHPort != 30022 {
+		t.Fatalf("failed update changed persisted state: %+v", container)
 	}
 }
 
