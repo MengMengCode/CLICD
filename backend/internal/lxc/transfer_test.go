@@ -51,3 +51,21 @@ func TestOwnershipRewriteHonorsCancellationAndPreservesUnchangedSetID(t *testing
 		t.Fatal("ownership pass ignored cancellation")
 	}
 }
+
+func TestParseSubIDRangeRejectsOutOfRangeStarts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "subuid")
+	for _, value := range []string{"-1:65536", "4294967296:65536", "4294901761:65536"} {
+		if err := os.WriteFile(path, []byte("root:"+value+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := parseSubIDRange(path, "root"); err == nil {
+			t.Fatalf("accepted invalid subordinate ID range %q", value)
+		}
+	}
+	if err := os.WriteFile(path, []byte("root:100000:65536\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := parseSubIDRange(path, "root"); err != nil || got != 100000 {
+		t.Fatalf("valid subordinate ID range = %d, %v", got, err)
+	}
+}

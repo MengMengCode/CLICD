@@ -1929,10 +1929,11 @@ func parseSubIDRange(path, user string) (int, error) {
 		if len(fields) != 3 || fields[0] != user {
 			continue
 		}
-		start, startErr := strconv.Atoi(fields[1])
-		count, countErr := strconv.Atoi(fields[2])
-		if startErr == nil && countErr == nil && count >= 65536 {
-			return start, nil
+		start, startErr := strconv.ParseUint(fields[1], 10, 32)
+		count, countErr := strconv.ParseUint(fields[2], 10, 32)
+		maxInt := uint64(^uint(0) >> 1)
+		if startErr == nil && countErr == nil && count >= 65536 && start <= maxInt && start+count <= uint64(1)<<32 {
+			return int(start), nil
 		}
 	}
 	return 0, fmt.Errorf("%s must contain a %s subordinate id range with at least 65536 ids", path, user)
