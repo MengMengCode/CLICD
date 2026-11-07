@@ -10,25 +10,7 @@ The project includes common Linux distribution templates such as Debian, Ubuntu,
 
 ## Management Actions
 
-```http
-GET /api/v1/templates
-GET /api/v1/images
-POST /api/v1/images/download
-POST /api/v1/images/cancel
-DELETE /api/v1/images/delete
-PUT /api/v1/images/toggle
-POST /api/v1/images/upload
-```
-
-- `templates` returns available template definitions.
-- `images` returns local image status.
-- `download` downloads a specific template.
-- `cancel` cancels a download task.
-- `delete` removes the local image cache.
-- `toggle` controls whether a template can be used during creation.
-- `upload` accepts `multipart/form-data` with `file`, optionally adding `name`, `description`, `arch`, `sha256`, `provisioner`, `distro` and `release`. A file can be at most **32 GiB**; select a storage pool with the `storage_pool_id` query parameter.
-
-Image mutations require administrator permission. External API keys also need `admin:access` and the corresponding `image:*` scopes.
+See [local image upload and KVM installation media](./api#local-image-upload-and-kvm-installation-media) for the API request format and scopes.
 
 ## Local Images and Generic ISO Installation
 

@@ -1,6 +1,7 @@
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { translateText } from '../utils/i18n'
 import { getLanguage, updateLanguage } from '../services/api'
+import { useAuth } from './AuthContext'
 
 export type Language = 'zh' | 'en'
 
@@ -12,44 +13,39 @@ interface LanguageContextValue {
 }
 
 const LanguageContext = createContext<LanguageContextValue | undefined>(undefined)
-function initialLanguage(): Language {
-  return 'zh'
+const languagePreferenceKey = 'clicd_language'
+
+function storedLanguage(): Language | undefined {
+  const saved = localStorage.getItem(languagePreferenceKey)
+  return saved === 'zh' || saved === 'en' ? saved : undefined
 }
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState<Language>(initialLanguage)
+  const { isAuthenticated, isSubUser } = useAuth()
+  const [language, setLanguageState] = useState<Language>(() => storedLanguage() || 'zh')
 
-  const setLanguageLocal = (next: Language) => {
-    setLanguageState(next)
-  }
-
-  const setLanguage = (next: Language) => {
-    setLanguageLocal(next)
-    updateLanguage(next).catch(() => {})
-  }
-
-  const value = useMemo<LanguageContextValue>(() => ({
-    language,
-    setLanguage,
-    toggleLanguage: async () => {
-      const next = language === 'zh' ? 'en' : 'zh'
-      setLanguageLocal(next)
-      try {
-        const res = await updateLanguage(next)
-        setLanguageLocal(res.data.data?.language || next)
-      } catch {
-        setLanguageLocal(language)
+  const value = useMemo<LanguageContextValue>(() => {
+    const changeLanguage = async (next: Language) => {
+      setLanguageState(next)
+      localStorage.setItem(languagePreferenceKey, next)
+      if (isAuthenticated && !isSubUser) {
+        await updateLanguage(next).catch(() => {})
       }
-    },
-    t: (text: string) => language === 'en' ? translateText(text) : text,
-  }), [language])
+    }
+    return {
+      language,
+      setLanguage: next => { void changeLanguage(next) },
+      toggleLanguage: () => changeLanguage(language === 'zh' ? 'en' : 'zh'),
+      t: (text: string) => language === 'en' ? translateText(text) : text,
+    }
+  }, [isAuthenticated, isSubUser, language])
 
   useEffect(() => {
     getLanguage()
       .then((res) => {
         const serverLanguage = res.data.data?.language
-        if (serverLanguage === 'zh' || serverLanguage === 'en') {
-          setLanguageLocal(serverLanguage)
+        if (!storedLanguage() && (serverLanguage === 'zh' || serverLanguage === 'en')) {
+          setLanguageState(serverLanguage)
         }
       })
       .catch(() => {})

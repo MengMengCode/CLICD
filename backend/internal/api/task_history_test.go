@@ -231,6 +231,33 @@ func TestTaskHistoryAndMetricsAcrossProcessRestart(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &scoped); err != nil || len(scoped.Data) < 6 || strings.Contains(response.Body.String(), `"payload"`) {
 		t.Fatalf("administrator history is incomplete or exposed operation payload: %s", response.Body.String())
 	}
+	const taskKey = "clicd_sk_task_detail_test"
+	config.AppConfig.ApiKeys = []config.ApiKeyConfig{{ID: "task-detail-test", KeyHash: legacyHashKey(taskKey)}}
+	for _, tc := range []struct {
+		scopes []string
+		uuids  []string
+		want   int
+	}{
+		{[]string{"task:read"}, []string{"replacement-owner"}, http.StatusNotFound},
+		{[]string{"container:read"}, nil, http.StatusForbidden},
+		{[]string{"task:read"}, []string{"original-owner"}, http.StatusOK},
+	} {
+		key := &config.AppConfig.ApiKeys[0]
+		key.Scopes, key.ContainerUUIDs = tc.scopes, tc.uuids
+		request = httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+ids["done"], nil)
+		request.Header.Set("X-API-Key", taskKey)
+		response = httptest.NewRecorder()
+		AuthMiddleware(HandleTask)(response, request)
+		if response.Code != tc.want {
+			t.Fatalf("task detail status=%d want=%d: %s", response.Code, tc.want, response.Body.String())
+		}
+		if tc.want == http.StatusOK {
+			var body struct{ Data Task }
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.Data.ID != ids["done"] || body.Data.Status != "done" || len(body.Data.Logs) == 0 || !strings.Contains(string(body.Data.Result), "backup-example") || strings.Contains(response.Body.String(), `"payload"`) {
+				t.Fatalf("task detail is incomplete or exposed private payload: %s", response.Body.String())
+			}
+		}
+	}
 	beforeCalls := calls
 	q.runOperationTask(q.takeNextTask(false))
 	if calls != beforeCalls || q.tasks[newID].Status != "failed" || !strings.Contains(q.tasks[newID].Error, "identity changed") {

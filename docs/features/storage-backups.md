@@ -60,26 +60,4 @@ KVM 恢复、克隆和模板实例化需要宿主机提供 guestfs 的 `virt-cus
 
 ## API
 
-```http
-GET /api/v1/containers/{id}/disks
-POST /api/v1/containers/{id}/disks
-PUT /api/v1/containers/{id}/disks/system
-PUT /api/v1/containers/{id}/disks/{disk_id}
-PUT /api/v1/containers/{id}/disks/{disk_id}/attachment
-DELETE /api/v1/containers/{id}/disks/{disk_id}
-POST /api/v1/containers/{id}/backup
-POST /api/v1/containers/{id}/clone
-POST /api/v1/containers/{id}/template
-GET /api/v1/backups
-POST /api/v1/backups
-GET /api/v1/backups/{artifact_id}
-DELETE /api/v1/backups/{artifact_id}
-POST /api/v1/backups/{artifact_id}/restore
-GET /api/v1/instance-templates
-DELETE /api/v1/instance-templates/{artifact_id}
-POST /api/v1/instance-templates/{artifact_id}/instantiate
-```
-
-扩容请求为 `{"size_gb": 20}`，连接状态为 `{"attached": false}`，删除为 `{"delete_data": true}`。数据盘和恢复操作只接受磁盘/归档 ID，不接受任意宿主机路径。
-
-备份上传使用 `multipart/form-data` 的 `file` 字段；可附 `name` 和 `storage_pool_id`。恢复、克隆和模板实例化使用 `{"name":"new-instance","storage_pool_id":"pool-id","assign_nat":true,"port_mapping_count":2}`。异步请求返回 `202` 和 `data.task_id`；上传备份完成返回 `201`，并不自动恢复实例。
+磁盘请求、权限、任务查询、备份下载和导入示例见 [API 集成](./api#磁盘和备份工作流)。

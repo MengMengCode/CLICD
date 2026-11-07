@@ -484,7 +484,11 @@ func issueBackupTicket(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	backupTickets.Items[token] = backupTicket{ID: id, Expires: expiry}
 	backupTickets.Unlock()
-	jsonResponse(w, 200, APIResponse{Success: true, Data: map[string]string{"url": "/api/backup-download/" + token, "expires_at": expiry.UTC().Format(time.RFC3339)}})
+	prefix := "/api/backup-download/"
+	if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+		prefix = "/api/v1/backup-download/"
+	}
+	jsonResponse(w, 200, APIResponse{Success: true, Data: map[string]string{"url": prefix + token, "expires_at": expiry.UTC().Format(time.RFC3339)}})
 }
 
 // This route intentionally accepts only an opaque, short-lived scoped ticket.

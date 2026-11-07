@@ -60,26 +60,4 @@ Use full backups for rollback or migration with data disks. Snapshot quotas do n
 
 ## API
 
-```http
-GET /api/v1/containers/{id}/disks
-POST /api/v1/containers/{id}/disks
-PUT /api/v1/containers/{id}/disks/system
-PUT /api/v1/containers/{id}/disks/{disk_id}
-PUT /api/v1/containers/{id}/disks/{disk_id}/attachment
-DELETE /api/v1/containers/{id}/disks/{disk_id}
-POST /api/v1/containers/{id}/backup
-POST /api/v1/containers/{id}/clone
-POST /api/v1/containers/{id}/template
-GET /api/v1/backups
-POST /api/v1/backups
-GET /api/v1/backups/{artifact_id}
-DELETE /api/v1/backups/{artifact_id}
-POST /api/v1/backups/{artifact_id}/restore
-GET /api/v1/instance-templates
-DELETE /api/v1/instance-templates/{artifact_id}
-POST /api/v1/instance-templates/{artifact_id}/instantiate
-```
-
-Grow with `{"size_gb": 20}`, change attachment with `{"attached": false}`, and delete with `{"delete_data": true}`. Disk/restore requests use IDs and do not accept arbitrary host paths.
-
-Upload backups with the `file` field in `multipart/form-data`, optionally adding `name` and `storage_pool_id`. Restore/clone/instantiate requests use `{"name":"new-instance","storage_pool_id":"pool-id","assign_nat":true,"port_mapping_count":2}`. Asynchronous operations return `202` with `data.task_id`. A successful backup upload returns `201` and does not automatically restore an instance.
+See [disk and backup workflows](./api#disk-and-backup-workflows) for request bodies, scopes, task polling, archive downloads and imports.

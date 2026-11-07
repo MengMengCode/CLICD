@@ -109,6 +109,7 @@ func setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/images/upload", corsMiddleware(api.AdminMiddleware(api.HandleImageUpload)))
 	mux.HandleFunc("/api/v1/backups", corsMiddleware(api.AdminMiddleware(api.HandleBackups)))
 	mux.HandleFunc("/api/v1/backups/", corsMiddleware(api.AdminMiddleware(api.HandleBackups)))
+	mux.HandleFunc("/api/v1/backup-download/", corsMiddleware(api.HandleBackupDownload))
 	mux.HandleFunc("/api/v1/instance-templates", corsMiddleware(api.AdminMiddleware(api.HandleInstanceTemplates)))
 	mux.HandleFunc("/api/v1/instance-templates/", corsMiddleware(api.AdminMiddleware(api.HandleInstanceTemplates)))
 	mux.HandleFunc("/api/v1/images/download", corsMiddleware(api.AdminMiddleware(api.HandleImageDownload)))
@@ -126,7 +127,7 @@ func setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/ipv6/status", corsMiddleware(api.AuthMiddleware(api.HandleIPv6Status)))
 	mux.HandleFunc("/api/v1/ipv6/nat", corsMiddleware(api.AdminMiddleware(api.HandleIPv6NATSettings)))
 	mux.HandleFunc("/api/v1/tasks", corsMiddleware(api.AuthMiddleware(api.SubUserMiddleware(api.HandleTasks))))
-	mux.HandleFunc("/api/v1/tasks/", corsMiddleware(api.AuthMiddleware(api.HandleTaskDelete)))
+	mux.HandleFunc("/api/v1/tasks/", corsMiddleware(api.AuthMiddleware(api.HandleTask)))
 	mux.HandleFunc("/api/v1/task-queue/settings", corsMiddleware(api.AdminMiddleware(api.HandleTaskQueueSettings)))
 	mux.HandleFunc("/api/v1/batch-create", corsMiddleware(api.AuthMiddleware(api.HandleBatchCreate)))
 	mux.HandleFunc("/api/v1/batch-action", corsMiddleware(api.AuthMiddleware(api.HandleBatchAction)))
@@ -152,6 +153,7 @@ func setupRoutes(mux *http.ServeMux) {
 
 	// Version (public)
 	mux.HandleFunc("/api/version", corsMiddleware(api.HandleVersion))
+	mux.HandleFunc("/api/v1/version", corsMiddleware(api.HandleVersion))
 
 	// Static files
 	if webFS != nil {

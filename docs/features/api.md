@@ -16,7 +16,7 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
 
 ## 响应结构
 
-所有接口保持统一响应包裹：
+大多数 JSON 接口返回 `success`，以及可选的 `message` 和 `data`。先检查 HTTP 状态码。备份下载返回归档文件。
 
 ```json
 {
@@ -30,7 +30,7 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
 
 ## 创建与重装
 
-创建容器、批量创建、重装和批量重装已支持 NAT、公网 IPv4、IPv6 混合网络，以及 Linux SSH 登录方式配置。公网 IPv4/IPv6 地址池可通过 `GET /api/v1/routing` 查看，并可通过 `PUT /api/v1/routing` 更新。
+创建容器和批量创建可以组合配置 NAT、公网 IPv4、IPv6。重装和批量重装用于更换系统镜像，并可设置 Linux SSH 登录方式。公网 IPv4/IPv6 地址池可通过 `GET /api/v1/routing` 查看，并可通过 `PUT /api/v1/routing` 更新。
 
 创建容器示例：
 
@@ -47,9 +47,7 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
   "assign_ipv4": false,
   "ipv4_count": 1,
   "public_ipv4s": [],
-  "assign_ipv6": true,
-  "ipv6_count": 1,
-  "ipv6_addresses": [],
+  "assign_ipv6": false,
   "ssh_auth_mode": "auto_password",
   "ssh_password": "",
   "ssh_public_key": "",
@@ -93,7 +91,7 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
 }
 ```
 
-`keep` 仅用于重装，表示沿用当前 SSH 密码。Windows KVM 镜像会忽略 Linux SSH 公钥相关字段。
+`keep` 仅用于重装，表示沿用当前 SSH 密码。Windows KVM 镜像会忽略 Linux SSH 公钥相关字段。使用手动安装 ISO 创建 KVM 时，将镜像 ID 作为 `template_id`，创建后通过控制台安装。
 
 ## 资源限制与流量限制
 
@@ -125,14 +123,14 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
 
 | 字段 | 说明 |
 | --- | --- |
-| `traffic_mode` | 流量限制模式；常用 `total` 表示总量限制，`split` 表示入站/出站分别限制。 |
+| `traffic_mode` | 流量限制模式；常用 `total` 表示总量限制，`in_out` 表示入站/出站分别限制。 |
 | `monthly_traffic_gb` | `total` 模式下的月总流量额度，单位 GB；`0` 表示不限制。 |
-| `traffic_in_gb` | `split` 模式下的月入站额度，单位 GB；`0` 表示不限制。 |
-| `traffic_out_gb` | `split` 模式下的月出站额度，单位 GB；`0` 表示不限制。 |
+| `traffic_in_gb` | `in_out` 模式下的月入站额度，单位 GB；`0` 表示不限制。 |
+| `traffic_out_gb` | `in_out` 模式下的月出站额度，单位 GB；`0` 表示不限制。 |
 
 ## 容器防火墙
 
-容器防火墙通过 `GET /api/v1/containers/{id}/firewall` 读取，通过 `PUT /api/v1/containers/{id}/firewall` 更新。容器运行中更新时会立即应用规则。
+容器防火墙通过 `GET /api/v1/containers/{id}/firewall` 读取，通过 `PUT /api/v1/containers/{id}/firewall` 更新。容器运行中更新时会立即应用规则。可按字段更新；传入 `rules` 数组时替换完整规则列表。需要生效的规则应设置 `rules[].enabled` 为 `true`。
 
 更新示例：
 
@@ -148,7 +146,8 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
       "network": "ipv4",
       "source_ip": "203.0.113.0/24",
       "port": "22,80,443",
-      "description": "allow admin and web"
+      "description": "allow admin and web",
+      "enabled": true
     }
   ]
 }
@@ -169,7 +168,7 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
 
 ## API Key 创建与更新
 
-`POST /api/v1/api-keys` 和 `PATCH /api/v1/api-keys/{id}` 使用相同的字段结构。创建时 `name` 必填；更新时根据需要覆盖字段。
+`POST /api/v1/api-keys` 和 `PATCH /api/v1/api-keys/{id}` 使用相同的字段结构。创建时 `name` 必填。更新时，如果需要保留 `ip_whitelist`、`expires_at`、`disabled` 和 `container_uuids`，需把原值一并提交。省略限制字段会清空限制，省略 `disabled` 会重新启用密钥。省略或留空的 `name` 和 `scopes` 保留原值。
 
 ```json
 {
@@ -186,14 +185,16 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
 | --- | --- |
 | `name` | API Key 名称；创建时必填。 |
 | `ip_whitelist` | 可选；允许的来源 IP/CIDR，多个值用逗号分隔；空值表示不限制。 |
-| `scopes` | 可选；权限范围。省略时使用默认只读范围，传 `*` 表示全部权限。 |
+| `scopes` | 可选；权限范围。创建时省略会使用默认只读范围；传 `["*"]` 表示全部权限。 |
 | `expires_at` | 可选；过期时间，空值表示不过期。 |
 | `disabled` | 是否禁用该 Key。 |
 | `container_uuids` | 可选；限制该 Key 只能访问指定容器。 |
 
+明文 `data.key` 仅在创建成功时返回。API Key 管理权限作用于整个平台。持有 `apikey:create` 或 `apikey:update` 的 Key 可以设置任意权限（包括 `*`）和容器范围。仅向受信任的管理员授予这些权限。
+
 ## 面板访问来源策略
 
-`GET /api/v1/access-policy` 读取面板访问白名单，`PUT /api/v1/access-policy` 更新策略。两者均需要 `admin:access` 权限。策略覆盖面板页面、登录入口和全部 API。
+`GET /api/v1/access-policy` 读取面板访问白名单，`PUT /api/v1/access-policy` 更新策略。两者均需要 `admin:access` 权限。策略覆盖面板页面、登录入口和 API 请求，包括公开接口和票据下载。
 
 ```json
 {
@@ -243,7 +244,7 @@ CONTAINER_ID = "example-vm"
 
 payload = {
     "protocol": "tcp",
-    "host_port": 18080,
+    "host_port": 30080,
     "container_port": 80,
     "description": "web",
 }
@@ -258,135 +259,237 @@ resp.raise_for_status()
 print(resp.json())
 ```
 
+## 查询异步任务
+
+提交磁盘、备份、恢复、克隆或实例模板任务后，HTTP `202` 的 `data.task_id` 用于查询 `GET /api/v1/tasks/{task_id}`。批量创建和批量操作的 `data` 是任务 ID 数组，按每个 ID 分别查询。单个实例创建 `POST /api/v1/containers` 在创建完成时返回 `201`。
+
+```bash
+curl --fail-with-body -H "X-API-Key: $CLICD_API_KEY" \
+  "$CLICD_URL/api/v1/tasks/task-42"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "task-42",
+    "type": "backup",
+    "status": "done",
+    "result": { "artifact_id": "example-backup-id" }
+  }
+}
+```
+
+`data.status` 为 `pending`、`running`、`done` 或 `failed`。失败时查看 `error` 和 `logs`，完成后可按任务类型读取 `result`。过期清理、任务不存在或无权访问时，详情接口返回 `404`。删除排队任务会取消执行，删除已完成记录仅清除历史，运行中的任务返回 `409`。详见[任务与历史指标](./tasks)。
+
+主机及实例历史接口返回采样点数组。`ts` 为 Unix 毫秒，`cpu` 和 `memory` 为百分比，`network_rx`、`network_tx`、`disk_read` 和 `disk_write` 为字节/秒。最多保留 7 天，停机期间可能有空档。
+
+## 磁盘和备份工作流
+
+先读实例磁盘清单的 `data.system`、`data.data_disks` 和 `data.can_edit`。停止实例后，用下面的 JSON 请求操作；`size_gb` 为目标容量（GiB）。
+
+| 操作 | 请求体 |
+| --- | --- |
+| 添加 LXC 数据盘 | `{"name":"data","size_gb":8,"mount_path":"/data","storage_pool_id":"disk-root"}` |
+| 添加 KVM 数据盘 | `{"name":"data","size_gb":8,"storage_pool_id":"disk-root"}` |
+| 扩容系统盘或数据盘 | `{"size_gb":20}` |
+| 断开或重新连接 | `{"attached":false}` 或 `{"attached":true}` |
+| 永久删除数据盘 | `{"delete_data":true}` |
+
+存储池可从 `GET /api/v1/storage` 的 `data.pools` 选择。可选 `storage_pool_id` 省略时自动选择合适的存储池。`PUT /api/v1/storage` 接收完整的 `{"pools":[...]}` 清单；应以最近的 GET 结果为基础更新配置。
+
+创建备份和保存实例模板接收 `{"name":"nightly","storage_pool_id":"disk-root"}`。完成后从任务结果取得 `result.artifact_id`，备份和模板也可分别从清单查询。冷复制会暂时停止运行中的源实例并在复制后尝试恢复其运行状态。
+
+```bash
+# 下载归档
+curl --fail-with-body -H "X-API-Key: $CLICD_API_KEY" \
+  "$CLICD_URL/api/v1/backups/$ARTIFACT_ID" -o backup.clicd.tar.gz
+
+# 导入完整备份到指定池
+curl --fail-with-body -H "X-API-Key: $CLICD_API_KEY" \
+  -F 'name=imported-backup' -F 'file=@backup.clicd.tar.gz' \
+  "$CLICD_URL/api/v1/backups?storage_pool_id=disk-root"
+```
+
+下载响应为 `application/gzip`，可使用 `HEAD` 查看元数据、用 `Range` 分段下载。浏览器也可先调用 `POST /api/v1/backups/{artifact_id}/download-ticket`，然后向同一个面板请求响应中的 `data.url`。v1 返回的相对地址为 `/api/v1/backup-download/{ticket}`。可直接凭票据 GET、HEAD 或分段下载，无需额外发送 API Key。票据有效期为 2 分钟，受面板来源策略约束。签发响应的 `data.expires_at` 是 RFC 3339 时间戳。
+
+导入成功返回 HTTP `201` 和包含 `id` 的备份元数据。之后恢复备份、克隆或从模板创建时，发送 `{"name":"restored-01","storage_pool_id":"disk-root","assign_nat":true,"port_mapping_count":2}`。新实例默认停止，`assign_nat` 默认启用，端口配额默认 2（范围 1–64）。每次模板实例化请求创建一个实例，批量使用时需逐个提交不同名称。归档限制及系统要求见[磁盘、备份与克隆](./storage-backups)。
+
+## 本地镜像上传和 KVM 安装介质
+
+上传使用 `multipart/form-data`，必填字段为 `file` 与 `name`，单文件最多 32 GiB。可选字段有 `description`、`arch`、`sha256`、`provisioner`、`distro`、`release`，`storage_pool_id` 通过查询参数传递。
+
+```bash
+curl --fail-with-body -H "X-API-Key: $CLICD_API_KEY" \
+  -F 'name=Debian installer' -F 'provisioner=manual-iso' \
+  -F 'file=@debian.iso' \
+  "$CLICD_URL/api/v1/images/upload?storage_pool_id=disk-root"
+```
+
+验证并启用成功后返回 HTTP `201`，`data` 包含 `id`、`name`、`format`、`size_bytes` 和 `sha256`。新建 KVM 时可将 `id` 用作 `template_id`。已有 KVM 可查询 `GET /api/v1/containers/{id}/installation-media` 的 `data.available`，停止实例后通过 PUT 发送 `{"image_id":"<iso_id>","boot":"cdrom"}`。安装结束可用 `{"image_id":"","boot":"disk"}` 弹出 ISO 并从磁盘启动。文件格式和安装方式见[镜像管理](./images)。
+
+## IPv4 和 IPv6 NAT
+
+已有实例的 `PUT .../public-ipv4` 和 `PUT .../ipv6-addresses` 接收 `{"mode":"auto","count":1}`、`{"mode":"custom","addresses":["<地址>"]}` 或 `{"mode":"clear"}`。先用 `GET /api/v1/routing` 查询宿主机地址池。
+
+端口映射协议仅允许 `tcp` 或 `udp`。通过 GET 获取映射后，使用数组的零基序号编辑或删除，提交前应重新读取序号。IPv4 NAT 无独立公网地址时，宿主机端口必须落在路由配置中的 NAT 端口范围内。
+
+`GET /api/v1/containers/{id}/ipv6-port-mappings` 返回 `enabled`、`sync_ipv4`、`host_ipv6`、`guest_ipv6`、`limit` 和 `mappings`。启用同步时映射由 IPv4 列表推导。先用 `PUT /api/v1/containers/{id}/ipv6-nat-sync` 提交 `{"enabled":false}`，再管理独立 IPv6 映射。POST/PUT 的映射字段与 IPv4 一致，`host_ip` 可省略以使用该实例的 IPv6 NAT 入口。LXC 的 IPv6 NAT 需要宿主机先启用 `/api/v1/ipv6/nat`，配置方式见[网络与路由](./networking)。
+
 ## 接口清单
+
+最后一列为 API Key 权限。绑定容器 UUID 的 Key 同时受资源范围限制。修改全局面板语言时需使用未绑定容器的 Key。凭据缺失或无效通常返回 `401`，权限不足返回 `403`，资源或状态冲突返回 `409`。`/api/v1/containers/list` 为兼容别名，新客户端使用 `GET /api/v1/containers`。
 
 ### 总览
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/v1/dashboard` | 控制面板统计 |
-| GET | `/api/v1/host-info` | 主机资源 |
-| GET | `/api/v1/host-report` | 主机巡检报告 |
-| GET | `/api/v1/routing` | NAT/IPv4/IPv6 路由 |
-| PUT | `/api/v1/routing` | 更新公网 IPv4/IPv6 池 |
-| POST | `/api/v1/routing/ipv4-scan` | 扫描公网 IPv4 段 |
-| GET | `/api/v1/ipv6/status` | IPv6 状态 |
-| GET | `/api/v1/tasks` | 任务队列 |
-| DELETE | `/api/v1/tasks/{task_id}` | 删除任务 |
+| 方法 | 路径 | 说明 | API Key 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/dashboard` | 控制面板统计 | `dashboard:read` |
+| GET | `/api/v1/version` | 读取面板版本 | 公开 |
+| GET | `/api/v1/host-info` | 主机资源 | `host:read` |
+| GET | `/api/v1/host-report` | 主机巡检报告 | `host:read` |
+| GET | `/api/v1/routing` | NAT/IPv4/IPv6 路由 | `routing:read` 或 `routing:write` |
+| PUT | `/api/v1/routing` | 更新公网 IPv4/IPv6 池 | `routing:write` |
+| POST | `/api/v1/routing/ipv4-scan` | 扫描公网 IPv4 段 | `routing:write` |
+| GET | `/api/v1/ipv6/status` | IPv6 状态 | `ipv6:read` |
+| GET | `/api/v1/ipv6/nat` | 宿主机 LXC IPv6 NAT 配置及状态 | `admin:access` 及 `ipv6:read` |
+| PUT | `/api/v1/ipv6/nat` | 启用、禁用或配置 LXC IPv6 NAT | `admin:access` 及 `routing:write` |
+| GET | `/api/v1/tasks` | 任务队列 | `task:read` |
+| GET | `/api/v1/tasks/{task_id}` | 读取单个任务及其阶段、结果和错误 | `task:read` |
+| DELETE | `/api/v1/tasks/{task_id}` | 删除任务 | `task:delete` |
+| GET | `/api/v1/task-queue/settings` | 读取并发上限、运行中和排队任务数 | `admin:access` |
+| PUT/POST | `/api/v1/task-queue/settings` | 设置任务并发上限 | `admin:access` |
 
 ### 容器
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/v1/containers` | 容器列表（推荐） |
-| GET | `/api/v1/containers/list` | 容器列表兼容 GET 写法 |
-| POST | `/api/v1/containers/list` | 容器列表兼容 POST 写法 |
-| POST | `/api/v1/containers` | 创建容器 |
-| GET | `/api/v1/containers/{id\|uuid\|name}` | 容器详情 |
-| POST | `/api/v1/containers/{id}/start` | 开机 |
-| POST | `/api/v1/containers/{id}/stop` | 关机 |
-| POST | `/api/v1/containers/{id}/restart` | 重启 |
-| POST | `/api/v1/containers/{id}/reinstall` | 重装 |
-| DELETE | `/api/v1/containers/{id}/delete` | 删除 |
-| GET | `/api/v1/containers/{id}/usage` | 资源用量 |
-| GET | `/api/v1/containers/{id}/history` | 持久化资源历史，最多 7 天 |
-| GET | `/api/v1/containers/{id}/installation-media` | KVM 安装介质、启动方式及可选 ISO |
-| PUT | `/api/v1/containers/{id}/installation-media` | 停止状态下挂载/更换/弹出 ISO 与设置启动方式 |
-| GET | `/api/v1/containers/{id}/traffic` | 流量统计 |
-| POST | `/api/v1/containers/{id}/traffic-reset` | 重置流量 |
-| PUT | `/api/v1/containers/{id}/traffic-limit` | 调整流量限制 |
-| PUT | `/api/v1/containers/{id}/resource-limit` | 调整资源限制 |
-| PUT | `/api/v1/containers/{id}/expiry` | 调整到期时间 |
-| POST | `/api/v1/containers/{id}/reset-password` | 重置 SSH 密码 |
-| POST | `/api/v1/containers/{id}/ipv6` | 分配 IPv6 |
+| 方法 | 路径 | 说明 | API Key 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/containers` | 容器列表（推荐） | `container:read` |
+| GET | `/api/v1/containers/list` | 容器列表兼容 GET 写法 | `container:read` |
+| POST | `/api/v1/containers/list` | 容器列表兼容 POST 写法 | `container:read` |
+| POST | `/api/v1/containers` | 创建容器 | `container:create` |
+| GET | `/api/v1/containers/{id\|uuid\|name}` | 容器详情 | `container:read` |
+| POST | `/api/v1/containers/{id}/start` | 开机 | `container:power` |
+| POST | `/api/v1/containers/{id}/stop` | 关机 | `container:power` |
+| POST | `/api/v1/containers/{id}/restart` | 重启 | `container:power` |
+| POST | `/api/v1/containers/{id}/reinstall` | 重装 | `container:reinstall` |
+| DELETE | `/api/v1/containers/{id}/delete` | 删除 | `container:delete` |
+| GET | `/api/v1/containers/{id}/usage` | 资源用量 | `container:read` |
+| GET | `/api/v1/containers/{id}/history` | 持久化资源历史，最多 7 天 | `container:read` |
+| GET | `/api/v1/containers/{id}/installation-media` | KVM 安装介质、启动方式及可选 ISO | `container:read` |
+| PUT | `/api/v1/containers/{id}/installation-media` | 停止状态下挂载/更换/弹出 ISO 与设置启动方式 | `container:reinstall` |
+| GET | `/api/v1/containers/{id}/traffic` | 流量统计 | `container:read` |
+| POST | `/api/v1/containers/{id}/traffic-reset` | 重置流量 | `container:traffic` |
+| PUT | `/api/v1/containers/{id}/traffic-limit` | 调整流量限制 | `container:traffic` |
+| PUT | `/api/v1/containers/{id}/resource-limit` | 调整资源限制 | `container:resize` |
+| PUT | `/api/v1/containers/{id}/expiry` | 调整到期时间 | `container:resize` |
+| POST | `/api/v1/containers/{id}/reset-password` | 重置 SSH 密码 | `container:password` |
+| POST | `/api/v1/containers/{id}/ipv6` | 分配 IPv6 | `ipv6:assign` |
+| PUT | `/api/v1/containers/{id}/public-ipv4` | 更新公网 IPv4 分配 | `container:network` |
+| PUT | `/api/v1/containers/{id}/ipv6-addresses` | 更新 IPv6 分配 | `ipv6:assign` |
 
 ### 端口与快照
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/v1/containers/{id}/random-port` | 随机可用端口；可传 `host_ip` 查询指定宿主机 IP |
-| POST | `/api/v1/containers/{id}/port-mappings` | 添加端口映射 |
-| PUT | `/api/v1/containers/{id}/port-mappings/{index}` | 更新端口映射 |
-| DELETE | `/api/v1/containers/{id}/port-mappings/{index}` | 删除端口映射 |
-| GET | `/api/v1/containers/{id}/firewall` | 获取容器防火墙设置 |
-| PUT | `/api/v1/containers/{id}/firewall` | 更新容器防火墙设置 |
-| GET | `/api/v1/snapshots` | 快照总览 |
-| GET | `/api/v1/containers/{id}/snapshots` | 容器快照 |
-| POST | `/api/v1/containers/{id}/snapshots` | 创建快照 |
-| DELETE | `/api/v1/containers/{id}/snapshots/{snapshot_id}` | 删除快照 |
-| POST | `/api/v1/containers/{id}/snapshots/{snapshot_id}/restore` | 恢复快照 |
-| POST | `/api/v1/containers/{id}/snapshots/schedule` | 计划快照 |
-| PUT | `/api/v1/containers/{id}/snapshots/quota` | 快照配额 |
+| 方法 | 路径 | 说明 | API Key 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/containers/{id}/random-port` | 随机可用端口；可传 `host_ip` 查询指定宿主机 IP | `container:network` |
+| GET | `/api/v1/containers/{id}/port-mappings` | IPv4 NAT 端口映射清单 | `container:read` |
+| POST | `/api/v1/containers/{id}/port-mappings` | 添加端口映射 | `container:network` |
+| PUT | `/api/v1/containers/{id}/port-mappings/{index}` | 更新端口映射 | `container:network` |
+| DELETE | `/api/v1/containers/{id}/port-mappings/{index}` | 删除端口映射 | `container:network` |
+| GET | `/api/v1/containers/{id}/ipv6-port-mappings` | IPv6 NAT 状态与端口映射清单 | `container:network` |
+| POST | `/api/v1/containers/{id}/ipv6-port-mappings` | 添加独立 IPv6 端口映射 | `container:network` |
+| PUT | `/api/v1/containers/{id}/ipv6-port-mappings/{index}` | 修改独立 IPv6 端口映射 | `container:network` |
+| DELETE | `/api/v1/containers/{id}/ipv6-port-mappings/{index}` | 删除独立 IPv6 端口映射 | `container:network` |
+| PUT | `/api/v1/containers/{id}/ipv6-nat-sync` | 设置是否镜像 IPv4 映射 | `container:network` |
+| GET | `/api/v1/containers/{id}/firewall` | 获取容器防火墙设置 | `container:network` |
+| PUT | `/api/v1/containers/{id}/firewall` | 更新容器防火墙设置 | `container:network` |
+| GET | `/api/v1/snapshots` | 快照总览 | `snapshot:read` |
+| GET | `/api/v1/containers/{id}/snapshots` | 容器快照 | `snapshot:read` |
+| POST | `/api/v1/containers/{id}/snapshots` | 创建快照 | `snapshot:create` |
+| DELETE | `/api/v1/containers/{id}/snapshots/{snapshot_id}` | 删除快照 | `snapshot:delete` |
+| POST | `/api/v1/containers/{id}/snapshots/{snapshot_id}/restore` | 恢复快照 | `snapshot:restore` |
+| POST | `/api/v1/containers/{id}/snapshots/schedule` | 计划快照 | `snapshot:schedule` |
+| PUT | `/api/v1/containers/{id}/snapshots/quota` | 快照配额 | `snapshot:schedule` |
 
 ### 磁盘、完整备份与实例模板
 
-磁盘修改需管理员和 `container:resize` 权限，子用户仅可读取自己实例的磁盘清单。完整备份、恢复、克隆和模板接口需管理员权限（外部 API Key 需 `admin:access`）。支持边界与请求示例见[磁盘、备份与克隆](./storage-backups)。
+磁盘变更、完整备份、恢复、克隆和模板操作仅接受管理员会话或具备表列权限且未绑定容器的 API Key。子用户可读取自己实例的磁盘清单。运行与存储要求见[磁盘、备份与克隆](./storage-backups)。
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/v1/containers/{id}/disks` | 真实容量、已分配空间与编辑能力 |
-| POST | `/api/v1/containers/{id}/disks` | 添加受管数据盘 |
-| PUT | `/api/v1/containers/{id}/disks/system` | 离线扩容系统盘，只增不减 |
-| PUT | `/api/v1/containers/{id}/disks/{disk_id}` | 离线扩容数据盘 |
-| PUT | `/api/v1/containers/{id}/disks/{disk_id}/attachment` | 连接/断开数据盘 |
-| DELETE | `/api/v1/containers/{id}/disks/{disk_id}` | 永久删除数据盘，需 `delete_data: true` |
-| POST | `/api/v1/containers/{id}/backup` | 创建完整备份 |
-| POST | `/api/v1/containers/{id}/clone` | 完整克隆为新停止实例 |
-| POST | `/api/v1/containers/{id}/template` | 保存已安装实例模板 |
-| GET | `/api/v1/backups` | 完整备份列表 |
-| POST | `/api/v1/backups` | 上传 `.clicd.tar.gz` 完整备份 |
-| GET | `/api/v1/backups/{artifact_id}` | 下载完整备份 |
-| DELETE | `/api/v1/backups/{artifact_id}` | 删除备份文件 |
-| POST | `/api/v1/backups/{artifact_id}/restore` | 恢复为新停止实例 |
-| GET | `/api/v1/instance-templates` | 已安装实例模板列表 |
-| DELETE | `/api/v1/instance-templates/{artifact_id}` | 删除实例模板 |
-| POST | `/api/v1/instance-templates/{artifact_id}/instantiate` | 从模板创建新停止实例 |
+| 方法 | 路径 | 说明 | API Key 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/containers/{id}/disks` | 真实容量、已分配空间与编辑能力 | `container:read` |
+| POST | `/api/v1/containers/{id}/disks` | 添加受管数据盘 | `container:resize` |
+| PUT | `/api/v1/containers/{id}/disks/system` | 离线扩容系统盘，只增不减 | `container:resize` |
+| PUT | `/api/v1/containers/{id}/disks/{disk_id}` | 离线扩容数据盘 | `container:resize` |
+| PUT | `/api/v1/containers/{id}/disks/{disk_id}/attachment` | 连接/断开数据盘 | `container:resize` |
+| DELETE | `/api/v1/containers/{id}/disks/{disk_id}` | 永久删除数据盘，需 `delete_data: true` | `container:resize` |
+| POST | `/api/v1/containers/{id}/backup` | 创建完整备份 | `admin:access` |
+| POST | `/api/v1/containers/{id}/clone` | 完整克隆为新停止实例 | `admin:access` |
+| POST | `/api/v1/containers/{id}/template` | 保存已安装实例模板 | `admin:access` |
+| GET | `/api/v1/backups` | 完整备份列表 | `admin:access` |
+| POST | `/api/v1/backups` | 上传 `.clicd.tar.gz` 完整备份 | `admin:access` |
+| GET/HEAD | `/api/v1/backups/{artifact_id}` | 下载完整备份 | `admin:access` |
+| POST | `/api/v1/backups/{artifact_id}/download-ticket` | 签发临时备份下载地址 | `admin:access` |
+| GET/HEAD | `/api/v1/backup-download/{ticket}` | 凭 2 分钟有效的票据下载单个备份 | 下载票据 |
+| DELETE | `/api/v1/backups/{artifact_id}` | 删除备份文件 | `admin:access` |
+| POST | `/api/v1/backups/{artifact_id}/restore` | 恢复为新停止实例 | `admin:access` |
+| GET | `/api/v1/instance-templates` | 已安装实例模板列表 | `admin:access` |
+| DELETE | `/api/v1/instance-templates/{artifact_id}` | 删除实例模板 | `admin:access` |
+| POST | `/api/v1/instance-templates/{artifact_id}/instantiate` | 从模板创建新停止实例 | `admin:access` |
 
-磁盘修改及备份/恢复/克隆/模板操作返回 `202` 和 `data.task_id`；持续查询 `GET /api/v1/tasks`，查看最终状态、阶段日志和结果。上传备份本身返回 `201`，不会自动恢复。计划快照与带数据盘工作流互斥。
+请求示例见[磁盘和备份工作流](#磁盘和备份工作流)。
 
 ### 平台管理
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/v1/templates` | 模板列表 |
-| GET | `/api/v1/images` | 镜像管理列表 |
-| GET | `/api/v1/images/enabled` | 已启用且已下载的镜像；支持 `type=lxc\|kvm` |
-| POST | `/api/v1/images/custom` | 添加第三方 LXC/KVM 镜像源 |
-| DELETE | `/api/v1/images/custom` | 移除第三方 LXC/KVM 镜像源及缓存 |
-| POST | `/api/v1/images/download` | 下载镜像 |
-| POST | `/api/v1/images/cancel` | 取消镜像下载 |
-| DELETE | `/api/v1/images/delete` | 删除镜像缓存 |
-| PUT | `/api/v1/images/toggle` | 启用/禁用镜像 |
-| POST | `/api/v1/images/upload` | 本地 ISO/QCOW2 上传，`multipart/form-data`，文件最多 32 GiB |
-| GET | `/api/v1/host-history` | 持久化主机历史指标，最多 7 天 |
-| GET | `/api/v1/swap` | Swap 信息 |
-| POST | `/api/v1/swap` | 调整 Swap |
-| GET | `/api/v1/language` | 当前面板语言 |
-| POST/PUT | `/api/v1/language` | 更新面板语言 |
-| GET | `/api/v1/ssl` | SSL 设置（需管理员权限 / `admin:access`） |
-| PUT | `/api/v1/ssl` | 更新 SSL 设置（需管理员权限 / `admin:access`） |
-| GET | `/api/v1/webssh-origins` | WebSSH Origin 白名单（需管理员权限 / `admin:access`） |
-| PUT | `/api/v1/webssh-origins` | 更新 WebSSH Origin 白名单（需管理员权限 / `admin:access`） |
-| POST | `/api/v1/batch-create` | 批量创建容器 |
-| POST | `/api/v1/batch-action` | 批量开关机/删除/重装 |
-| POST | `/api/v1/ssh-ticket` | 创建 WebSSH 票据 |
-| POST | `/api/v1/vnc-ticket` | 创建 WebVNC 票据 |
+| 方法 | 路径 | 说明 | API Key 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/templates` | 模板列表 | `image:read` |
+| GET | `/api/v1/images` | 镜像管理列表 | `image:read` |
+| GET | `/api/v1/images/enabled` | 已启用且已下载的镜像；支持 `type=lxc\|kvm` | `image:read` |
+| POST | `/api/v1/images/custom` | 添加第三方 LXC/KVM 镜像源 | `admin:access` 及 `image:download` |
+| DELETE | `/api/v1/images/custom` | 移除第三方 LXC/KVM 镜像源及缓存 | `admin:access` 及 `image:delete` |
+| POST | `/api/v1/images/download` | 下载镜像 | `admin:access` 及 `image:download` |
+| POST | `/api/v1/images/cancel` | 取消镜像下载 | `admin:access` 及 `image:download` |
+| DELETE | `/api/v1/images/delete` | 删除镜像缓存 | `admin:access` 及 `image:delete` |
+| PUT | `/api/v1/images/toggle` | 启用/禁用镜像 | `admin:access` 及 `image:toggle` |
+| POST | `/api/v1/images/upload` | 本地 ISO/QCOW2 上传，`multipart/form-data`，文件最多 32 GiB | `admin:access` 及 `image:download` 及 `image:toggle` |
+| GET | `/api/v1/storage` | 宿主机存储池和磁盘清单 | `admin:access` |
+| PUT | `/api/v1/storage` | 替换受管存储池配置 | `admin:access` |
+| GET | `/api/v1/host-history` | 持久化主机历史指标，最多 7 天 | `host:read` |
+| GET | `/api/v1/swap` | Swap 信息 | `swap:read` |
+| POST | `/api/v1/swap` | 调整 Swap | `swap:manage` |
+| GET | `/api/v1/language` | 当前面板语言 | 公开 |
+| POST/PUT | `/api/v1/language` | 更新面板语言 | `admin:access` |
+| GET | `/api/v1/ssl` | SSL 设置 | `admin:access` |
+| PUT | `/api/v1/ssl` | 更新 SSL 设置 | `admin:access` |
+| GET | `/api/v1/webssh-origins` | WebSSH Origin 白名单 | `admin:access` |
+| PUT | `/api/v1/webssh-origins` | 更新 WebSSH Origin 白名单 | `admin:access` |
+| GET | `/api/v1/access-policy` | 读取面板来源策略 | `admin:access` |
+| PUT | `/api/v1/access-policy` | 更新面板来源策略 | `admin:access` |
+| POST | `/api/v1/batch-create` | 批量创建容器 | `container:create` |
+| POST | `/api/v1/batch-action` | 批量开关机/删除/重装 | 按操作授予 `container:power`、`container:delete` 或 `container:reinstall` |
+| POST | `/api/v1/ssh-ticket` | 创建 WebSSH 票据 | `terminal:ssh` |
+| POST | `/api/v1/vnc-ticket` | 创建 WebVNC 票据 | `terminal:vnc` |
+
+更新语言可发送 `{"language":"en"}` 或 `{"language":"zh"}`。`/api/v1/language` 和 `/api/language` 的写入均需管理员认证。任务并发数设置请求体为 `{"concurrency":2}`，范围 1–16。
 
 ### 账号与日志
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| POST | `/api/v1/sub-user/create` | 创建子用户链接 |
-| GET | `/api/v1/sub-users` | 子用户列表 |
-| POST | `/api/v1/sub-users/{id}/rotate-password` | 轮换子用户密码 |
-| GET | `/api/v1/sub-users/{id}/audit-logs` | 子用户操作日志 |
-| GET | `/api/v1/sub-users/{id}/login-logs` | 子用户登录日志 |
-| GET | `/api/v1/audit-logs` | 操作日志 |
-| GET | `/api/v1/login-logs` | 登录日志 |
-| GET | `/api/v1/api-keys` | API Key 列表 |
-| POST | `/api/v1/api-keys` | 创建 API Key |
-| PATCH | `/api/v1/api-keys/{id}` | 更新 API Key |
-| DELETE | `/api/v1/api-keys/{id}` | 删除 API Key |
+| 方法 | 路径 | 说明 | API Key 权限 |
+| --- | --- | --- | --- |
+| POST | `/api/v1/sub-user/create` | 创建子用户链接 | `subuser:create` |
+| GET | `/api/v1/sub-users` | 子用户列表 | `subuser:read` |
+| POST | `/api/v1/sub-users/{id}/rotate-password` | 轮换子用户密码 | `subuser:update` |
+| PUT | `/api/v1/sub-users/{id}/images` | 设置子用户镜像权限 | `subuser:update` |
+| GET | `/api/v1/sub-users/{id}/audit-logs` | 子用户操作日志 | `audit:read` |
+| GET | `/api/v1/sub-users/{id}/login-logs` | 子用户登录日志 | `loginlog:read` |
+| GET | `/api/v1/audit-logs` | 操作日志 | `audit:read` |
+| GET | `/api/v1/login-logs` | 登录日志 | `loginlog:read` |
+| GET | `/api/v1/api-keys` | API Key 列表 | `apikey:read` |
+| POST | `/api/v1/api-keys` | 创建 API Key | `apikey:create` |
+| PATCH | `/api/v1/api-keys/{id}` | 更新 API Key | `apikey:update` |
+| DELETE | `/api/v1/api-keys/{id}` | 删除 API Key | `apikey:delete` |
 
 ## 返回样例
 

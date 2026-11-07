@@ -200,6 +200,12 @@ func HandleSingleContainer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		setIPv6NATSync(w, r, id)
+	case action == "port-mappings" && r.Method == http.MethodGet:
+		if !requireScope(w, r, "container:read") {
+			return
+		}
+		mappings := append([]config.PortMapping{}, c.PortMappings...)
+		jsonResponse(w, http.StatusOK, APIResponse{Success: true, Data: mappings})
 	case action == "port-mappings" && r.Method == http.MethodPost:
 		if !requireScope(w, r, "container:network") {
 			return
@@ -225,7 +231,7 @@ func HandleSingleContainer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		updateFirewall(w, r, id)
-	case r.Method == http.MethodGet:
+	case action == "" && r.Method == http.MethodGet:
 		if !requireScope(w, r, "container:read") {
 			return
 		}

@@ -10,25 +10,7 @@
 
 ## 管理动作
 
-```http
-GET /api/v1/templates
-GET /api/v1/images
-POST /api/v1/images/download
-POST /api/v1/images/cancel
-DELETE /api/v1/images/delete
-PUT /api/v1/images/toggle
-POST /api/v1/images/upload
-```
-
-- `templates` 返回可用模板定义。
-- `images` 返回本地镜像状态。
-- `download` 下载指定模板。
-- `cancel` 取消下载任务。
-- `delete` 删除本地镜像缓存。
-- `toggle` 控制模板是否对创建流程可用。
-- `upload` 使用 `multipart/form-data` 上传 `file`，可附 `name`、`description`、`arch`、`sha256`、`provisioner`、`distro`、`release`；单文件最多 **32 GiB**，存储池通过查询参数 `storage_pool_id` 指定。
-
-镜像源创建、下载、取消、删除和启用管理需要管理员权限。使用外部 API Key 时，需同时授予 `admin:access` 和对应的 `image:*` 操作权限。
+接口权限、上传字段和示例见 [API 集成](./api#本地镜像上传和-kvm-安装介质)。
 
 ## 本地镜像与通用 ISO
 

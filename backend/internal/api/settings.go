@@ -29,24 +29,34 @@ func HandleLanguage(w http.ResponseWriter, r *http.Request) {
 			"language": config.NormalizeLanguage(config.AppConfig.Language),
 		}})
 	case http.MethodPost, http.MethodPut:
-		var req struct {
-			Language string `json:"language"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Invalid request body"})
-			return
-		}
-		config.AppConfig.Language = config.NormalizeLanguage(req.Language)
-		if err := config.SaveConfig(); err != nil {
-			jsonResponse(w, http.StatusInternalServerError, APIResponse{Success: false, Message: "Failed to save language"})
-			return
-		}
-		jsonResponse(w, http.StatusOK, APIResponse{Success: true, Data: map[string]string{
-			"language": config.AppConfig.Language,
-		}})
+		AdminMiddleware(updateLanguage)(w, r)
 	default:
 		jsonResponse(w, http.StatusMethodNotAllowed, APIResponse{Success: false, Message: "Method not allowed"})
 	}
+}
+
+func updateLanguage(w http.ResponseWriter, r *http.Request) {
+	if isAccessRestrictedRequest(r) {
+		jsonResponse(w, http.StatusForbidden, APIResponse{Success: false, Message: "Administrator permission required"})
+		return
+	}
+	var req struct {
+		Language string `json:"language"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Invalid request body"})
+		return
+	}
+	previous := config.AppConfig.Language
+	config.AppConfig.Language = config.NormalizeLanguage(req.Language)
+	if err := config.SaveConfig(); err != nil {
+		config.AppConfig.Language = previous
+		jsonResponse(w, http.StatusInternalServerError, APIResponse{Success: false, Message: "Failed to save language"})
+		return
+	}
+	jsonResponse(w, http.StatusOK, APIResponse{Success: true, Data: map[string]string{
+		"language": config.AppConfig.Language,
+	}})
 }
 
 // HandleTaskQueueSettings returns or updates the global task concurrency limit.

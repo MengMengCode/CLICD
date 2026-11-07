@@ -2,12 +2,7 @@
 
 The Tasks page shows lifecycle operations, disk growth, data-disk changes, full backups, restore, clone and template operations with status, duration, errors and stage logs. Long changes for the same instance run sequentially.
 
-```http
-GET /api/v1/tasks
-DELETE /api/v1/tasks/{task_id}
-```
-
-After a `202` response, find `data.task_id` in the task list. `done` indicates success; inspect `error` and stage logs for `failed` tasks. A running task cannot be removed. Deleting completed history does not undo disk, backup or instance changes.
+Use [task detail](./api#poll-asynchronous-tasks) to poll an ID returned by an asynchronous request. Deleting completed history does not undo disk, backup or instance changes.
 
 ## Service Restarts
 

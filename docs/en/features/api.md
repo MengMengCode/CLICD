@@ -16,7 +16,7 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
 
 ## Response Shape
 
-All APIs use the same response envelope:
+Most JSON endpoints return `success` and optional `message` and `data` fields. Check the HTTP status first. Backup downloads return an archive body rather than JSON.
 
 ```json
 {
@@ -30,7 +30,7 @@ Integrations should read only the business fields they need. New capabilities ar
 
 ## Creation and Reinstall
 
-Container creation, batch creation, reinstall, and batch reinstall support mixed NAT, public IPv4, IPv6 networking, plus Linux SSH login configuration. Public IPv4/IPv6 pools can be viewed with `GET /api/v1/routing` and updated with `PUT /api/v1/routing`.
+Container creation and batch creation can configure NAT and public IPv4/IPv6 together. Reinstall and batch reinstall change the installed image and accept Linux SSH login options. Public IPv4/IPv6 pools can be viewed with `GET /api/v1/routing` and updated with `PUT /api/v1/routing`.
 
 Create container example:
 
@@ -47,9 +47,7 @@ Create container example:
   "assign_ipv4": false,
   "ipv4_count": 1,
   "public_ipv4s": [],
-  "assign_ipv6": true,
-  "ipv6_count": 1,
-  "ipv6_addresses": [],
+  "assign_ipv6": false,
   "ssh_auth_mode": "auto_password",
   "ssh_password": "",
   "ssh_public_key": "",
@@ -93,7 +91,7 @@ Reinstall example:
 }
 ```
 
-`keep` is only for reinstall and keeps the current SSH password. Windows KVM images ignore Linux SSH public key fields.
+`keep` is only for reinstall and keeps the current SSH password. Windows KVM images ignore Linux SSH public key fields. When creating a VM with a manual ISO, select the image ID as `template_id` and complete installation through the console.
 
 ## Resource and Traffic Limits
 
@@ -125,14 +123,14 @@ Legacy `network_bw_mbps` and `io_speed_mbps` are still accepted. They mean symme
 
 | Field | Description |
 | --- | --- |
-| `traffic_mode` | Traffic limit mode. Common values are `total` for a shared total limit and `split` for separate inbound/outbound limits. |
+| `traffic_mode` | Traffic limit mode. Common values are `total` for a shared total limit and `in_out` for separate inbound/outbound limits. |
 | `monthly_traffic_gb` | Monthly total traffic quota for `total` mode, in GB. `0` means unlimited. |
-| `traffic_in_gb` | Monthly inbound quota for `split` mode, in GB. `0` means unlimited. |
-| `traffic_out_gb` | Monthly outbound quota for `split` mode, in GB. `0` means unlimited. |
+| `traffic_in_gb` | Monthly inbound quota for `in_out` mode, in GB. `0` means unlimited. |
+| `traffic_out_gb` | Monthly outbound quota for `in_out` mode, in GB. `0` means unlimited. |
 
 ## Container Firewall
 
-Read container firewall settings with `GET /api/v1/containers/{id}/firewall` and update them with `PUT /api/v1/containers/{id}/firewall`. Updates are applied immediately when the container is running.
+Read container firewall settings with `GET /api/v1/containers/{id}/firewall` and update them with `PUT /api/v1/containers/{id}/firewall`. Updates are applied immediately when the container is running. Fields can be updated independently. A supplied `rules` array replaces the existing list. Set `rules[].enabled` to `true` for rules that should take effect.
 
 Update example:
 
@@ -148,7 +146,8 @@ Update example:
       "network": "ipv4",
       "source_ip": "203.0.113.0/24",
       "port": "22,80,443",
-      "description": "allow admin and web"
+      "description": "allow admin and web",
+      "enabled": true
     }
   ]
 }
@@ -169,7 +168,7 @@ Update example:
 
 ## API Key Create and Update
 
-`POST /api/v1/api-keys` and `PATCH /api/v1/api-keys/{id}` use the same field shape. `name` is required when creating a key; updates overwrite the fields you send.
+`POST /api/v1/api-keys` and `PATCH /api/v1/api-keys/{id}` use the same field shape. `name` is required on creation. On update, send the existing `ip_whitelist`, `expires_at`, `disabled` and `container_uuids` values if you want to keep them. Omitted restrictions are cleared and an omitted `disabled` becomes `false`. An empty or omitted `name` or `scopes` preserves its current value.
 
 ```json
 {
@@ -186,14 +185,16 @@ Update example:
 | --- | --- |
 | `name` | API key name. Required when creating a key. |
 | `ip_whitelist` | Optional allowed source IPs/CIDRs, comma-separated. Empty means no IP restriction. |
-| `scopes` | Optional permission scopes. If omitted, the default read-only scopes are used. `*` grants all permissions. |
+| `scopes` | Optional permission scopes. If omitted on creation, the default read-only scopes are used. `*` grants all permissions. |
 | `expires_at` | Optional expiration time. Empty means no expiration. |
 | `disabled` | Whether this key is disabled. |
 | `container_uuids` | Optional container allowlist that limits the key to specific containers. |
 
+The plaintext `data.key` is returned only on creation. API key management scopes are global. A key with `apikey:create` or `apikey:update` can set any scopes, including `*`, and any container restrictions. Reserve these scopes for trusted administrators.
+
 ## Panel Access Source Policy
 
-Use `GET /api/v1/access-policy` to read the panel source allowlist and `PUT /api/v1/access-policy` to update it. Both endpoints require `admin:access`. The policy covers panel pages, login endpoints, and every API.
+Use `GET /api/v1/access-policy` to read the panel source allowlist and `PUT /api/v1/access-policy` to update it. Both endpoints require `admin:access`. The policy covers panel pages, login endpoints and API requests, including public endpoints and ticket downloads.
 
 ```json
 {
@@ -243,7 +244,7 @@ CONTAINER_ID = "example-vm"
 
 payload = {
     "protocol": "tcp",
-    "host_port": 18080,
+    "host_port": 30080,
     "container_port": 80,
     "description": "web",
 }
@@ -258,135 +259,237 @@ resp.raise_for_status()
 print(resp.json())
 ```
 
+## Poll Asynchronous Tasks
+
+Disk, backup, restore, clone and instance-template operations return HTTP `202` with `data.task_id`. Poll `GET /api/v1/tasks/{task_id}`. Batch creation and batch actions return an array of task IDs in `data`. Poll each ID separately. Single-instance creation with `POST /api/v1/containers` returns `201` when creation completes.
+
+```bash
+curl --fail-with-body -H "X-API-Key: $CLICD_API_KEY" \
+  "$CLICD_URL/api/v1/tasks/task-42"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "task-42",
+    "type": "backup",
+    "status": "done",
+    "result": { "artifact_id": "example-backup-id" }
+  }
+}
+```
+
+`data.status` is `pending`, `running`, `done` or `failed`. Read `error` and `logs` on failure and the operation-specific `result` after success. The detail endpoint returns `404` for missing, pruned or inaccessible tasks. Deleting a pending task cancels it. Deleting a completed task clears its history. Deleting a running task returns `409`. See [tasks and metric history](./tasks).
+
+Host and instance history endpoints return sample arrays. `ts` is in Unix milliseconds, `cpu` and `memory` are percentages, and `network_rx`, `network_tx`, `disk_read` and `disk_write` are in bytes per second. Samples are retained for up to seven days and can have gaps during downtime.
+
+## Disk and Backup Workflows
+
+Read `data.system`, `data.data_disks` and `data.can_edit` from the instance disk inventory. Stop the instance before changing disks. `size_gb` is the requested final size in GiB.
+
+| Operation | Request body |
+| --- | --- |
+| Add an LXC data disk | `{"name":"data","size_gb":8,"mount_path":"/data","storage_pool_id":"disk-root"}` |
+| Add a KVM data disk | `{"name":"data","size_gb":8,"storage_pool_id":"disk-root"}` |
+| Grow a system or data disk | `{"size_gb":20}` |
+| Detach or reattach | `{"attached":false}` or `{"attached":true}` |
+| Permanently delete a data disk | `{"delete_data":true}` |
+
+Choose a pool from `data.pools` on `GET /api/v1/storage`. Omit the optional `storage_pool_id` to let CLICD select a suitable pool. `PUT /api/v1/storage` accepts a complete `{"pools":[...]}` inventory. Use the current GET result as the basis for changes.
+
+Create a full backup or save an instance template with `{"name":"nightly","storage_pool_id":"disk-root"}`. Read `result.artifact_id` from the completed task, or find the artifact in its respective list. Cold copies temporarily stop a running source and attempt to restore its power state after copying.
+
+```bash
+# Download the archive
+curl --fail-with-body -H "X-API-Key: $CLICD_API_KEY" \
+  "$CLICD_URL/api/v1/backups/$ARTIFACT_ID" -o backup.clicd.tar.gz
+
+# Import a full backup to the specified pool
+curl --fail-with-body -H "X-API-Key: $CLICD_API_KEY" \
+  -F 'name=imported-backup' -F 'file=@backup.clicd.tar.gz' \
+  "$CLICD_URL/api/v1/backups?storage_pool_id=disk-root"
+```
+
+Downloads return `application/gzip` and support `HEAD` for metadata and `Range` for partial downloads. Browser clients may call `POST /api/v1/backups/{artifact_id}/download-ticket` and then request `data.url` on the same panel origin. For v1, this relative URL is `/api/v1/backup-download/{ticket}`. It supports GET, HEAD and byte ranges without another API key header. The ticket is valid for two minutes and remains subject to the panel access source policy. The issuer also returns `data.expires_at` as an RFC 3339 timestamp.
+
+A successful import returns HTTP `201` with backup metadata including `id`. To restore, clone or instantiate a template, send `{"name":"restored-01","storage_pool_id":"disk-root","assign_nat":true,"port_mapping_count":2}`. The new instance starts in a stopped state. NAT defaults to enabled with a quota of two mappings (range 1–64). Each template instantiation request creates one instance. For multiple copies, submit a request per unique name. See [disk, backup and clone requirements](./storage-backups).
+
+## Local Image Upload and KVM Installation Media
+
+Upload with `multipart/form-data`. The `file` and `name` fields are required and each file is limited to 32 GiB. Optional fields are `description`, `arch`, `sha256`, `provisioner`, `distro` and `release`. Pass `storage_pool_id` as a query parameter.
+
+```bash
+curl --fail-with-body -H "X-API-Key: $CLICD_API_KEY" \
+  -F 'name=Debian installer' -F 'provisioner=manual-iso' \
+  -F 'file=@debian.iso' \
+  "$CLICD_URL/api/v1/images/upload?storage_pool_id=disk-root"
+```
+
+After validation and activation the API returns HTTP `201` with `id`, `name`, `format`, `size_bytes` and `sha256` in `data`. Use `id` as the `template_id` for a new KVM instance. For an existing KVM instance, check `data.available` from `GET /api/v1/containers/{id}/installation-media`. Stop the VM and PUT `{"image_id":"<iso_id>","boot":"cdrom"}`. To eject the ISO and boot from disk, PUT `{"image_id":"","boot":"disk"}`. See [image formats and install modes](./images).
+
+## IPv4 and IPv6 NAT
+
+For an existing instance, `PUT .../public-ipv4` and `PUT .../ipv6-addresses` accept `{"mode":"auto","count":1}`, `{"mode":"custom","addresses":["<address>"]}`, or `{"mode":"clear"}`. Read the host address pools from `GET /api/v1/routing` first.
+
+Port mappings accept `tcp` or `udp`. Fetch the current mappings before editing or deleting by zero-based index. Without a dedicated public IPv4 address, the host port must be inside the NAT range in the routing settings.
+
+`GET /api/v1/containers/{id}/ipv6-port-mappings` returns `enabled`, `sync_ipv4`, `host_ipv6`, `guest_ipv6`, `limit` and `mappings`. When synchronization is enabled, the mappings mirror the IPv4 list. Send `{"enabled":false}` to `PUT /api/v1/containers/{id}/ipv6-nat-sync` before editing independent IPv6 mappings. POST and PUT accept the same mapping fields as IPv4. Omit `host_ip` to use the instance's IPv6 NAT endpoint. LXC requires host IPv6 NAT enabled through `/api/v1/ipv6/nat`. See [networking and routing](./networking) for setup.
+
 ## Endpoint List
+
+Scopes in the last column apply to API keys. An API key bound to container UUIDs also has resource-level restrictions. Updating the global panel language requires an unbound key. A missing or invalid credential normally returns `401`, a missing scope `403`, and a resource or state conflict `409`. `/api/v1/containers/list` is a compatibility alias; use `GET /api/v1/containers` in new clients.
 
 ### Overview
 
-| Method | Path | Description |
-| --- | --- | --- |
-| GET | `/api/v1/dashboard` | Dashboard statistics |
-| GET | `/api/v1/host-info` | Host resources |
-| GET | `/api/v1/host-report` | Host inspection report |
-| GET | `/api/v1/routing` | NAT/IPv4/IPv6 routing |
-| PUT | `/api/v1/routing` | Update public IPv4/IPv6 pools |
-| POST | `/api/v1/routing/ipv4-scan` | Scan a public IPv4 segment |
-| GET | `/api/v1/ipv6/status` | IPv6 status |
-| GET | `/api/v1/tasks` | Task queue |
-| DELETE | `/api/v1/tasks/{task_id}` | Delete a task |
+| Method | Path | Description | API key scopes |
+| --- | --- | --- | --- |
+| GET | `/api/v1/dashboard` | Dashboard statistics | `dashboard:read` |
+| GET | `/api/v1/version` | Read the panel version | Public |
+| GET | `/api/v1/host-info` | Host resources | `host:read` |
+| GET | `/api/v1/host-report` | Host inspection report | `host:read` |
+| GET | `/api/v1/routing` | NAT/IPv4/IPv6 routing | `routing:read` or `routing:write` |
+| PUT | `/api/v1/routing` | Update public IPv4/IPv6 pools | `routing:write` |
+| POST | `/api/v1/routing/ipv4-scan` | Scan a public IPv4 segment | `routing:write` |
+| GET | `/api/v1/ipv6/status` | IPv6 status | `ipv6:read` |
+| GET | `/api/v1/ipv6/nat` | Host LXC IPv6 NAT settings and state | `admin:access` + `ipv6:read` |
+| PUT | `/api/v1/ipv6/nat` | Enable, disable or configure LXC IPv6 NAT | `admin:access` + `routing:write` |
+| GET | `/api/v1/tasks` | Task queue | `task:read` |
+| GET | `/api/v1/tasks/{task_id}` | Read a single task with stages, result and error | `task:read` |
+| DELETE | `/api/v1/tasks/{task_id}` | Delete a task | `task:delete` |
+| GET | `/api/v1/task-queue/settings` | Read concurrency, active and pending counts | `admin:access` |
+| PUT/POST | `/api/v1/task-queue/settings` | Set task concurrency | `admin:access` |
 
 ### Containers
 
-| Method | Path | Description |
-| --- | --- | --- |
-| GET | `/api/v1/containers` | Container list (recommended) |
-| GET | `/api/v1/containers/list` | Compatible GET form for container list |
-| POST | `/api/v1/containers/list` | Compatible POST form for container list |
-| POST | `/api/v1/containers` | Create container |
-| GET | `/api/v1/containers/{id\|uuid\|name}` | Container details |
-| POST | `/api/v1/containers/{id}/start` | Start |
-| POST | `/api/v1/containers/{id}/stop` | Stop |
-| POST | `/api/v1/containers/{id}/restart` | Restart |
-| POST | `/api/v1/containers/{id}/reinstall` | Reinstall |
-| DELETE | `/api/v1/containers/{id}/delete` | Delete |
-| GET | `/api/v1/containers/{id}/usage` | Resource usage |
-| GET | `/api/v1/containers/{id}/history` | Persisted resource history, up to 7 days |
-| GET | `/api/v1/containers/{id}/installation-media` | KVM media, boot mode and available ISOs |
-| PUT | `/api/v1/containers/{id}/installation-media` | Mount/change/eject ISO and set boot mode while stopped |
-| GET | `/api/v1/containers/{id}/traffic` | Traffic statistics |
-| POST | `/api/v1/containers/{id}/traffic-reset` | Reset traffic |
-| PUT | `/api/v1/containers/{id}/traffic-limit` | Update traffic limits |
-| PUT | `/api/v1/containers/{id}/resource-limit` | Update resource limits |
-| PUT | `/api/v1/containers/{id}/expiry` | Update expiration time |
-| POST | `/api/v1/containers/{id}/reset-password` | Reset SSH password |
-| POST | `/api/v1/containers/{id}/ipv6` | Assign IPv6 |
+| Method | Path | Description | API key scopes |
+| --- | --- | --- | --- |
+| GET | `/api/v1/containers` | Container list (recommended) | `container:read` |
+| GET | `/api/v1/containers/list` | Compatible GET form for container list | `container:read` |
+| POST | `/api/v1/containers/list` | Compatible POST form for container list | `container:read` |
+| POST | `/api/v1/containers` | Create container | `container:create` |
+| GET | `/api/v1/containers/{id\|uuid\|name}` | Container details | `container:read` |
+| POST | `/api/v1/containers/{id}/start` | Start | `container:power` |
+| POST | `/api/v1/containers/{id}/stop` | Stop | `container:power` |
+| POST | `/api/v1/containers/{id}/restart` | Restart | `container:power` |
+| POST | `/api/v1/containers/{id}/reinstall` | Reinstall | `container:reinstall` |
+| DELETE | `/api/v1/containers/{id}/delete` | Delete | `container:delete` |
+| GET | `/api/v1/containers/{id}/usage` | Resource usage | `container:read` |
+| GET | `/api/v1/containers/{id}/history` | Persisted resource history, up to 7 days | `container:read` |
+| GET | `/api/v1/containers/{id}/installation-media` | KVM media, boot mode and available ISOs | `container:read` |
+| PUT | `/api/v1/containers/{id}/installation-media` | Mount/change/eject ISO and set boot mode while stopped | `container:reinstall` |
+| GET | `/api/v1/containers/{id}/traffic` | Traffic statistics | `container:read` |
+| POST | `/api/v1/containers/{id}/traffic-reset` | Reset traffic | `container:traffic` |
+| PUT | `/api/v1/containers/{id}/traffic-limit` | Update traffic limits | `container:traffic` |
+| PUT | `/api/v1/containers/{id}/resource-limit` | Update resource limits | `container:resize` |
+| PUT | `/api/v1/containers/{id}/expiry` | Update expiration time | `container:resize` |
+| POST | `/api/v1/containers/{id}/reset-password` | Reset SSH password | `container:password` |
+| POST | `/api/v1/containers/{id}/ipv6` | Assign IPv6 | `ipv6:assign` |
+| PUT | `/api/v1/containers/{id}/public-ipv4` | Update public IPv4 assignments | `container:network` |
+| PUT | `/api/v1/containers/{id}/ipv6-addresses` | Update IPv6 assignments | `ipv6:assign` |
 
 ### Ports and Snapshots
 
-| Method | Path | Description |
-| --- | --- | --- |
-| GET | `/api/v1/containers/{id}/random-port` | Random available port; accepts `host_ip` to check a specific host IP |
-| POST | `/api/v1/containers/{id}/port-mappings` | Add port mapping |
-| PUT | `/api/v1/containers/{id}/port-mappings/{index}` | Update port mapping |
-| DELETE | `/api/v1/containers/{id}/port-mappings/{index}` | Delete port mapping |
-| GET | `/api/v1/containers/{id}/firewall` | Get container firewall settings |
-| PUT | `/api/v1/containers/{id}/firewall` | Update container firewall settings |
-| GET | `/api/v1/snapshots` | Snapshot overview |
-| GET | `/api/v1/containers/{id}/snapshots` | Container snapshots |
-| POST | `/api/v1/containers/{id}/snapshots` | Create snapshot |
-| DELETE | `/api/v1/containers/{id}/snapshots/{snapshot_id}` | Delete snapshot |
-| POST | `/api/v1/containers/{id}/snapshots/{snapshot_id}/restore` | Restore snapshot |
-| POST | `/api/v1/containers/{id}/snapshots/schedule` | Schedule snapshots |
-| PUT | `/api/v1/containers/{id}/snapshots/quota` | Snapshot quota |
+| Method | Path | Description | API key scopes |
+| --- | --- | --- | --- |
+| GET | `/api/v1/containers/{id}/random-port` | Random available port; accepts `host_ip` to check a specific host IP | `container:network` |
+| GET | `/api/v1/containers/{id}/port-mappings` | List IPv4 NAT port mappings | `container:read` |
+| POST | `/api/v1/containers/{id}/port-mappings` | Add port mapping | `container:network` |
+| PUT | `/api/v1/containers/{id}/port-mappings/{index}` | Update port mapping | `container:network` |
+| DELETE | `/api/v1/containers/{id}/port-mappings/{index}` | Delete port mapping | `container:network` |
+| GET | `/api/v1/containers/{id}/ipv6-port-mappings` | Read IPv6 NAT state and effective mappings | `container:network` |
+| POST | `/api/v1/containers/{id}/ipv6-port-mappings` | Add an independent IPv6 port mapping | `container:network` |
+| PUT | `/api/v1/containers/{id}/ipv6-port-mappings/{index}` | Update an independent IPv6 port mapping | `container:network` |
+| DELETE | `/api/v1/containers/{id}/ipv6-port-mappings/{index}` | Delete an independent IPv6 port mapping | `container:network` |
+| PUT | `/api/v1/containers/{id}/ipv6-nat-sync` | Set whether IPv6 mirrors IPv4 mappings | `container:network` |
+| GET | `/api/v1/containers/{id}/firewall` | Get container firewall settings | `container:network` |
+| PUT | `/api/v1/containers/{id}/firewall` | Update container firewall settings | `container:network` |
+| GET | `/api/v1/snapshots` | Snapshot overview | `snapshot:read` |
+| GET | `/api/v1/containers/{id}/snapshots` | Container snapshots | `snapshot:read` |
+| POST | `/api/v1/containers/{id}/snapshots` | Create snapshot | `snapshot:create` |
+| DELETE | `/api/v1/containers/{id}/snapshots/{snapshot_id}` | Delete snapshot | `snapshot:delete` |
+| POST | `/api/v1/containers/{id}/snapshots/{snapshot_id}/restore` | Restore snapshot | `snapshot:restore` |
+| POST | `/api/v1/containers/{id}/snapshots/schedule` | Schedule snapshots | `snapshot:schedule` |
+| PUT | `/api/v1/containers/{id}/snapshots/quota` | Snapshot quota | `snapshot:schedule` |
 
 ### Disks, Full Backups and Instance Templates
 
-Disk mutations require administrator access and `container:resize`; sub-users can only read their assigned instances' disk inventory. Full backup, restore, clone and template endpoints require administrator access (`admin:access` for external API keys). See [storage limits and request examples](./storage-backups).
+Disk mutations, full backups, restores, clones and template operations accept administrator sessions or API keys with the listed scopes and no container restriction. Sub-users can read their assigned instances’ disk inventory. See [disk, backup and clone requirements](./storage-backups).
 
-| Method | Path | Description |
-| --- | --- | --- |
-| GET | `/api/v1/containers/{id}/disks` | Actual capacity, allocated space and editing capabilities |
-| POST | `/api/v1/containers/{id}/disks` | Add a managed data disk |
-| PUT | `/api/v1/containers/{id}/disks/system` | Grow the system disk offline; no shrinking |
-| PUT | `/api/v1/containers/{id}/disks/{disk_id}` | Grow a data disk offline |
-| PUT | `/api/v1/containers/{id}/disks/{disk_id}/attachment` | Attach/detach a data disk |
-| DELETE | `/api/v1/containers/{id}/disks/{disk_id}` | Permanently delete a data disk; requires `delete_data: true` |
-| POST | `/api/v1/containers/{id}/backup` | Create a full backup |
-| POST | `/api/v1/containers/{id}/clone` | Full clone to a new stopped instance |
-| POST | `/api/v1/containers/{id}/template` | Save an installed-instance template |
-| GET | `/api/v1/backups` | List full backups |
-| POST | `/api/v1/backups` | Upload a `.clicd.tar.gz` full backup |
-| GET | `/api/v1/backups/{artifact_id}` | Download a full backup |
-| DELETE | `/api/v1/backups/{artifact_id}` | Delete a backup artifact |
-| POST | `/api/v1/backups/{artifact_id}/restore` | Restore a new stopped instance |
-| GET | `/api/v1/instance-templates` | List installed-instance templates |
-| DELETE | `/api/v1/instance-templates/{artifact_id}` | Delete an instance template |
-| POST | `/api/v1/instance-templates/{artifact_id}/instantiate` | Create a new stopped instance from a template |
+| Method | Path | Description | API key scopes |
+| --- | --- | --- | --- |
+| GET | `/api/v1/containers/{id}/disks` | Actual capacity, allocated space and editing capabilities | `container:read` |
+| POST | `/api/v1/containers/{id}/disks` | Add a managed data disk | `container:resize` |
+| PUT | `/api/v1/containers/{id}/disks/system` | Grow the system disk offline; no shrinking | `container:resize` |
+| PUT | `/api/v1/containers/{id}/disks/{disk_id}` | Grow a data disk offline | `container:resize` |
+| PUT | `/api/v1/containers/{id}/disks/{disk_id}/attachment` | Attach/detach a data disk | `container:resize` |
+| DELETE | `/api/v1/containers/{id}/disks/{disk_id}` | Permanently delete a data disk; requires `delete_data: true` | `container:resize` |
+| POST | `/api/v1/containers/{id}/backup` | Create a full backup | `admin:access` |
+| POST | `/api/v1/containers/{id}/clone` | Full clone to a new stopped instance | `admin:access` |
+| POST | `/api/v1/containers/{id}/template` | Save an installed-instance template | `admin:access` |
+| GET | `/api/v1/backups` | List full backups | `admin:access` |
+| POST | `/api/v1/backups` | Upload a `.clicd.tar.gz` full backup | `admin:access` |
+| GET/HEAD | `/api/v1/backups/{artifact_id}` | Download a full backup | `admin:access` |
+| POST | `/api/v1/backups/{artifact_id}/download-ticket` | Issue a temporary backup download URL | `admin:access` |
+| GET/HEAD | `/api/v1/backup-download/{ticket}` | Stream one backup using its two-minute ticket | Download ticket |
+| DELETE | `/api/v1/backups/{artifact_id}` | Delete a backup artifact | `admin:access` |
+| POST | `/api/v1/backups/{artifact_id}/restore` | Restore a new stopped instance | `admin:access` |
+| GET | `/api/v1/instance-templates` | List installed-instance templates | `admin:access` |
+| DELETE | `/api/v1/instance-templates/{artifact_id}` | Delete an instance template | `admin:access` |
+| POST | `/api/v1/instance-templates/{artifact_id}/instantiate` | Create a new stopped instance from a template | `admin:access` |
 
-Disk mutations and backup/restore/clone/template operations return `202` with `data.task_id`. Poll `GET /api/v1/tasks` for final status, stage logs and results. A backup upload itself returns `201` and does not start a restore. Scheduled snapshots and instances with data disks are mutually exclusive workflows.
+See [disk and backup workflows](#disk-and-backup-workflows) for example requests.
 
 ### Platform Management
 
-| Method | Path | Description |
-| --- | --- | --- |
-| GET | `/api/v1/templates` | Template list |
-| GET | `/api/v1/images` | Image management list |
-| GET | `/api/v1/images/enabled` | Enabled and downloaded images; supports `type=lxc\|kvm` |
-| POST | `/api/v1/images/custom` | Add a third-party LXC/KVM image source |
-| DELETE | `/api/v1/images/custom` | Remove a third-party LXC/KVM image source and cache |
-| POST | `/api/v1/images/download` | Download image |
-| POST | `/api/v1/images/cancel` | Cancel image download |
-| DELETE | `/api/v1/images/delete` | Delete image cache |
-| PUT | `/api/v1/images/toggle` | Enable or disable image |
-| POST | `/api/v1/images/upload` | Local ISO/QCOW2 upload, `multipart/form-data`, at most 32 GiB |
-| GET | `/api/v1/host-history` | Persisted host metrics, up to 7 days |
-| GET | `/api/v1/swap` | Swap information |
-| POST | `/api/v1/swap` | Adjust Swap |
-| GET | `/api/v1/language` | Current panel language |
-| POST/PUT | `/api/v1/language` | Update panel language |
-| GET | `/api/v1/ssl` | SSL settings (requires admin permission / `admin:access`) |
-| PUT | `/api/v1/ssl` | Update SSL settings (requires admin permission / `admin:access`) |
-| GET | `/api/v1/webssh-origins` | WebSSH Origin allowlist (requires admin permission / `admin:access`) |
-| PUT | `/api/v1/webssh-origins` | Update WebSSH Origin allowlist (requires admin permission / `admin:access`) |
-| POST | `/api/v1/batch-create` | Batch create containers |
-| POST | `/api/v1/batch-action` | Batch power action, delete, or reinstall |
-| POST | `/api/v1/ssh-ticket` | Create WebSSH ticket |
-| POST | `/api/v1/vnc-ticket` | Create WebVNC ticket |
+| Method | Path | Description | API key scopes |
+| --- | --- | --- | --- |
+| GET | `/api/v1/templates` | Template list | `image:read` |
+| GET | `/api/v1/images` | Image management list | `image:read` |
+| GET | `/api/v1/images/enabled` | Enabled and downloaded images; supports `type=lxc\|kvm` | `image:read` |
+| POST | `/api/v1/images/custom` | Add a third-party LXC/KVM image source | `admin:access` + `image:download` |
+| DELETE | `/api/v1/images/custom` | Remove a third-party LXC/KVM image source and cache | `admin:access` + `image:delete` |
+| POST | `/api/v1/images/download` | Download image | `admin:access` + `image:download` |
+| POST | `/api/v1/images/cancel` | Cancel image download | `admin:access` + `image:download` |
+| DELETE | `/api/v1/images/delete` | Delete image cache | `admin:access` + `image:delete` |
+| PUT | `/api/v1/images/toggle` | Enable or disable image | `admin:access` + `image:toggle` |
+| POST | `/api/v1/images/upload` | Local ISO/QCOW2 upload, `multipart/form-data`, at most 32 GiB | `admin:access` + `image:download` + `image:toggle` |
+| GET | `/api/v1/storage` | List host storage pools and disks | `admin:access` |
+| PUT | `/api/v1/storage` | Replace managed storage pool configuration | `admin:access` |
+| GET | `/api/v1/host-history` | Persisted host metrics, up to 7 days | `host:read` |
+| GET | `/api/v1/swap` | Swap information | `swap:read` |
+| POST | `/api/v1/swap` | Adjust Swap | `swap:manage` |
+| GET | `/api/v1/language` | Current panel language | Public |
+| POST/PUT | `/api/v1/language` | Update panel language | `admin:access` |
+| GET | `/api/v1/ssl` | SSL settings | `admin:access` |
+| PUT | `/api/v1/ssl` | Update SSL settings | `admin:access` |
+| GET | `/api/v1/webssh-origins` | WebSSH Origin allowlist | `admin:access` |
+| PUT | `/api/v1/webssh-origins` | Update WebSSH Origin allowlist | `admin:access` |
+| GET | `/api/v1/access-policy` | Read the panel access source policy | `admin:access` |
+| PUT | `/api/v1/access-policy` | Update the panel access source policy | `admin:access` |
+| POST | `/api/v1/batch-create` | Batch create containers | `container:create` |
+| POST | `/api/v1/batch-action` | Batch power action, delete, or reinstall | `container:power`, `container:delete` or `container:reinstall` according to the action |
+| POST | `/api/v1/ssh-ticket` | Create WebSSH ticket | `terminal:ssh` |
+| POST | `/api/v1/vnc-ticket` | Create WebVNC ticket | `terminal:vnc` |
+
+Language writes accept `{"language":"en"}` or `{"language":"zh"}` and require administrator authentication on both `/api/v1/language` and `/api/language`. Set task concurrency with `{"concurrency":2}` (allowed range 1–16).
 
 ### Accounts and Logs
 
-| Method | Path | Description |
-| --- | --- | --- |
-| POST | `/api/v1/sub-user/create` | Create sub-user link |
-| GET | `/api/v1/sub-users` | Sub-user list |
-| POST | `/api/v1/sub-users/{id}/rotate-password` | Rotate sub-user password |
-| GET | `/api/v1/sub-users/{id}/audit-logs` | Sub-user audit logs |
-| GET | `/api/v1/sub-users/{id}/login-logs` | Sub-user login logs |
-| GET | `/api/v1/audit-logs` | Audit logs |
-| GET | `/api/v1/login-logs` | Login logs |
-| GET | `/api/v1/api-keys` | API key list |
-| POST | `/api/v1/api-keys` | Create API key |
-| PATCH | `/api/v1/api-keys/{id}` | Update API key |
-| DELETE | `/api/v1/api-keys/{id}` | Delete API key |
+| Method | Path | Description | API key scopes |
+| --- | --- | --- | --- |
+| POST | `/api/v1/sub-user/create` | Create sub-user link | `subuser:create` |
+| GET | `/api/v1/sub-users` | Sub-user list | `subuser:read` |
+| POST | `/api/v1/sub-users/{id}/rotate-password` | Rotate sub-user password | `subuser:update` |
+| PUT | `/api/v1/sub-users/{id}/images` | Set the sub-user image allowlist | `subuser:update` |
+| GET | `/api/v1/sub-users/{id}/audit-logs` | Sub-user audit logs | `audit:read` |
+| GET | `/api/v1/sub-users/{id}/login-logs` | Sub-user login logs | `loginlog:read` |
+| GET | `/api/v1/audit-logs` | Audit logs | `audit:read` |
+| GET | `/api/v1/login-logs` | Login logs | `loginlog:read` |
+| GET | `/api/v1/api-keys` | API key list | `apikey:read` |
+| POST | `/api/v1/api-keys` | Create API key | `apikey:create` |
+| PATCH | `/api/v1/api-keys/{id}` | Update API key | `apikey:update` |
+| DELETE | `/api/v1/api-keys/{id}` | Delete API key | `apikey:delete` |
 
 ## Response Samples
 

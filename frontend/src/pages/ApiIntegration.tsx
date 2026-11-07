@@ -53,30 +53,34 @@ interface ApiKeyForm {
 
 const BASE_URL = window.location.origin
 const SAMPLE_BASE_URL = 'https://panel.example.com'
+const DOCS_ORIGIN = 'https://cli.cd'
 
-type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-type EndpointTuple = [HttpMethod, string, string]
+type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+type EndpointTuple = [method: HttpMethod, path: string, description: string, access: string]
 
 interface EndpointDoc {
   method: HttpMethod
   path: string
   desc: string
+  access: string
   examplePath: string
   body?: Record<string, unknown>
+  upload?: { file: string; fields?: Record<string, string> }
+  download?: string
   response: unknown
   note?: string
 }
 
 const scopeGroups = [
   {
-    title: '总览与只读',
+    title: '总览与任务',
     scopes: [
       ['dashboard:read', '控制面板'],
       ['host:read', '主机资源'],
       ['routing:read', '路由信息'],
       ['routing:write', '路由配置'],
       ['ipv6:read', 'IPv6 状态'],
-      ['task:read', '任务列表'],
+      ['task:read', '任务列表与详情'],
       ['task:delete', '删除任务'],
       ['image:read', '镜像列表'],
     ],
@@ -87,9 +91,9 @@ const scopeGroups = [
       ['container:read', '查看容器'],
       ['container:create', '创建容器'],
       ['container:power', '开关机/重启'],
-      ['container:reinstall', '重装系统'],
+      ['container:reinstall', '重装系统与安装介质'],
       ['container:delete', '删除容器'],
-      ['container:resize', '资源/到期'],
+      ['container:resize', '资源、到期与磁盘'],
       ['container:traffic', '流量管理'],
       ['container:network', '网络与端口映射'],
       ['container:password', '重置密码'],
@@ -111,7 +115,7 @@ const scopeGroups = [
   {
     title: '平台管理',
     scopes: [
-      ['image:download', '下载镜像'],
+      ['image:download', '下载或上传镜像'],
       ['image:delete', '删除镜像'],
       ['image:toggle', '启停镜像'],
       ['swap:read', 'Swap 信息'],
@@ -125,7 +129,7 @@ const scopeGroups = [
       ['apikey:create', '创建 Key'],
       ['apikey:update', '更新 Key'],
       ['apikey:delete', '删除 Key'],
-      ['admin:access', '管理员接口'],
+      ['admin:access', '主机设置、备份与模板'],
     ],
   },
 ]
@@ -145,112 +149,151 @@ const endpointGroups: Array<{ title: string; endpoints: EndpointTuple[] }> = [
   {
     title: '总览',
     endpoints: [
-      ['GET', '/api/v1/dashboard', '控制面板统计'],
-      ['GET', '/api/v1/host-info', '主机资源'],
-      ['GET', '/api/v1/host-history', '宿主机历史指标（后台每 30 秒采集）'],
-      ['GET', '/api/v1/host-report', '宿主机硬件、网络与运行环境探测报告'],
-      ['GET', '/api/v1/routing', 'NAT/IPv4/IPv6 路由'],
-      ['PUT', '/api/v1/routing', '更新公网 IPv4/IPv6 池'],
-      ['POST', '/api/v1/routing/ipv4-scan', '扫描公网 IPv4 段'],
-      ['GET', '/api/v1/ipv6/status', 'IPv6 状态'],
-      ['GET', '/api/v1/tasks', '任务队列'],
-      ['DELETE', '/api/v1/tasks/{task_id}', '删除任务'],
+      ['GET', '/api/v1/dashboard', '控制面板统计', 'dashboard:read'],
+      ['GET', '/api/v1/version', '服务版本', '公开'],
+      ['GET', '/api/v1/host-info', '主机资源', 'host:read'],
+      ['GET', '/api/v1/host-history', '宿主机历史指标（后台每 30 秒采集）', 'host:read'],
+      ['GET', '/api/v1/host-report', '宿主机硬件、网络与运行环境探测报告', 'host:read'],
+      ['GET', '/api/v1/routing', 'NAT/IPv4/IPv6 路由', 'routing:read / routing:write'],
+      ['PUT', '/api/v1/routing', '更新公网 IPv4/IPv6 池', 'routing:write'],
+      ['POST', '/api/v1/routing/ipv4-scan', '扫描公网 IPv4 段', 'routing:write'],
+      ['GET', '/api/v1/ipv6/status', 'IPv6 状态', 'ipv6:read'],
+      ['GET', '/api/v1/tasks', '任务队列', 'task:read'],
+      ['GET', '/api/v1/tasks/{task_id}', '任务详情', 'task:read'],
+      ['DELETE', '/api/v1/tasks/{task_id}', '删除任务', 'task:delete'],
     ],
   },
   {
     title: '容器',
     endpoints: [
-      ['GET', '/api/v1/containers', '容器列表'],
-      ['POST', '/api/v1/containers/list', '容器列表（兼容 POST 写法）'],
-      ['POST', '/api/v1/containers', '创建容器'],
-      ['GET', '/api/v1/containers/{id|uuid|name}', '容器详情'],
-      ['POST', '/api/v1/containers/{id}/start', '开机'],
-      ['POST', '/api/v1/containers/{id}/stop', '关机'],
-      ['POST', '/api/v1/containers/{id}/restart', '重启'],
-      ['POST', '/api/v1/containers/{id}/reinstall', '重装'],
-      ['DELETE', '/api/v1/containers/{id}/delete', '删除'],
-      ['GET', '/api/v1/containers/{id}/usage', '资源用量'],
-      ['GET', '/api/v1/containers/{id}/history', '容器历史指标（后台每 30 秒采集）'],
-      ['GET', '/api/v1/containers/{id}/traffic', '流量统计'],
-      ['POST', '/api/v1/containers/{id}/traffic-reset', '重置流量'],
-      ['PUT', '/api/v1/containers/{id}/traffic-limit', '调整流量限制'],
-      ['PUT', '/api/v1/containers/{id}/resource-limit', '调整资源限制'],
-      ['PUT', '/api/v1/containers/{id}/expiry', '调整到期时间'],
-      ['POST', '/api/v1/containers/{id}/reset-password', '重置 SSH 密码'],
-      ['POST', '/api/v1/containers/{id}/ipv6', '分配 IPv6'],
-      ['PUT', '/api/v1/containers/{id}/public-ipv4', '更新独立公网 IPv4 地址'],
-      ['PUT', '/api/v1/containers/{id}/ipv6-addresses', '更新独立 IPv6 地址'],
+      ['GET', '/api/v1/containers', '容器列表', 'container:read'],
+      ['POST', '/api/v1/containers/list', '容器列表（兼容 POST 写法）', 'container:read'],
+      ['POST', '/api/v1/containers', '创建容器', 'container:create'],
+      ['GET', '/api/v1/containers/{id|uuid|name}', '容器详情', 'container:read'],
+      ['POST', '/api/v1/containers/{id}/start', '开机', 'container:power'],
+      ['POST', '/api/v1/containers/{id}/stop', '关机', 'container:power'],
+      ['POST', '/api/v1/containers/{id}/restart', '重启', 'container:power'],
+      ['POST', '/api/v1/containers/{id}/reinstall', '重装', 'container:reinstall'],
+      ['DELETE', '/api/v1/containers/{id}/delete', '删除', 'container:delete'],
+      ['GET', '/api/v1/containers/{id}/usage', '资源用量', 'container:read'],
+      ['GET', '/api/v1/containers/{id}/history', '容器历史指标（后台每 30 秒采集）', 'container:read'],
+      ['GET', '/api/v1/containers/{id}/traffic', '流量统计', 'container:read'],
+      ['POST', '/api/v1/containers/{id}/traffic-reset', '重置流量', 'container:traffic'],
+      ['PUT', '/api/v1/containers/{id}/traffic-limit', '调整流量限制', 'container:traffic'],
+      ['PUT', '/api/v1/containers/{id}/resource-limit', '调整资源限制', 'container:resize'],
+      ['PUT', '/api/v1/containers/{id}/expiry', '调整到期时间', 'container:resize'],
+      ['POST', '/api/v1/containers/{id}/reset-password', '重置 SSH 密码', 'container:password'],
+      ['POST', '/api/v1/containers/{id}/ipv6', '分配 IPv6', 'ipv6:assign'],
+      ['PUT', '/api/v1/containers/{id}/public-ipv4', '更新独立公网 IPv4 地址', 'container:network'],
+      ['PUT', '/api/v1/containers/{id}/ipv6-addresses', '更新独立 IPv6 地址', 'ipv6:assign'],
+      ['GET', '/api/v1/containers/{id}/installation-media', '查询 KVM 安装介质', 'container:read'],
+      ['PUT', '/api/v1/containers/{id}/installation-media', '挂载或卸载 KVM 安装介质', 'container:reinstall'],
+    ],
+  },
+  {
+    title: '磁盘与备份',
+    endpoints: [
+      ['GET', '/api/v1/containers/{id}/disks', '磁盘清单', 'container:read'],
+      ['POST', '/api/v1/containers/{id}/disks', '添加数据盘', 'container:resize'],
+      ['PUT', '/api/v1/containers/{id}/disks/{disk_id}', '扩容系统盘或数据盘', 'container:resize'],
+      ['PUT', '/api/v1/containers/{id}/disks/{disk_id}/attachment', '挂载或卸载数据盘', 'container:resize'],
+      ['DELETE', '/api/v1/containers/{id}/disks/{disk_id}', '删除数据盘', 'container:resize'],
+      ['POST', '/api/v1/containers/{id}/backup', '完整备份', 'admin:access'],
+      ['POST', '/api/v1/containers/{id}/clone', '完整克隆', 'admin:access'],
+      ['POST', '/api/v1/containers/{id}/template', '保存实例模板', 'admin:access'],
+      ['GET', '/api/v1/backups', '备份列表', 'admin:access'],
+      ['POST', '/api/v1/backups', '导入备份', 'admin:access'],
+      ['GET', '/api/v1/backups/{backup_id}', '下载备份', 'admin:access'],
+      ['HEAD', '/api/v1/backups/{backup_id}', '检查备份下载元数据', 'admin:access'],
+      ['DELETE', '/api/v1/backups/{backup_id}', '删除备份', 'admin:access'],
+      ['POST', '/api/v1/backups/{backup_id}/restore', '恢复为新实例', 'admin:access'],
+      ['POST', '/api/v1/backups/{backup_id}/download-ticket', '创建备份下载票据', 'admin:access'],
+      ['GET', '/api/v1/backup-download/{ticket}', '使用票据下载备份', '下载票据'],
+      ['HEAD', '/api/v1/backup-download/{ticket}', '使用票据检查备份下载元数据', '下载票据'],
+      ['GET', '/api/v1/instance-templates', '实例模板列表', 'admin:access'],
+      ['POST', '/api/v1/instance-templates/{template_id}/instantiate', '从模板创建实例', 'admin:access'],
+      ['DELETE', '/api/v1/instance-templates/{template_id}', '删除实例模板', 'admin:access'],
     ],
   },
   {
     title: '端口与快照',
     endpoints: [
-      ['GET', '/api/v1/containers/{id}/random-port', '随机可用端口'],
-      ['POST', '/api/v1/containers/{id}/port-mappings', '添加端口映射'],
-      ['PUT', '/api/v1/containers/{id}/port-mappings/{index}', '更新端口映射'],
-      ['DELETE', '/api/v1/containers/{id}/port-mappings/{index}', '删除端口映射'],
-      ['GET', '/api/v1/containers/{id}/firewall', '获取防火墙设置'],
-      ['PUT', '/api/v1/containers/{id}/firewall', '更新防火墙设置'],
-      ['GET', '/api/v1/snapshots', '快照总览'],
-      ['GET', '/api/v1/containers/{id}/snapshots', '容器快照'],
-      ['POST', '/api/v1/containers/{id}/snapshots', '创建快照'],
-      ['DELETE', '/api/v1/containers/{id}/snapshots/{snapshot_id}', '删除快照'],
-      ['POST', '/api/v1/containers/{id}/snapshots/{snapshot_id}/restore', '恢复快照'],
-      ['POST', '/api/v1/containers/{id}/snapshots/schedule', '计划快照'],
-      ['PUT', '/api/v1/containers/{id}/snapshots/quota', '快照配额'],
+      ['GET', '/api/v1/containers/{id}/random-port', '随机可用端口', 'container:network'],
+      ['GET', '/api/v1/containers/{id}/port-mappings', '查询 IPv4 端口映射', 'container:read'],
+      ['POST', '/api/v1/containers/{id}/port-mappings', '添加端口映射', 'container:network'],
+      ['PUT', '/api/v1/containers/{id}/port-mappings/{index}', '更新端口映射', 'container:network'],
+      ['DELETE', '/api/v1/containers/{id}/port-mappings/{index}', '删除端口映射', 'container:network'],
+      ['GET', '/api/v1/containers/{id}/ipv6-port-mappings', '查询 IPv6 NAT 端口映射', 'container:network'],
+      ['POST', '/api/v1/containers/{id}/ipv6-port-mappings', '添加 IPv6 NAT 端口映射', 'container:network'],
+      ['PUT', '/api/v1/containers/{id}/ipv6-port-mappings/{index}', '更新 IPv6 NAT 端口映射', 'container:network'],
+      ['DELETE', '/api/v1/containers/{id}/ipv6-port-mappings/{index}', '删除 IPv6 NAT 端口映射', 'container:network'],
+      ['PUT', '/api/v1/containers/{id}/ipv6-nat-sync', '设置 IPv6 NAT 同步 IPv4 映射', 'container:network'],
+      ['GET', '/api/v1/containers/{id}/firewall', '获取防火墙设置', 'container:network'],
+      ['PUT', '/api/v1/containers/{id}/firewall', '更新防火墙设置', 'container:network'],
+      ['GET', '/api/v1/snapshots', '快照总览', 'snapshot:read'],
+      ['GET', '/api/v1/containers/{id}/snapshots', '容器快照', 'snapshot:read'],
+      ['POST', '/api/v1/containers/{id}/snapshots', '创建快照', 'snapshot:create'],
+      ['DELETE', '/api/v1/containers/{id}/snapshots/{snapshot_id}', '删除快照', 'snapshot:delete'],
+      ['POST', '/api/v1/containers/{id}/snapshots/{snapshot_id}/restore', '恢复快照', 'snapshot:restore'],
+      ['POST', '/api/v1/containers/{id}/snapshots/schedule', '计划快照', 'snapshot:schedule'],
+      ['PUT', '/api/v1/containers/{id}/snapshots/quota', '快照配额', 'snapshot:schedule'],
     ],
   },
   {
     title: '平台管理',
     endpoints: [
-      ['GET', '/api/v1/templates', '模板列表'],
-      ['GET', '/api/v1/images', '镜像管理列表'],
-      ['GET', '/api/v1/images/enabled?type=lxc&container={id}', '可用于创建或重装的已启用镜像'],
-      ['POST', '/api/v1/images/custom', '添加第三方 LXC/KVM 镜像源'],
-      ['DELETE', '/api/v1/images/custom', '移除第三方 LXC/KVM 镜像源'],
-      ['POST', '/api/v1/images/download', '下载镜像'],
-      ['POST', '/api/v1/images/cancel', '取消镜像下载'],
-      ['DELETE', '/api/v1/images/delete', '删除镜像缓存'],
-      ['PUT', '/api/v1/images/toggle', '启用/禁用镜像'],
-      ['GET', '/api/v1/swap', 'Swap 信息'],
-      ['POST', '/api/v1/swap', '调整 Swap'],
-      ['POST', '/api/v1/batch-create', '批量创建容器'],
-      ['POST', '/api/v1/batch-action', '批量开关机/删除/重装'],
-      ['POST', '/api/v1/ssh-ticket', '创建 WebSSH 票据'],
-      ['POST', '/api/v1/vnc-ticket', '创建 WebVNC 票据'],
+      ['GET', '/api/v1/templates', '模板列表', 'image:read'],
+      ['GET', '/api/v1/images', '镜像管理列表', 'image:read'],
+      ['GET', '/api/v1/images/enabled?type=lxc&container={id}', '可用于创建或重装的已启用镜像', 'image:read'],
+      ['POST', '/api/v1/images/custom', '添加第三方 LXC/KVM 镜像源', 'admin:access + image:download'],
+      ['DELETE', '/api/v1/images/custom', '移除第三方 LXC/KVM 镜像源', 'admin:access + image:delete'],
+      ['POST', '/api/v1/images/download', '下载镜像', 'admin:access + image:download'],
+      ['POST', '/api/v1/images/cancel', '取消镜像下载', 'admin:access + image:download'],
+      ['DELETE', '/api/v1/images/delete', '删除镜像缓存', 'admin:access + image:delete'],
+      ['PUT', '/api/v1/images/toggle', '启用/禁用镜像', 'admin:access + image:toggle'],
+      ['POST', '/api/v1/images/upload', '上传本地 KVM 镜像', 'admin:access + image:download + image:toggle'],
+      ['GET', '/api/v1/swap', 'Swap 信息', 'swap:read'],
+      ['POST', '/api/v1/swap', '调整 Swap', 'swap:manage'],
+      ['POST', '/api/v1/batch-create', '批量创建容器', 'container:create'],
+      ['POST', '/api/v1/batch-action', '批量开关机/删除/重装', 'container:power / container:delete / container:reinstall'],
+      ['POST', '/api/v1/ssh-ticket', '创建 WebSSH 票据', 'terminal:ssh'],
+      ['POST', '/api/v1/vnc-ticket', '创建 WebVNC 票据', 'terminal:vnc'],
     ],
   },
   {
     title: '主机与设置',
     endpoints: [
-      ['GET', '/api/v1/storage', '已挂载磁盘、存储池和空间占用'],
-      ['PUT', '/api/v1/storage', '更新各磁盘的存储用途和默认盘'],
-      ['GET', '/api/v1/task-queue/settings', '任务队列并发状态'],
-      ['PUT', '/api/v1/task-queue/settings', '调整任务并发数量'],
-      ['GET', '/api/v1/ssl', 'SSL 配置和证书状态'],
-      ['PUT', '/api/v1/ssl', '更新 SSL 配置'],
-      ['GET', '/api/v1/webssh-origins', 'WebSSH/VNC Origin 白名单'],
-      ['PUT', '/api/v1/webssh-origins', '更新 WebSSH/VNC Origin 白名单'],
-      ['GET', '/api/v1/access-policy', '面板访问来源策略'],
-      ['PUT', '/api/v1/access-policy', '更新面板访问来源策略'],
-      ['GET', '/api/v1/language', '面板语言'],
-      ['PUT', '/api/v1/language', '更新面板语言'],
+      ['GET', '/api/v1/storage', '已挂载磁盘、存储池和空间占用', 'admin:access'],
+      ['PUT', '/api/v1/storage', '更新各磁盘的存储用途和默认盘', 'admin:access'],
+      ['GET', '/api/v1/ipv6/nat', '查询 LXC IPv6 NAT 设置', 'admin:access + ipv6:read'],
+      ['PUT', '/api/v1/ipv6/nat', '更新 LXC IPv6 NAT 设置', 'admin:access + routing:write'],
+      ['GET', '/api/v1/task-queue/settings', '任务队列并发状态', 'admin:access'],
+      ['PUT', '/api/v1/task-queue/settings', '调整任务并发数量', 'admin:access'],
+      ['GET', '/api/v1/ssl', 'SSL 配置和证书状态', 'admin:access'],
+      ['PUT', '/api/v1/ssl', '更新 SSL 配置', 'admin:access'],
+      ['GET', '/api/v1/webssh-origins', 'WebSSH/VNC Origin 白名单', 'admin:access'],
+      ['PUT', '/api/v1/webssh-origins', '更新 WebSSH/VNC Origin 白名单', 'admin:access'],
+      ['GET', '/api/v1/access-policy', '面板访问来源策略', 'admin:access'],
+      ['PUT', '/api/v1/access-policy', '更新面板访问来源策略', 'admin:access'],
+      ['GET', '/api/v1/language', '面板语言', '公开'],
+      ['PUT', '/api/v1/language', '更新面板语言', 'admin:access'],
     ],
   },
   {
     title: '账号与日志',
     endpoints: [
-      ['POST', '/api/v1/sub-user/create', '创建子用户链接'],
-      ['GET', '/api/v1/sub-users', '子用户列表'],
-      ['POST', '/api/v1/sub-users/{id}/rotate-password', '轮换子用户密码'],
-      ['GET', '/api/v1/sub-users/{id}/audit-logs', '子用户操作日志'],
-      ['GET', '/api/v1/sub-users/{id}/login-logs', '子用户登录日志'],
-      ['GET', '/api/v1/audit-logs', '操作日志'],
-      ['GET', '/api/v1/login-logs', '登录日志'],
-      ['GET', '/api/v1/api-keys', 'API Key 列表'],
-      ['POST', '/api/v1/api-keys', '创建 API Key'],
-      ['PATCH', '/api/v1/api-keys/{id}', '更新 API Key'],
-      ['DELETE', '/api/v1/api-keys/{id}', '删除 API Key'],
+      ['POST', '/api/v1/sub-user/create', '创建子用户链接', 'subuser:create'],
+      ['GET', '/api/v1/sub-users', '子用户列表', 'subuser:read'],
+      ['POST', '/api/v1/sub-users/{id}/rotate-password', '轮换子用户密码', 'subuser:update'],
+      ['PUT', '/api/v1/sub-users/{id}/images', '更新子用户镜像权限', 'subuser:update'],
+      ['GET', '/api/v1/sub-users/{id}/audit-logs', '子用户操作日志', 'audit:read'],
+      ['GET', '/api/v1/sub-users/{id}/login-logs', '子用户登录日志', 'loginlog:read'],
+      ['GET', '/api/v1/audit-logs', '操作日志', 'audit:read'],
+      ['GET', '/api/v1/login-logs', '登录日志', 'loginlog:read'],
+      ['GET', '/api/v1/api-keys', 'API Key 列表', 'apikey:read'],
+      ['POST', '/api/v1/api-keys', '创建 API Key', 'apikey:create'],
+      ['PATCH', '/api/v1/api-keys/{id}', '更新 API Key', 'apikey:update'],
+      ['DELETE', '/api/v1/api-keys/{id}', '删除 API Key', 'apikey:delete'],
     ],
   },
 ]
@@ -266,7 +309,7 @@ const emptyForm = (): ApiKeyForm => ({
 
 export default function ApiIntegration() {
   const dialog = useDialog()
-  const { t } = useLanguage()
+  const { language, t } = useLanguage()
   const [keys, setKeys] = useState<ApiKeyItem[]>([])
   const [containers, setContainers] = useState<Container[]>([])
   const [loading, setLoading] = useState(true)
@@ -537,18 +580,29 @@ export default function ApiIntegration() {
               <div>curl -X GET {BASE_URL}/api/v1/containers -H "X-API-Key: clicd_sk_xxxx"</div>
               <div className="mt-2 text-muted-foreground">curl -X GET {BASE_URL}/api/v1/dashboard -H "Authorization: Bearer clicd_sk_xxxx"</div>
             </div>
+            <a
+              className="inline-flex text-sm font-medium underline underline-offset-4"
+              href={`${DOCS_ORIGIN}${language === 'en' ? '/en' : ''}/features/api`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {t('在线 API 文档')}
+            </a>
 
             {endpointGroups.map(group => (
               <section key={group.title}>
                 <h3 className="mb-2 text-sm font-semibold text-foreground">{group.title}</h3>
                 <div className="overflow-hidden rounded-lg border border-border">
-                  {group.endpoints.map(([method, path, desc]) => (
+                  {group.endpoints.map(([method, path, desc, access]) => (
                     <div key={`${method}-${path}`} className="grid gap-2 border-b border-border px-3 py-2 text-xs last:border-b-0 md:grid-cols-[72px_minmax(220px,1fr)_180px_72px]">
                       <Badge variant="outline" className="w-fit px-1.5 py-0.5 font-mono font-bold">{method}</Badge>
                       <code className="min-w-0 break-all font-mono text-foreground">{path}</code>
-                      <span className="text-muted-foreground">{desc}</span>
+                      <div className="min-w-0 space-y-1 text-muted-foreground">
+                        <div>{t(desc)}</div>
+                        <code className="block break-words text-[11px]">{t(access)}</code>
+                      </div>
                       <Button variant="outline"
-                        onClick={() => setSelectedEndpoint(buildEndpointDoc(method, path, desc))}
+                        onClick={() => setSelectedEndpoint(buildEndpointDoc(method, path, desc, access))}
                         className="h-auto inline-flex w-fit items-center justify-center gap-1 px-2 py-1"
                         title="查看使用范例"
                       >
@@ -565,7 +619,7 @@ export default function ApiIntegration() {
       </Card>
 
       {selectedEndpoint && (
-        <Modal size="5xl" onClose={() => setSelectedEndpoint(null)} title={<span className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="px-1.5 py-0.5 font-mono text-xs">{selectedEndpoint.method}</Badge><code className="min-w-0 break-all font-mono text-sm">{selectedEndpoint.path}</code></span>} description={selectedEndpoint.desc} flush>
+        <Modal size="5xl" onClose={() => setSelectedEndpoint(null)} title={<span className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="px-1.5 py-0.5 font-mono text-xs">{selectedEndpoint.method}</Badge><code className="min-w-0 break-all font-mono text-sm">{selectedEndpoint.path}</code></span>} description={<>{t(selectedEndpoint.desc)} · <code>{t(selectedEndpoint.access)}</code></>} flush>
 <div className="min-h-0 flex-1 overflow-y-auto p-5">
               <div className="grid gap-4 lg:grid-cols-2">
                 <section className="min-w-0">
@@ -590,7 +644,7 @@ export default function ApiIntegration() {
                     <div className="mb-2 rounded border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">{selectedEndpoint.note}</div>
                   )}
                   <pre className="max-h-[52vh] overflow-auto rounded-lg bg-background p-4 text-xs text-muted-foreground">
-                    <code>{formatJSON(selectedEndpoint.response)}</code>
+                    <code>{typeof selectedEndpoint.response === 'string' ? selectedEndpoint.response : formatJSON(selectedEndpoint.response)}</code>
                   </pre>
                 </section>
               </div>
@@ -687,6 +741,7 @@ export default function ApiIntegration() {
                       {form.scopes.includes('*') ? '取消全权限' : '全权限'}
                     </Button>
                   </div>
+                  <p className="mb-3 text-xs leading-relaxed text-muted-foreground">{t('以接口标注的权限为准。上传镜像还需要 image:toggle 和 admin:access；绑定容器的 Key 无法执行磁盘变更和备份操作。')}</p>
                   <div className="space-y-4">
                     {scopeGroups.map(group => (
                       <div key={group.title}>
@@ -718,6 +773,21 @@ export default function ApiIntegration() {
 }
 
 const requestBodySamples: Record<string, Record<string, unknown>> = {
+  'PUT /api/v1/containers/{id}/installation-media': { image_id: 'custom-kvm-a1b2c3d4e5', boot: 'cdrom' },
+  'POST /api/v1/containers/{id}/disks': { name: 'Data', size_gb: 20, storage_pool_id: 'disk-root' },
+  'PUT /api/v1/containers/{id}/disks/{disk_id}': { size_gb: 40 },
+  'PUT /api/v1/containers/{id}/disks/{disk_id}/attachment': { attached: true },
+  'DELETE /api/v1/containers/{id}/disks/{disk_id}': { delete_data: true },
+  'POST /api/v1/containers/{id}/backup': { name: 'Before maintenance' },
+  'POST /api/v1/containers/{id}/clone': { name: 'vm-copy', assign_nat: true, port_mapping_count: 2 },
+  'POST /api/v1/containers/{id}/template': { name: 'Base image' },
+  'POST /api/v1/backups/{backup_id}/restore': { name: 'vm-restored', assign_nat: true, port_mapping_count: 2 },
+  'POST /api/v1/instance-templates/{template_id}/instantiate': { name: 'vm-from-template', assign_nat: true, port_mapping_count: 2 },
+  'POST /api/v1/containers/{id}/ipv6-port-mappings': { host_port: 30053, container_port: 53, protocol: 'udp', description: 'DNS' },
+  'PUT /api/v1/containers/{id}/ipv6-port-mappings/{index}': { host_port: 30053, container_port: 5353, protocol: 'udp', description: 'DNS' },
+  'PUT /api/v1/containers/{id}/ipv6-nat-sync': { enabled: false },
+  'PUT /api/v1/ipv6/nat': { enabled: true, subnet: 'fd42:636c:6963::/64', interface: 'eth0' },
+  'PUT /api/v1/sub-users/{id}/images': { allowed_image_ids: ['debian-bookworm'] },
   'POST /api/v1/containers/list': {},
   'POST /api/v1/containers': {
     name: 'demo-lxc-01',
@@ -963,7 +1033,63 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
   },
 }
 
+const backupID = 'bk-0123456789abcdef0123456789abcdef'
+const backupSample = {
+  id: backupID, name: 'Before maintenance', kind: 'backup', runtime: 'kvm', arch: 'amd64',
+  created_at: '2026-11-07T06:30:00Z', source_name: 'example-vm', size_bytes: 134217728,
+  disk_count: 2, format_version: 1, sha256: '<SHA-256>', credentials_preserved: true, cold_copy: true,
+}
+const templateID = 'tpl-0123456789abcdef0123456789abcdef'
+const ipv6MappingSample = { host_port: 30053, container_port: 53, protocol: 'udp', description: 'DNS' }
+const ipv6MappingStateSample = { enabled: true, sync_ipv4: false, host_ipv6: '2001:db8::2', guest_ipv6: 'fd42:636c:6963::10', limit: 2, mappings: [ipv6MappingSample] }
+const ipv6NATSample = { settings: { enabled: true, subnet: 'fd42:636c:6963::/64', interface: 'eth0' }, available: true, reason: '', bridge: 'lxcbr0', gateway: 'fd42:636c:6963::1', host_address: '2001:db8::2', interface: 'eth0' }
+const installationMediaSample = {
+  supported: true, image_id: 'custom-kvm-a1b2c3d4e5', image_name: 'Debian Installer', boot: 'cdrom',
+  manual_install: true, running: false,
+  available: [{ id: 'custom-kvm-a1b2c3d4e5', name: 'Debian Installer', distro: 'debian', release: '12', arch: 'amd64', provisioner: 'manual-iso', format: 'iso' }],
+}
+const diskQueuedSample = { success: true, message: 'Disk operation queued', data: { task_id: 'task-10', status: 'pending' } }
+const transferQueuedSample = { success: true, data: { task_id: 'task-10' } }
+
 const responseSamples: Record<string, unknown> = {
+  'GET /api/v1/version': { success: true, data: { version: '1.1.38' } },
+  'GET /api/v1/tasks/{task_id}': { success: true, data: {
+    id: 'task-10', type: 'backup', container_id: 5, container_name: 'example-vm', status: 'done',
+    created_at: '2026-11-07 06:29:00', stage: 'completed', finished_at: '2026-11-07T06:30:00Z',
+    logs: [{ time: '2026-11-07T06:29:00Z', stage: 'queued', detail: 'Queued' }],
+    result: { artifact_id: backupID, artifact: backupSample },
+  } },
+  'GET /api/v1/containers/{id}/installation-media': { success: true, data: installationMediaSample },
+  'PUT /api/v1/containers/{id}/installation-media': { success: true, message: 'Installation media updated', data: installationMediaSample },
+  'GET /api/v1/containers/{id}/disks': { success: true, data: {
+    system: { id: 'system', name: 'System', size_gb: 20, allocated_bytes: 1073741824, format: 'qcow2', target: 'vda', storage_pool_id: 'disk-root', attached: true, can_resize: true },
+    data_disks: [], can_edit: true, limits: { max_data_disks: 8 },
+  } },
+  'POST /api/v1/containers/{id}/disks': diskQueuedSample,
+  'PUT /api/v1/containers/{id}/disks/{disk_id}': diskQueuedSample,
+  'PUT /api/v1/containers/{id}/disks/{disk_id}/attachment': diskQueuedSample,
+  'DELETE /api/v1/containers/{id}/disks/{disk_id}': diskQueuedSample,
+  'POST /api/v1/containers/{id}/backup': transferQueuedSample,
+  'POST /api/v1/containers/{id}/clone': transferQueuedSample,
+  'POST /api/v1/containers/{id}/template': transferQueuedSample,
+  'GET /api/v1/backups': { success: true, data: [backupSample] },
+  'POST /api/v1/backups': { success: true, data: backupSample },
+  'DELETE /api/v1/backups/{backup_id}': { success: true },
+  'POST /api/v1/backups/{backup_id}/restore': transferQueuedSample,
+  'POST /api/v1/backups/{backup_id}/download-ticket': { success: true, data: { url: '/api/v1/backup-download/<ticket>', expires_at: '2026-11-07T06:32:00Z' } },
+  'GET /api/v1/instance-templates': { success: true, data: [{ ...backupSample, id: templateID, kind: 'template', name: 'Base image' }] },
+  'POST /api/v1/instance-templates/{template_id}/instantiate': transferQueuedSample,
+  'DELETE /api/v1/instance-templates/{template_id}': { success: true },
+  'GET /api/v1/containers/{id}/port-mappings': { success: true, data: [{ container_port: 22, host_port: 22004, protocol: 'tcp', description: 'SSH' }] },
+  'GET /api/v1/containers/{id}/ipv6-port-mappings': { success: true, data: ipv6MappingStateSample },
+  'POST /api/v1/containers/{id}/ipv6-port-mappings': { success: true, data: [ipv6MappingSample] },
+  'PUT /api/v1/containers/{id}/ipv6-port-mappings/{index}': { success: true, data: [{ ...ipv6MappingSample, container_port: 5353 }] },
+  'DELETE /api/v1/containers/{id}/ipv6-port-mappings/{index}': { success: true, data: [] },
+  'PUT /api/v1/containers/{id}/ipv6-nat-sync': { success: true, data: ipv6MappingStateSample },
+  'GET /api/v1/ipv6/nat': { success: true, data: ipv6NATSample },
+  'PUT /api/v1/ipv6/nat': { success: true, data: ipv6NATSample },
+  'POST /api/v1/images/upload': { success: true, data: { id: 'custom-kvm-a1b2c3d4e5', name: 'Debian Installer', format: 'iso', size_bytes: 734003200, sha256: '<SHA-256>' } },
+  'PUT /api/v1/sub-users/{id}/images': { success: true, data: { id: 'a1b2c3d4', username: 'user-xxxxxxxx', allowed_image_ids: ['debian-bookworm'], image_limit_configured: true } },
   'GET /api/v1/dashboard': { success: true, data: { running: 31, stopped: 0, total_containers: 31 } },
   'GET /api/v1/host-info': {
     success: true,
@@ -1329,27 +1455,43 @@ function queuedTaskSample(action: string) {
   }
 }
 
-function buildEndpointDoc(method: HttpMethod, path: string, desc: string): EndpointDoc {
+function buildEndpointDoc(method: HttpMethod, path: string, desc: string, access: string): EndpointDoc {
   const key = `${method} ${path}`
+  const isBackupFile = path.endsWith('/backups/{backup_id}') || path.endsWith('/backup-download/{ticket}')
+  const download = isBackupFile && method === 'GET' ? 'backup.clicd.tar.gz' : undefined
+  const upload = key === 'POST /api/v1/backups'
+    ? { file: 'backup.clicd.tar.gz' }
+    : key === 'POST /api/v1/images/upload'
+      ? { file: 'debian.iso', fields: { name: 'Debian Installer', provisioner: 'manual-iso' } }
+      : undefined
   return {
     method,
     path,
     desc,
-    examplePath: examplePathFor(path),
+    access,
+    examplePath: examplePathFor(method, path),
     body: requestBodySamples[key],
-    response: responseSamples[key] || defaultResponseFor(method),
+    upload,
+    download,
+    response: isBackupFile && (method === 'GET' || method === 'HEAD')
+      ? 'Content-Type: application/gzip\nContent-Disposition: attachment\nAccept-Ranges: bytes'
+      : responseSamples[key] || defaultResponseFor(method),
     note: endpointNoteFor(key),
   }
 }
 
-function examplePathFor(path: string) {
+function examplePathFor(method: HttpMethod, path: string) {
   return path
     .replace('{id|uuid|name}', '5')
-    .replace('{id}', '5')
+    .replace('{id}', /\/(api-keys|sub-users)\//.test(path) ? 'a1b2c3d4' : '5')
     .replace('{task_id}', 'task-10')
     .replace('{index}', '1')
     .replace('{snapshot_id}', 'snap-20260608-001')
     .replace('{name}', 'example-vm')
+    .replace('{disk_id}', method === 'PUT' && path.endsWith('/{disk_id}') ? 'system' : 'disk-00000000-0000-4000-8000-000000000001')
+    .replace('{backup_id}', backupID)
+    .replace('{template_id}', templateID)
+    .replace('{ticket}', '<ticket>')
 }
 
 function endpointNoteFor(key: string) {
@@ -1375,6 +1517,27 @@ function endpointNoteFor(key: string) {
   if (key === 'PUT /api/v1/containers/{id}/firewall') {
     notes.push('Backward compatible: default_action is optional; if omitted, the existing policy is kept. rule.network is optional; if omitted, it is treated as ipv4. default_action: DROP=deny unmatched traffic, ACCEPT=allow unmatched traffic. network: ipv4=IPv4 NAT/public IPv4, ipv6=IPv6, all=apply to both IPv4 and IPv6. For NAT inbound rules, port is the container internal port, not the host public port.')
   }
+  if (key.includes('/port-mappings') || key.includes('/ipv6-port-mappings')) {
+    notes.push('Port mappings accept tcp and udp. The mapping index starts at 0.')
+  }
+  if (key.includes('/ipv6-port-mappings') || key.includes('/ipv6-nat-sync')) {
+    notes.push('IPv6 NAT requires an eligible LXC container. Disable IPv4 synchronization before changing its separate IPv6 mappings.')
+  }
+  if (key.includes('/installation-media')) {
+    notes.push('KVM only. Stop the VM before changing installation media. To eject the ISO, use image_id="" and boot="disk".')
+  }
+  if (key.includes('/disks') && !key.startsWith('GET ')) {
+    notes.push('Returns HTTP 202. Poll GET /api/v1/tasks/{task_id} to confirm completion. Disk changes require an API key without container binding. Only growth is supported; use disk ID "system" for the system disk.')
+  }
+  if (key.startsWith('POST ') && ['/backup', '/clone', '/template', '/restore', '/instantiate'].some(suffix => key.endsWith(suffix)) && !key.includes('/snapshots/')) {
+    notes.push('Returns HTTP 202 with data.task_id. Poll GET /api/v1/tasks/{task_id}. A full copy may stop and then restart the source instance.')
+  }
+  if (key.includes('/backups') || key.includes('/instance-templates') || key.endsWith('/backup') || key.endsWith('/clone') || key.endsWith('/template')) {
+    notes.push('Requires a key without container binding. Backup archives may contain guest credentials and data.')
+  }
+  if (key === 'POST /api/v1/backups') notes.push('Send a CLICD backup archive as a binary body or multipart/form-data with the file field. Use the optional storage_pool_id query parameter to choose a pool. Returns HTTP 201 after verification.')
+  if (key.includes('/backup-download/') || key.endsWith('/download-ticket')) notes.push('The ticket expires after two minutes. Download using the returned data.url and keep the ticket private.')
+  if (key === 'POST /api/v1/images/upload') notes.push('Upload a complete ISO or standalone QCOW2 file (up to 32 GiB). Use multipart/form-data, optionally pass storage_pool_id in the query, and leave the API key unbound. The server validates and enables the image before returning HTTP 201.')
   if (key === 'POST /api/v1/batch-action') {
     notes.push('When action=reinstall, you can include template_id, ssh_auth_mode, ssh_password, and ssh_public_key. Other actions ignore these reinstall fields.')
   }
@@ -1425,23 +1588,60 @@ function defaultResponseFor(method: HttpMethod) {
 
 function buildPythonExample(doc: EndpointDoc) {
   const hasBody = doc.body !== undefined && doc.method !== 'GET'
-  const bodyJSON = hasBody ? formatJSON(doc.body) : ''
-  return [
-    'import json',
+  const needsKey = doc.access !== '公开' && doc.access !== '下载票据'
+  const header = needsKey ? '{"X-API-Key": API_KEY}' : '{}'
+  const url = `f"{BASE_URL}${doc.examplePath}"`
+  const setup = [
     'import requests',
     '',
     `BASE_URL = "${SAMPLE_BASE_URL}"`,
-    'API_KEY = "clicd_sk_xxxx"',
+    ...(needsKey ? ['API_KEY = "clicd_sk_xxxx"'] : []),
     '',
-    ...(hasBody ? [`payload = json.loads(r'''${bodyJSON}''')`, ''] : []),
+  ]
+  if (doc.upload) {
+    const { file, fields } = doc.upload
+    const multipart = fields !== undefined
+    return [
+      ...setup,
+      ...(multipart ? ['# pip install requests-toolbelt', 'from requests_toolbelt.multipart.encoder import MultipartEncoder', ''] : []),
+      `with open("${file}", "rb") as file:`,
+      ...(multipart
+        ? [
+            `    fields = ${JSON.stringify(fields)}`,
+            `    fields["file"] = ("${file}", file, "application/octet-stream")`,
+            '    upload = MultipartEncoder(fields=fields)',
+            '    content_type = upload.content_type',
+          ]
+        : ['    upload = file', '    content_type = "application/gzip"']),
+      `    response = requests.post(${url}, data=upload,`,
+      '                             headers={"X-API-Key": API_KEY, "Content-Type": content_type},',
+      '                             timeout=(10, 600))',
+      '    response.raise_for_status()',
+      '    print(response.json())',
+    ].join('\n')
+  }
+  if (doc.download) {
+    return [
+      ...setup,
+      `with requests.get(${url}, headers=${header}, stream=True, timeout=(10, 120)) as response:`,
+      '    response.raise_for_status()',
+      `    with open("${doc.download}", "wb") as output:`,
+      '        for chunk in response.iter_content(chunk_size=1024 * 1024):',
+      '            output.write(chunk)',
+    ].join('\n')
+  }
+  return [
+    ...(hasBody ? ['import json'] : []),
+    ...setup,
+    ...(hasBody ? [`payload = json.loads(r'''${formatJSON(doc.body)}''')`, ''] : []),
     `response = requests.${doc.method.toLowerCase()}(`,
-    `    f"{BASE_URL}${doc.examplePath}",`,
-    '    headers={"X-API-Key": API_KEY},',
+    `    ${url},`,
+    ...(needsKey ? [`    headers=${header},`] : []),
     ...(hasBody ? ['    json=payload,'] : []),
     '    timeout=30,',
     ')',
     'response.raise_for_status()',
-    'print(response.json())',
+    doc.method === 'HEAD' ? 'print(response.headers)' : 'print(response.json())',
   ].join('\n')
 }
 

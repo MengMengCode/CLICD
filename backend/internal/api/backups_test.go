@@ -114,6 +114,16 @@ func TestBackupAdminBoundaryAndScopedDownloadTicket(t *testing.T) {
 	if expired.Code != 404 {
 		t.Fatal("expired scoped ticket accepted")
 	}
+	versioned := httptest.NewRecorder()
+	HandleBackups(versioned, withAuthContext(httptest.NewRequest(http.MethodPost, "/api/v1/backups/"+id+"/download-ticket", nil), AuthContext{Type: authTypeAdmin}))
+	if err := json.Unmarshal(versioned.Body.Bytes(), &data); versioned.Code != http.StatusOK || err != nil || !strings.HasPrefix(data.Data.URL, "/api/v1/backup-download/") {
+		t.Fatalf("versioned ticket returned the wrong download URL: %s", versioned.Body.String())
+	}
+	head := httptest.NewRecorder()
+	HandleBackupDownload(head, httptest.NewRequest(http.MethodHead, data.Data.URL, nil))
+	if head.Code != http.StatusOK || head.Body.Len() != 0 || head.Header().Get("Content-Length") != "20" {
+		t.Fatalf("versioned ticket HEAD failed: %d %v", head.Code, head.Header())
+	}
 	for _, path := range []string{"/api/backup-download/../config.db", "/api/backup-download/" + strings.Repeat("b", 64), "/api/backups/../../config.db"} {
 		rec := httptest.NewRecorder()
 		if strings.Contains(path, "backup-download") {

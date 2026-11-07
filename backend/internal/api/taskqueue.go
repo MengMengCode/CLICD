@@ -753,13 +753,7 @@ func (q *TaskQueue) GetTasks() []*Task {
 	result := make([]*Task, 0, len(q.tasks))
 	// Collect all task IDs, sort by creation time (extracted from ID number)
 	for _, t := range q.tasks {
-		copyTask := *t
-		copyTask.Logs = append([]TaskEvent(nil), t.Logs...)
-		copyTask.Result = append(json.RawMessage(nil), t.Result...)
-		if t.Status == "running" && !taskTime(t.StartedAt).IsZero() {
-			copyTask.DurationMS = max(0, time.Since(taskTime(t.StartedAt)).Milliseconds())
-		}
-		result = append(result, &copyTask)
+		result = append(result, snapshotTask(t))
 	}
 	// Stable sort by ID number (task-N where N is sequential)
 	for i := 0; i < len(result); i++ {
@@ -770,6 +764,17 @@ func (q *TaskQueue) GetTasks() []*Task {
 		}
 	}
 	return result
+}
+
+// snapshotTask copies a task while the queue lock is held.
+func snapshotTask(task *Task) *Task {
+	snapshot := *task
+	snapshot.Logs = append([]TaskEvent(nil), task.Logs...)
+	snapshot.Result = append(json.RawMessage(nil), task.Result...)
+	if start := taskTime(task.StartedAt); task.Status == "running" && !start.IsZero() {
+		snapshot.DurationMS = max(0, time.Since(start).Milliseconds())
+	}
+	return &snapshot
 }
 
 // HandleSingleTaskAction creates a task for a single container action
@@ -1104,7 +1109,35 @@ func HandleBatchAction(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusAccepted, APIResponse{Success: true, Data: ids})
 }
 
-// HandleTaskDelete deletes a specific task by ID
+// HandleTask reads or removes a task by its ID.
+func HandleTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		HandleTaskDelete(w, r)
+		return
+	}
+	if !requireScope(w, r, "task:read") {
+		return
+	}
+	id := taskIDFromPath(r.URL.Path)
+	globalQueue.mu.Lock()
+	var snapshot *Task
+	if task := globalQueue.tasks[id]; task != nil {
+		snapshot = snapshotTask(task)
+	}
+	globalQueue.mu.Unlock()
+	if snapshot == nil || !isHistoricalTaskAllowed(r, snapshot) {
+		jsonResponse(w, http.StatusNotFound, APIResponse{Success: false, Message: "Task not found"})
+		return
+	}
+	jsonResponse(w, http.StatusOK, APIResponse{Success: true, Data: snapshot})
+}
+
+func taskIDFromPath(path string) string {
+	path = strings.TrimPrefix(path, "/api/v1/tasks/")
+	return strings.TrimPrefix(path, "/api/tasks/")
+}
+
+// HandleTaskDelete deletes a specific task by ID.
 func HandleTaskDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		jsonResponse(w, http.StatusMethodNotAllowed, APIResponse{Success: false, Message: "Method not allowed"})
@@ -1114,8 +1147,7 @@ func HandleTaskDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// URL: /api/tasks/{id} or /api/v1/tasks/{id}
-	taskID := strings.TrimPrefix(r.URL.Path, "/api/v1/tasks/")
-	taskID = strings.TrimPrefix(taskID, "/api/tasks/")
+	taskID := taskIDFromPath(r.URL.Path)
 	if taskID == "" {
 		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Task ID required"})
 		return
