@@ -86,6 +86,7 @@ import {
   resetTraffic,
   updateTrafficLimit,
   updateResourceLimit,
+  updateContainerName,
   updatePortMapping,
   SubUser,
 } from '../services/api'
@@ -163,6 +164,9 @@ export default function ContainerDetail() {
   const [showSSH, setShowSSH] = useState(false)
   const [showVNC, setShowVNC] = useState(false)
   const [showInstallationMedia, setShowInstallationMedia] = useState(false)
+  const [showRename, setShowRename] = useState(false)
+  const [renameDraft, setRenameDraft] = useState('')
+  const [renaming, setRenaming] = useState(false)
   const [showDisks, setShowDisks] = useState(false)
   const [showTransfer, setShowTransfer] = useState(false)
   const vncFullscreenRef = useRef<HTMLDivElement>(null)
@@ -411,6 +415,31 @@ export default function ContainerDetail() {
       dialog.alert('操作失败', (err as Error).message || '请稍后重试')
     } finally {
       setActionLoading(null)
+    }
+  }
+
+  const openRename = () => {
+    if (!container) return
+    setRenameDraft(container.name)
+    setShowRename(true)
+  }
+
+  const saveRename = async () => {
+    if (!container) return
+    const nextName = renameDraft.trim()
+    if (!/^[A-Za-z0-9_-]{1,63}$/.test(nextName)) {
+      dialog.alert('名称无效', '名称只能包含字母、数字、连字符和下划线，长度不超过 63 个字符')
+      return
+    }
+    setRenaming(true)
+    try {
+      await updateContainerName(container.id, nextName)
+      setShowRename(false)
+      await fetchContainer()
+    } catch (err) {
+      dialog.alert('修改名称失败', (err as Error).message || '请稍后重试')
+    } finally {
+      setRenaming(false)
     }
   }
 
@@ -1120,6 +1149,7 @@ export default function ContainerDetail() {
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="max-w-full truncate text-xl font-semibold tracking-tight text-foreground" title={container.name}>{container.name}</h1>
+                {!isSubUser && <Button variant="ghost" onClick={openRename} className="h-7 w-7 shrink-0 p-0" title="修改名称"><Pencil className="h-3.5 w-3.5" /></Button>}
                 <StatusBadge running={isRunning} initializing={isInitializing} status={container.status} taskLabel={taskStatus ? taskActionLabels[taskStatus] || '处理中' : undefined} />
               </div>
               <div className="flex items-center gap-2 flex-wrap mt-2">
@@ -1517,6 +1547,31 @@ export default function ContainerDetail() {
               >
                 {resetPasswordSaving ? '修改中...' : '确认修改'}
               </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showRename && (
+        <Modal dismissible={!renaming} title="修改实例名称" onClose={() => setShowRename(false)}>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="rename-container" className="mb-1.5 block text-xs text-muted-foreground">新名称</Label>
+              <Input
+                id="rename-container"
+                value={renameDraft}
+                onChange={event => setRenameDraft(event.target.value)}
+                onKeyDown={event => { if (event.key === 'Enter' && !renaming) void saveRename() }}
+                maxLength={63}
+                autoFocus
+                className="h-auto w-full px-3 py-2 text-sm"
+                placeholder="my-container"
+              />
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">只修改面板展示名称，运行时名称、磁盘路径、UUID 和网络配置保持不变。</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowRename(false)} disabled={renaming} className="h-auto px-4 py-2 text-sm">取消</Button>
+              <Button onClick={() => void saveRename()} disabled={renaming || !renameDraft.trim()} className="h-auto px-4 py-2 text-sm">{renaming ? '保存中...' : '保存'}</Button>
             </div>
           </div>
         </Modal>

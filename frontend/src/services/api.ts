@@ -80,6 +80,8 @@ export interface Container {
   uuid: string
   name: string
   virtualization?: string
+  lxc_privileged?: boolean
+  lxc_nesting?: boolean
   storage_pool_id?: string
   storage_path?: string
   template: string
@@ -156,6 +158,8 @@ export interface Template {
 export interface CreateContainerRequest {
   name: string
   virtualization: string
+  privileged?: boolean
+  nesting?: boolean
   template_id: string
   storage_pool_id?: string
   vcpu: number
@@ -583,6 +587,9 @@ export const getContainers = () =>
 
 export const getContainer = (id: ContainerIdentifier) =>
   api.get<APIResponse<Container>>(`/containers/${id}`)
+
+export const updateContainerName = (id: ContainerIdentifier, name: string) =>
+  api.patch<APIResponse<Container>>(`/containers/${id}/name`, { name })
 
 export interface InstallationMediaImage {
   id: string

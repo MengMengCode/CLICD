@@ -231,6 +231,8 @@ func NewManager() *Manager {
 type ContainerConfig struct {
 	Name                 string                     `json:"name"`
 	Virtualization       string                     `json:"virtualization,omitempty"`
+	Privileged           bool                       `json:"privileged,omitempty"`
+	Nesting              bool                       `json:"nesting,omitempty"`
 	TemplateID           string                     `json:"template_id"`
 	StoragePoolID        string                     `json:"storage_pool_id,omitempty"`
 	VCPU                 float64                    `json:"vcpu"`
@@ -699,6 +701,8 @@ func (m *Manager) CreateContainer(cfg ContainerConfig) error {
 		Name:                 cfg.Name,
 		Virtualization:       config.VirtualizationLXC,
 		LXCName:              lxcName,
+		LXCPrivileged:        cfg.Privileged,
+		LXCNesting:           cfg.Nesting,
 		StoragePoolID:        storagePoolID,
 		StoragePath:          storagePath,
 		Template:             cfg.TemplateID,
@@ -776,11 +780,15 @@ func (m *Manager) CreateContainer(cfg ContainerConfig) error {
 		}
 	}
 
-	cfg.ReportProgress("permissions", "转换非特权容器文件权限")
-	if err := m.shiftRootfsForUnprivileged(lxcName); err != nil {
-		_ = m.cleanupContainerStorage(lxcName)
-		config.RemoveContainer(id)
-		return err
+	if !cfg.Privileged {
+		cfg.ReportProgress("permissions", "转换非特权容器文件权限")
+		if err := m.shiftRootfsForUnprivileged(lxcName); err != nil {
+			_ = m.cleanupContainerStorage(lxcName)
+			config.RemoveContainer(id)
+			return err
+		}
+	} else {
+		cfg.ReportProgress("permissions", "保留特权容器 root 权限")
 	}
 
 	// Set root password AFTER shiftRootfsForUnprivileged,
@@ -1195,7 +1203,9 @@ func (m *Manager) applyResourceLimits(lxcName string, cfg ContainerConfig) error
 			!strings.HasPrefix(trimmed, "lxc.prlimit") &&
 			!strings.HasPrefix(trimmed, "lxc.idmap") &&
 			!strings.HasPrefix(trimmed, "lxc.apparmor.profile") &&
+			!strings.HasPrefix(trimmed, "lxc.apparmor.allow_nesting") &&
 			!strings.HasPrefix(trimmed, "lxc.seccomp.profile") &&
+			!strings.HasPrefix(trimmed, "lxc.seccomp.allow_nesting") &&
 			!strings.HasPrefix(trimmed, "lxc.no_new_privs") &&
 			!strings.HasPrefix(trimmed, "lxc.cap.drop") {
 			newLines = append(newLines, line)
@@ -1210,18 +1220,24 @@ func (m *Manager) applyResourceLimits(lxcName string, cfg ContainerConfig) error
 	if err != nil {
 		return err
 	}
-	uidBase, gidBase, err := unprivilegedIDMap()
-	if err != nil {
-		return err
-	}
-
 	newLines = append(newLines, "", "# clicd managed: lxcfs virtualized /proc")
 	newLines = append(newLines, "lxc.mount.auto = proc:mixed sys:mixed cgroup:mixed")
-	newLines = append(newLines, "", "# clicd managed: mandatory unprivileged container hardening")
-	newLines = append(newLines, fmt.Sprintf("lxc.idmap = u 0 %d 65536", uidBase))
-	newLines = append(newLines, fmt.Sprintf("lxc.idmap = g 0 %d 65536", gidBase))
+	if !cfg.Privileged {
+		uidBase, gidBase, err := unprivilegedIDMap()
+		if err != nil {
+			return err
+		}
+		newLines = append(newLines, "", "# clicd managed: mandatory unprivileged container hardening")
+		newLines = append(newLines, fmt.Sprintf("lxc.idmap = u 0 %d 65536", uidBase))
+		newLines = append(newLines, fmt.Sprintf("lxc.idmap = g 0 %d 65536", gidBase))
+	} else {
+		newLines = append(newLines, "", "# clicd managed: trusted privileged container")
+	}
 	newLines = append(newLines, fmt.Sprintf("lxc.apparmor.profile = %s", apparmorProfile))
 	newLines = append(newLines, fmt.Sprintf("lxc.seccomp.profile = %s", seccompProfile))
+	if cfg.Nesting {
+		newLines = append(newLines, "lxc.apparmor.allow_nesting = 1", "lxc.seccomp.allow_nesting = 1")
+	}
 	newLines = append(newLines, "lxc.no_new_privs = 1")
 	// Keep sys_admin: unprivileged containers need it to mount tmpfs (/dev/shm, /run, etc.)
 	// All capabilities are already confined to the container's user namespace.
@@ -2143,7 +2159,7 @@ func (m *Manager) StartContainer(id int) error {
 	if err := m.syncLXCIPv6Config(&initialIPv6); err != nil {
 		return err
 	}
-	if m.hasUnprivilegedIDMap(lxcName) && !m.rootfsShifted(lxcName) {
+	if !c.LXCPrivileged && m.hasUnprivilegedIDMap(lxcName) && !m.rootfsShifted(lxcName) {
 		if err := m.shiftRootfsForUnprivileged(lxcName); err != nil {
 			return err
 		}
@@ -2151,6 +2167,8 @@ func (m *Manager) StartContainer(id int) error {
 	if m.rootfsShifted(lxcName) {
 		if err := m.applyResourceLimits(lxcName, ContainerConfig{
 			Name:             c.Name,
+			Privileged:       c.LXCPrivileged,
+			Nesting:          c.LXCNesting,
 			TemplateID:       c.Template,
 			VCPU:             c.VCPU,
 			RAMMB:            c.RAMMB,
@@ -2294,6 +2312,8 @@ func (m *Manager) ApplyContainerLimits(c *config.Container) error {
 	lxcName := c.LxcName()
 	if err := m.applyResourceLimits(lxcName, ContainerConfig{
 		Name:             c.Name,
+		Privileged:       c.LXCPrivileged,
+		Nesting:          c.LXCNesting,
 		TemplateID:       c.Template,
 		VCPU:             c.VCPU,
 		RAMMB:            c.RAMMB,
@@ -3690,6 +3710,8 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...Co
 	// Re-apply resource limits and mandatory security hardening.
 	cfg := ContainerConfig{
 		Name:             c.Name,
+		Privileged:       c.LXCPrivileged,
+		Nesting:          c.LXCNesting,
 		TemplateID:       templateID,
 		VCPU:             c.VCPU,
 		RAMMB:            c.RAMMB,
@@ -3733,8 +3755,10 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...Co
 			return fmt.Errorf("failed to install SSH public key: %v", err)
 		}
 	}
-	if err := m.shiftRootfsForUnprivileged(lxcName); err != nil {
-		return err
+	if !c.LXCPrivileged {
+		if err := m.shiftRootfsForUnprivileged(lxcName); err != nil {
+			return err
+		}
 	}
 	if err := m.setRootfsPassword(rootfsPath, c.SSHPassword); err != nil {
 		fmt.Printf("Warning: failed to set root password in %s after reinstall: %v\n", lxcName, err)

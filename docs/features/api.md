@@ -38,6 +38,8 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
 {
   "name": "demo-lxc-01",
   "virtualization": "lxc",
+  "privileged": false,
+  "nesting": false,
   "template_id": "debian-bookworm",
   "vcpu": 1,
   "ram_mb": 512,
@@ -59,10 +61,21 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
 }
 ```
 
+`privileged` 和 `nesting` 仅适用于 LXC，省略时都为 `false`。`nesting=true` 会启用 Docker、LXC-in-LXC 和部分 systemd 工作负载需要的嵌套能力；`privileged=true` 会创建特权容器，降低隔离强度，只允许管理员创建，适合可信工作负载。已有实例不能通过 API 在线切换这两种模式。KVM 请求中将任一参数设为 `true` 会返回 `400`，非管理员请求特权 LXC 会返回 `403`。
+
+批量创建时，将相同参数放在对应的 `containers[]` 项中。容器列表和详情响应使用 `lxc_privileged`、`lxc_nesting` 表示实际状态；这两个字段采用省略空值的 JSON 编码，关闭状态可能不会出现在响应中。
+
+KVM 创建的通用资源下限为 `vcpu >= 1`、`ram_mb >= 1024`、`disk_gb >= 10`；镜像自身声明的更高磁盘要求仍然优先。
+
 字段说明：
 
 | 字段 | 说明 |
 | --- | --- |
+| `virtualization` | `lxc` 或 `kvm`。`privileged` 和 `nesting` 只对 `lxc` 生效。 |
+| `privileged` | 可选布尔值，默认 `false`。仅 LXC 支持；创建特权容器需要管理员权限，且会降低隔离强度。 |
+| `nesting` | 可选布尔值，默认 `false`。仅 LXC 支持；启用 Docker/LXC-in-LXC 和 systemd 所需的嵌套能力。 |
+| `template_id` | 已下载并启用的镜像 ID。KVM 镜像可能声明高于通用下限的最小磁盘。 |
+| `vcpu` / `ram_mb` / `disk_gb` | vCPU、内存（MB）和磁盘（GB）。KVM 通用下限分别为 1、1024 和 10。 |
 | `assign_nat` | 是否分配 NAT 端口映射；不传时保持默认 NAT 行为。 |
 | `assign_ipv4` | 是否分配公网 IPv4。 |
 | `ipv4_count` | 自动分配公网 IPv4 数量。 |
@@ -79,6 +92,8 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://panel.example.com/api/v1/da
 | `io_write_mbps` | 可选；磁盘写入限速，单位 MB/s，`0` 表示不限制。 |
 | `network_bw_mbps` | 兼容旧字段；同时设置上下行对称带宽，新接入推荐使用拆分字段。 |
 | `io_speed_mbps` | 兼容旧字段；同时设置读写对称 IO 限速，新接入推荐使用拆分字段。 |
+
+创建成功后，通过 `GET /api/v1/containers` 或 `GET /api/v1/containers/{id|uuid|name}` 查看实际状态。LXC 的特权和嵌套状态分别读取 `lxc_privileged`、`lxc_nesting`；关闭状态因 JSON 省略空值可能缺省，客户端应按 `false` 处理缺省值。
 
 重装示例：
 
@@ -604,6 +619,8 @@ curl --fail-with-body -H "X-API-Key: $CLICD_API_KEY" \
         "uuid": "00000000-0000-4000-8000-000000000005",
         "name": "example-vm",
         "virtualization": "lxc",
+        "lxc_privileged": true,
+        "lxc_nesting": true,
         "template": "debian-bullseye",
         "vcpu": 1,
         "ram_mb": 512,
@@ -646,6 +663,9 @@ curl --fail-with-body -H "X-API-Key: $CLICD_API_KEY" \
       "id": 5,
       "uuid": "00000000-0000-4000-8000-000000000005",
       "name": "example-vm",
+      "virtualization": "lxc",
+      "lxc_privileged": true,
+      "lxc_nesting": true,
       "status": "running",
       "ip": "10.0.0.10",
       "ipv6": "2001:db8:100::1005",

@@ -170,6 +170,7 @@ const endpointGroups: Array<{ title: string; endpoints: EndpointTuple[] }> = [
       ['POST', '/api/v1/containers/list', '容器列表（兼容 POST 写法）', 'container:read'],
       ['POST', '/api/v1/containers', '创建容器', 'container:create'],
       ['GET', '/api/v1/containers/{id|uuid|name}', '容器详情', 'container:read'],
+      ['PATCH', '/api/v1/containers/{id}/name', '修改面板展示名称', 'container:resize'],
       ['POST', '/api/v1/containers/{id}/start', '开机', 'container:power'],
       ['POST', '/api/v1/containers/{id}/stop', '关机', 'container:power'],
       ['POST', '/api/v1/containers/{id}/restart', '重启', 'container:power'],
@@ -792,6 +793,8 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
   'POST /api/v1/containers': {
     name: 'demo-lxc-01',
     virtualization: 'lxc',
+    privileged: false,
+    nesting: false,
     template_id: 'debian-bookworm',
     storage_pool_id: 'disk-root',
     vcpu: 1,
@@ -838,6 +841,7 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
     ssh_public_key: '',
     expires_at: '',
   },
+  'PATCH /api/v1/containers/{id}/name': { name: 'renamed-vm' },
   'POST /api/v1/containers/{id}/reinstall': {
     template_id: 'debian-bookworm',
     ssh_auth_mode: 'keep',
@@ -976,6 +980,8 @@ const requestBodySamples: Record<string, Record<string, unknown>> = {
       {
         name: 'batch-lxc-01',
         virtualization: 'lxc',
+        privileged: false,
+        nesting: false,
         template_id: 'debian-bookworm',
         vcpu: 1,
         ram_mb: 512,
@@ -1197,6 +1203,8 @@ const responseSamples: Record<string, unknown> = {
         uuid: '00000000-0000-4000-8000-000000000005',
         name: 'example-vm',
         virtualization: 'lxc',
+        lxc_privileged: true,
+        lxc_nesting: true,
         template: 'debian-bullseye',
         vcpu: 1,
         ram_mb: 512,
@@ -1226,12 +1234,20 @@ const responseSamples: Record<string, unknown> = {
       id: 5,
       uuid: '00000000-0000-4000-8000-000000000005',
       name: 'example-vm',
+      virtualization: 'lxc',
+      lxc_privileged: true,
+      lxc_nesting: true,
       status: 'running',
       ip: '10.0.0.10',
       ipv6: '2001:db8:100::1005',
       ssh_port: 22004,
       ssh_password: '***',
     },
+  },
+  'PATCH /api/v1/containers/{id}/name': {
+    success: true,
+    message: 'Container name updated',
+    data: { id: 5, uuid: '00000000-0000-4000-8000-000000000005', name: 'renamed-vm', kvm_name: 'vm-5' },
   },
   'POST /api/v1/containers/{id}/start': queuedTaskSample('start'),
   'POST /api/v1/containers/{id}/stop': queuedTaskSample('stop'),
@@ -1503,12 +1519,17 @@ function endpointNoteFor(key: string) {
     notes.push('Supports independent upload/download bandwidth limits and read/write I/O limits. network_bw_mbps and io_speed_mbps are deprecated symmetric compatibility aliases. New integrations should use network_down_mbps, network_up_mbps, io_read_mbps, and io_write_mbps.')
     notes.push('storage_pool_id selects an enabled disk for the runtime. For an LXC with an independent LAN address, set lan_ipv4_mode=dhcp or static and set assign_nat=false; static mode also requires lan_ipv4_address, lan_ipv4_prefix_len, and lan_ipv4_gateway.')
     notes.push('allowed_image_ids and image_limit_configured define which downloaded images the container owner may use for reinstall. Include the initial template ID when it should remain reinstallable.')
+    notes.push('LXC-only: nesting=true enables Docker/LXC-in-LXC and some systemd workloads. privileged=true creates a trusted privileged container, requires administrator permission, and should not be used for untrusted tenants; existing containers cannot switch modes in place. On KVM, setting either option to true returns 400; generic KVM minimums are 1 vCPU, 1024 MB RAM, and 10 GB disk, subject to higher image requirements.')
+  }
+  if (key === 'PATCH /api/v1/containers/{id}/name') {
+    notes.push('Only the panel display name changes. The runtime name, UUID, storage paths, MAC address, and guest hostname remain unchanged. Requires container:resize scope.')
   }
   if (key === 'POST /api/v1/containers/{id}/reinstall') {
     notes.push('Reinstall supports ssh_auth_mode=keep|auto_password|password|key. keep is only for reinstall requests; if SSH fields are omitted, the existing behavior is kept.')
   }
   if (key === 'POST /api/v1/batch-create') {
     notes.push('Each containers[] item in batch creation supports the same storage, network, image allowlist, and SSH authentication fields as POST /api/v1/containers.')
+    notes.push('Each item also accepts privileged and nesting for LXC only. privileged=true requires administrator permission; setting either option to true for KVM returns 400.')
     notes.push('Custom management_port and NAT host_port values must be unique across the batch. The panel places each later source-port group after the previous container\'s highest public port while keeping every target container_port unchanged; direct API clients should submit the expanded values explicitly.')
   }
   if (key === 'PUT /api/v1/containers/{id}/resource-limit') {

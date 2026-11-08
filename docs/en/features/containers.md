@@ -33,6 +33,16 @@ Linux containers and Linux KVM virtual machines support SSH login configuration 
 
 Network allocation can combine NAT, public IPv4, and IPv6 as needed. API fields such as `assign_nat`, `assign_ipv4`, `public_ipv4s`, `assign_ipv6`, and `ipv6_addresses` are optional. If they are omitted, default behavior is preserved.
 
+LXC creation also supports two isolation options: `nesting=true` enables the nesting capabilities needed by Docker/LXC-in-LXC and systemd; `privileged=true` creates a privileged container and is restricted to administrators for trusted workloads. Privileged mode reduces isolation, cannot be switched on an existing instance, and should remain `false` by default.
+
+Instance names can be changed independently. The operation updates only the panel display name; the runtime name, UUID, disk paths, MAC address, and guest hostname remain unchanged:
+
+```http
+PATCH /api/v1/containers/{id}/name
+```
+
+Send `{ "name": "new-name" }`; the endpoint requires the `container:resize` scope.
+
 ## Lifecycle Operations
 
 ```http

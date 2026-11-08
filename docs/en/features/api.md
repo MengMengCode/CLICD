@@ -38,6 +38,8 @@ Create container example:
 {
   "name": "demo-lxc-01",
   "virtualization": "lxc",
+  "privileged": false,
+  "nesting": false,
   "template_id": "debian-bookworm",
   "vcpu": 1,
   "ram_mb": 512,
@@ -59,10 +61,21 @@ Create container example:
 }
 ```
 
+`privileged` and `nesting` are LXC-only options and both default to `false` when omitted. `nesting=true` enables the capabilities needed by Docker, LXC-in-LXC, and some systemd workloads. `privileged=true` creates a privileged container with weaker isolation; it is restricted to administrators and should be used only for trusted workloads. Existing instances cannot switch either mode in place. Setting either option to `true` for a KVM request returns `400`; requesting a privileged LXC as a non-administrator returns `403`.
+
+For batch creation, put the same options in the corresponding `containers[]` item. Container list and detail responses expose the effective state as `lxc_privileged` and `lxc_nesting`. These fields use `omitempty`, so a disabled state may be absent from JSON.
+
+Generic KVM creation limits are `vcpu >= 1`, `ram_mb >= 1024`, and `disk_gb >= 10`; an image-specific minimum disk requirement can be higher.
+
 Field notes:
 
 | Field | Description |
 | --- | --- |
+| `virtualization` | `lxc` or `kvm`. `privileged` and `nesting` apply only to `lxc`. |
+| `privileged` | Optional boolean, default `false`. LXC only; creating a privileged container requires administrator permission and reduces isolation. |
+| `nesting` | Optional boolean, default `false`. LXC only; enables nesting capabilities for Docker/LXC-in-LXC and systemd workloads. |
+| `template_id` | ID of a downloaded and enabled image. A KVM image may declare a higher minimum disk size. |
+| `vcpu` / `ram_mb` / `disk_gb` | vCPU, memory (MB), and disk (GB). Generic KVM minimums are 1, 1024, and 10. |
 | `assign_nat` | Whether to allocate NAT port mappings. If omitted, default NAT behavior is preserved. |
 | `assign_ipv4` | Whether to allocate public IPv4. |
 | `ipv4_count` | Number of public IPv4 addresses to allocate automatically. |
@@ -79,6 +92,8 @@ Field notes:
 | `io_write_mbps` | Optional disk write limit in MB/s. `0` means unlimited. |
 | `network_bw_mbps` | Legacy-compatible field. Sets symmetric downlink/uplink bandwidth; new integrations should prefer the split fields. |
 | `io_speed_mbps` | Legacy-compatible field. Sets symmetric read/write I/O limits; new integrations should prefer the split fields. |
+
+After creation, use `GET /api/v1/containers` or `GET /api/v1/containers/{id|uuid|name}` to read the effective state. For LXC, read `lxc_privileged` and `lxc_nesting`; because empty values are omitted, clients should treat an absent field as `false`.
 
 Reinstall example:
 
@@ -604,6 +619,8 @@ The samples below are grouped by endpoint path. Resource numbers, task IDs, cont
         "uuid": "00000000-0000-4000-8000-000000000005",
         "name": "example-vm",
         "virtualization": "lxc",
+        "lxc_privileged": true,
+        "lxc_nesting": true,
         "template": "debian-bullseye",
         "vcpu": 1,
         "ram_mb": 512,
@@ -646,6 +663,9 @@ The samples below are grouped by endpoint path. Resource numbers, task IDs, cont
       "id": 5,
       "uuid": "00000000-0000-4000-8000-000000000005",
       "name": "example-vm",
+      "virtualization": "lxc",
+      "lxc_privileged": true,
+      "lxc_nesting": true,
       "status": "running",
       "ip": "10.0.0.10",
       "ipv6": "2001:db8:100::1005",

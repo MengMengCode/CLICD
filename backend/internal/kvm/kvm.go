@@ -453,6 +453,12 @@ func (m *Manager) CreateContainer(cfg lxc.ContainerConfig) error {
 	if cfg.VCPU < 1 || cfg.VCPU != float64(int(cfg.VCPU)) {
 		return fmt.Errorf("KVM vCPU must be a whole number and at least 1")
 	}
+	if cfg.RAMMB < 1024 {
+		cfg.RAMMB = 1024
+	}
+	if cfg.DiskGB < 10 {
+		cfg.DiskGB = 10
+	}
 	if !image.IsManualDisk() && IsWindowsImage(image.ID) && cfg.DiskGB < 30 {
 		cfg.DiskGB = 30
 	} else if image.Desktop != "" && cfg.DiskGB < 20 {
@@ -2250,9 +2256,9 @@ func windowsMinimumResources(imageID string) (float64, int, int) {
 
 // GetKVMImageMinDiskGB returns the minimum required disk size in GB for a KVM image.
 func GetKVMImageMinDiskGB(imageID string) float64 {
-	minimum := float64(5)
+	minimum := float64(10)
 	if IsManualISOImage(imageID) || IsManualDiskImage(imageID) {
-		minimum = 1
+		minimum = 10
 	} else if IsWindowsImage(imageID) {
 		if IsWindows11Image(imageID) {
 			minimum = 64
@@ -2620,8 +2626,8 @@ func domainXML(name string, vcpu int, ramMB int, diskPath, seedPath, mac string,
 	if vcpu < 1 {
 		vcpu = 1
 	}
-	if ramMB < 512 {
-		ramMB = 512
+	if ramMB < 1024 {
+		ramMB = 1024
 	}
 	iotune := ""
 	if ioReadMBps > 0 || ioWriteMBps > 0 {

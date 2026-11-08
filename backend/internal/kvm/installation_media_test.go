@@ -67,8 +67,8 @@ func TestManualISOUsesDeviceBootOrdersAndEjectSurvivesRegistryChange(t *testing.
 	if image.IsWindows() || image.IsWindows11() || !image.IsManualISO() || image.downloadExtension() != ".iso" {
 		t.Fatal("manual Windows ISO followed unattended path")
 	}
-	if GetKVMImageMinDiskGB(c.Template) != 1 {
-		t.Fatal("manual ISO inherited cloud disk minimum")
+	if GetKVMImageMinDiskGB(c.Template) != 10 {
+		t.Fatal("manual ISO did not use the KVM disk minimum")
 	}
 	m := NewManager()
 	for _, boot := range []string{"cdrom", "disk"} {
@@ -95,7 +95,7 @@ func TestManualISOUsesDeviceBootOrdersAndEjectSurvivesRegistryChange(t *testing.
 		if err := xml.Unmarshal([]byte(text), &domain); err != nil {
 			t.Fatal(err)
 		}
-		if len(domain.OSBoot) != 0 || len(domain.Disks) != 2 || domain.Memory != 512 || len(domain.Serial) != 1 || len(domain.Graphics) != 1 {
+		if len(domain.OSBoot) != 0 || len(domain.Disks) != 2 || domain.Memory != 1024 || len(domain.Serial) != 1 || len(domain.Graphics) != 1 {
 			t.Fatalf("unexpected manual domain: %s", text)
 		}
 		diskOrder, cdOrder := 1, 2

@@ -220,13 +220,20 @@ func validateRuntimeResourceRequest(runtime string, templateID string, vcpu floa
 		if vcpu < 1 || math.Abs(vcpu-math.Round(vcpu)) > 0.000001 {
 			return fmt.Errorf("KVM vCPU must be a whole number and at least 1")
 		}
+		if ramMB < 1024 {
+			return fmt.Errorf("KVM memory must be at least 1024 MB")
+		}
+		minDisk := float64(10)
 		if templateID != "" {
-			minDisk := kvm.GetKVMImageMinDiskGB(templateID)
+			imageMinDisk := kvm.GetKVMImageMinDiskGB(templateID)
+			if imageMinDisk > minDisk {
+				minDisk = imageMinDisk
+			}
 			if diskGB < minDisk {
 				return fmt.Errorf("template %s requires at least %.2f GB disk, but requested %.2f GB", templateID, minDisk, diskGB)
 			}
-		} else if diskGB < 5 {
-			return fmt.Errorf("KVM disk must be at least 5 GB")
+		} else if diskGB < minDisk {
+			return fmt.Errorf("KVM disk must be at least %.0f GB", minDisk)
 		}
 	} else {
 		if templateID != "" {

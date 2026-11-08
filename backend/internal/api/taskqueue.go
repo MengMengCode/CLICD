@@ -912,6 +912,14 @@ func HandleBatchCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Containers[i].NormalizeResourceAliases()
 		req.Containers[i].Virtualization = runtimeFromRequest(req.Containers[i].Virtualization)
+		if req.Containers[i].Virtualization != config.VirtualizationLXC && (req.Containers[i].Privileged || req.Containers[i].Nesting) {
+			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: name + ": privileged and nesting options are only supported for LXC containers"})
+			return
+		}
+		if req.Containers[i].Privileged && !isAdministratorRequest(r) {
+			jsonResponse(w, http.StatusForbidden, APIResponse{Success: false, Message: name + ": privileged LXC containers require administrator permission"})
+			return
+		}
 		if req.Containers[i].WantsLANIPv4() && req.Containers[i].Virtualization != config.VirtualizationLXC {
 			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: name + ": LAN IPv4 is only supported for LXC containers"})
 			return

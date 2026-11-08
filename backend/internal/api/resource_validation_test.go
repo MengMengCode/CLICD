@@ -76,7 +76,11 @@ func TestValidateRuntimeResourceRequest_DiskLimits(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateRuntimeResourceRequest(tc.runtime, tc.templateID, 1.0, 512, tc.diskGB)
+			ramMB := 512
+			if tc.runtime == config.VirtualizationKVM {
+				ramMB = 1024
+			}
+			err := validateRuntimeResourceRequest(tc.runtime, tc.templateID, 1.0, ramMB, tc.diskGB)
 			if tc.expectError && err == nil {
 				t.Errorf("expected error for %s (disk=%.2f), but got nil", tc.name, tc.diskGB)
 			}

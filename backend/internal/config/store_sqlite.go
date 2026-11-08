@@ -22,6 +22,8 @@ var (
 type savedTaskConfig struct {
 	Name                 string        `json:"name"`
 	Virtualization       string        `json:"virtualization,omitempty"`
+	Privileged           bool          `json:"privileged,omitempty"`
+	Nesting              bool          `json:"nesting,omitempty"`
 	TemplateID           string        `json:"template_id"`
 	StoragePoolID        string        `json:"storage_pool_id,omitempty"`
 	VCPU                 float64       `json:"vcpu"`
@@ -194,6 +196,8 @@ func ensureSchema() error {
 			virtualization TEXT,
 			lxc_name TEXT,
 			kvm_name TEXT,
+			lxc_privileged INTEGER NOT NULL DEFAULT 0,
+			lxc_nesting INTEGER NOT NULL DEFAULT 0,
 			disk_image TEXT,
 			manual_install INTEGER NOT NULL DEFAULT 0,
 			installation_media_image_id TEXT NOT NULL DEFAULT '',
@@ -338,6 +342,8 @@ func ensureSchema() error {
 			user_agent TEXT,
 			cfg_name TEXT,
 			cfg_virtualization TEXT,
+			cfg_privileged INTEGER NOT NULL DEFAULT 0,
+			cfg_nesting INTEGER NOT NULL DEFAULT 0,
 			cfg_template_id TEXT,
 			cfg_vcpu REAL,
 			cfg_cpu_percent INTEGER,
@@ -441,6 +447,8 @@ func ensureSchemaMigrations() error {
 		{"tasks", "user_agent", "TEXT"},
 		{"tasks", "cfg_network_down_mbps", "INTEGER NOT NULL DEFAULT 0"},
 		{"tasks", "cfg_network_up_mbps", "INTEGER NOT NULL DEFAULT 0"},
+		{"tasks", "cfg_privileged", "INTEGER NOT NULL DEFAULT 0"},
+		{"tasks", "cfg_nesting", "INTEGER NOT NULL DEFAULT 0"},
 		{"tasks", "cfg_io_read_mbps", "INTEGER NOT NULL DEFAULT 0"},
 		{"tasks", "cfg_io_write_mbps", "INTEGER NOT NULL DEFAULT 0"},
 		{"tasks", "cfg_management_port", "INTEGER NOT NULL DEFAULT 0"},
@@ -467,6 +475,8 @@ func ensureSchemaMigrations() error {
 		{"sub_users", "image_limit_configured", "INTEGER NOT NULL DEFAULT 0"},
 		{"containers", "network_down_mbps", "INTEGER NOT NULL DEFAULT 0"},
 		{"containers", "network_up_mbps", "INTEGER NOT NULL DEFAULT 0"},
+		{"containers", "lxc_privileged", "INTEGER NOT NULL DEFAULT 0"},
+		{"containers", "lxc_nesting", "INTEGER NOT NULL DEFAULT 0"},
 		{"containers", "io_read_mbps", "INTEGER NOT NULL DEFAULT 0"},
 		{"containers", "io_write_mbps", "INTEGER NOT NULL DEFAULT 0"},
 		{"containers", "firewall_enabled", "INTEGER NOT NULL DEFAULT 0"},
@@ -802,7 +812,7 @@ func saveContainers(tx *sql.Tx) error {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT INTO containers (
-			id, uuid, name, virtualization, lxc_name, kvm_name, disk_image, storage_pool_id, storage_path, mac_address, template,
+			id, uuid, name, virtualization, lxc_name, kvm_name, lxc_privileged, lxc_nesting, disk_image, storage_pool_id, storage_path, mac_address, template,
 			vcpu, ram_mb, disk_gb, network_bw_mbps, network_down_mbps, network_up_mbps,
 			monthly_traffic_gb, traffic_mode, traffic_in_gb,
 			traffic_out_gb, traffic_used_rx, traffic_used_tx, traffic_reset_date,
@@ -815,8 +825,16 @@ func saveContainers(tx *sql.Tx) error {
 			firewall_enabled, firewall_default_action, firewall_rules, allowed_image_ids, image_limit_configured,
 			ipv6_nat_address, ipv6_port_mappings, ipv6_nat_sync_ipv4, ipv6_port_mapping_limit,
 			manual_install, installation_media_image_id, installation_media_boot, data_disks, standalone
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			c.ID, c.UUID, c.Name, c.Virtualization, c.LXCName, c.KVMName, c.DiskImage, c.StoragePoolID, c.StoragePath, c.MACAddress, c.Template,
+		) VALUES (
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?
+		)`,
+			c.ID, c.UUID, c.Name, c.Virtualization, c.LXCName, c.KVMName, boolInt(c.LXCPrivileged), boolInt(c.LXCNesting), c.DiskImage, c.StoragePoolID, c.StoragePath, c.MACAddress, c.Template,
 			c.VCPU, c.RAMMB, c.DiskGB, c.NetworkBWMbps, c.NetworkDownMbps, c.NetworkUpMbps,
 			c.MonthlyTrafficGB, c.TrafficMode, c.TrafficInGB,
 			c.TrafficOutGB, c.TrafficUsedRX, c.TrafficUsedTX, c.TrafficResetDate,
@@ -910,7 +928,7 @@ func saveTasksDB(tx *sql.Tx) error {
 		cfg := parseSavedTaskConfig(task.Config)
 		if _, err := tx.Exec(`INSERT INTO tasks(
 			id, type, container_id, container_name, status, error, created_at, template_id, user, ip, user_agent,
-			cfg_name, cfg_virtualization, cfg_template_id, cfg_vcpu, cfg_cpu_percent, cfg_ram_mb, cfg_disk_gb,
+			cfg_name, cfg_virtualization, cfg_privileged, cfg_nesting, cfg_template_id, cfg_vcpu, cfg_cpu_percent, cfg_ram_mb, cfg_disk_gb,
 			cfg_network_bw_mbps, cfg_network_down_mbps, cfg_network_up_mbps,
 			cfg_monthly_traffic_gb, cfg_traffic_mode, cfg_traffic_in_gb,
 			cfg_traffic_out_gb, cfg_io_speed_mbps, cfg_io_read_mbps, cfg_io_write_mbps,
@@ -919,9 +937,16 @@ func saveTasksDB(tx *sql.Tx) error {
 			cfg_assign_ipv4, cfg_ipv4_count, cfg_public_ipv4s, cfg_assign_ipv6, cfg_ipv6_count, cfg_ipv6_addresses,
 			cfg_ssh_auth_mode, cfg_ssh_password, cfg_ssh_public_key, cfg_allowed_image_ids, cfg_image_limit_configured, cfg_expires_at,
 			cfg_ipv6_port_mapping_count, cfg_ipv6_nat_sync_ipv4
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?
+		)`,
 			task.ID, task.Type, task.ContainerID, task.ContainerName, task.Status, task.Error, task.CreatedAt, task.TemplateID, task.User, task.IP, task.UserAgent,
-			cfg.Name, cfg.Virtualization, cfg.TemplateID, cfg.VCPU, cfg.CPUPercent, cfg.RAMMB, cfg.DiskGB,
+			cfg.Name, cfg.Virtualization, boolInt(cfg.Privileged), boolInt(cfg.Nesting), cfg.TemplateID, cfg.VCPU, cfg.CPUPercent, cfg.RAMMB, cfg.DiskGB,
 			cfg.NetworkBWMbps, cfg.NetworkDownMbps, cfg.NetworkUpMbps,
 			cfg.MonthlyTrafficGB, cfg.TrafficMode, cfg.TrafficInGB,
 			cfg.TrafficOutGB, cfg.IOSpeedMBps, cfg.IOReadMBps, cfg.IOWriteMBps,
@@ -982,7 +1007,7 @@ func saveSnapshots(tx *sql.Tx) error {
 
 func loadContainers() ([]Container, error) {
 	rows, err := db.Query(`SELECT
-		id, uuid, name, virtualization, lxc_name, kvm_name, disk_image, storage_pool_id, storage_path, mac_address, template,
+		id, uuid, name, virtualization, lxc_name, kvm_name, lxc_privileged, lxc_nesting, disk_image, storage_pool_id, storage_path, mac_address, template,
 		vcpu, ram_mb, disk_gb, network_bw_mbps, network_down_mbps, network_up_mbps,
 		monthly_traffic_gb, traffic_mode, traffic_in_gb,
 		traffic_out_gb, traffic_used_rx, traffic_used_tx, traffic_reset_date,
@@ -1004,7 +1029,7 @@ func loadContainers() ([]Container, error) {
 	result := []Container{}
 	for rows.Next() {
 		var c Container
-		var scheduleEnabled, firewallEnabled, imageLimitConfigured, restoreOnHostBoot, manualInstall, standalone int
+		var scheduleEnabled, firewallEnabled, imageLimitConfigured, restoreOnHostBoot, manualInstall, standalone, lxcPrivileged, lxcNesting int
 		var dataDisksJSON string
 		var firewallDefaultAction string
 		var firewallRulesJSON, allowedImageIDs, ipv6PortMappingsJSON sql.NullString
@@ -1014,7 +1039,7 @@ func loadContainers() ([]Container, error) {
 		var lanIPv4Address, lanIPv4Gateway sql.NullString
 		var lanIPv4PrefixLen sql.NullInt64
 		if err := rows.Scan(
-			&c.ID, &c.UUID, &c.Name, &c.Virtualization, &c.LXCName, &c.KVMName, &c.DiskImage, &storagePoolID, &storagePath, &c.MACAddress, &c.Template,
+			&c.ID, &c.UUID, &c.Name, &c.Virtualization, &c.LXCName, &c.KVMName, &lxcPrivileged, &lxcNesting, &c.DiskImage, &storagePoolID, &storagePath, &c.MACAddress, &c.Template,
 			&c.VCPU, &c.RAMMB, &c.DiskGB, &c.NetworkBWMbps, &c.NetworkDownMbps, &c.NetworkUpMbps,
 			&c.MonthlyTrafficGB, &c.TrafficMode, &c.TrafficInGB,
 			&c.TrafficOutGB, &c.TrafficUsedRX, &c.TrafficUsedTX, &c.TrafficResetDate,
@@ -1039,6 +1064,8 @@ func loadContainers() ([]Container, error) {
 		}
 		c.StoragePoolID = storagePoolID.String
 		c.StoragePath = storagePath.String
+		c.LXCPrivileged = lxcPrivileged != 0
+		c.LXCNesting = lxcNesting != 0
 		c.LANIPv4Mode = lanIPv4Mode.String
 		c.LANInterface = lanInterface.String
 		c.LANIPv4Address = lanIPv4Address.String
@@ -1257,7 +1284,7 @@ func loadAuditLogs() ([]AuditLog, error) {
 func loadTasks() ([]SavedTask, error) {
 	rows, err := db.Query(`SELECT
 		id, type, container_id, container_name, status, error, created_at, template_id, user, ip, user_agent,
-		cfg_name, cfg_virtualization, cfg_template_id, cfg_vcpu, cfg_cpu_percent, cfg_ram_mb, cfg_disk_gb,
+		cfg_name, cfg_virtualization, cfg_privileged, cfg_nesting, cfg_template_id, cfg_vcpu, cfg_cpu_percent, cfg_ram_mb, cfg_disk_gb,
 		cfg_network_bw_mbps, cfg_network_down_mbps, cfg_network_up_mbps,
 		cfg_monthly_traffic_gb, cfg_traffic_mode, cfg_traffic_in_gb,
 		cfg_traffic_out_gb, cfg_io_speed_mbps, cfg_io_read_mbps, cfg_io_write_mbps,
@@ -1276,13 +1303,13 @@ func loadTasks() ([]SavedTask, error) {
 	for rows.Next() {
 		var t SavedTask
 		var cfg savedTaskConfig
-		var assignIPv4, assignIPv6, imageLimitConfigured int
+		var assignIPv4, assignIPv6, imageLimitConfigured, privileged, nesting int
 		var ip, userAgent, publicIPv4s, ipv6Addresses sql.NullString
 		var lanIPv4Mode, lanInterface, lanIPv4Address, lanIPv4Gateway, sshAuthMode, sshPassword, sshPublicKey, allowedImageIDs sql.NullString
 		var assignNAT, lanIPv4PrefixLen, ipv4Count, ipv6Count, ipv6NATSyncIPv4 sql.NullInt64
 		if err := rows.Scan(
 			&t.ID, &t.Type, &t.ContainerID, &t.ContainerName, &t.Status, &t.Error, &t.CreatedAt, &t.TemplateID, &t.User, &ip, &userAgent,
-			&cfg.Name, &cfg.Virtualization, &cfg.TemplateID, &cfg.VCPU, &cfg.CPUPercent, &cfg.RAMMB, &cfg.DiskGB,
+			&cfg.Name, &cfg.Virtualization, &privileged, &nesting, &cfg.TemplateID, &cfg.VCPU, &cfg.CPUPercent, &cfg.RAMMB, &cfg.DiskGB,
 			&cfg.NetworkBWMbps, &cfg.NetworkDownMbps, &cfg.NetworkUpMbps,
 			&cfg.MonthlyTrafficGB, &cfg.TrafficMode, &cfg.TrafficInGB,
 			&cfg.TrafficOutGB, &cfg.IOSpeedMBps, &cfg.IOReadMBps, &cfg.IOWriteMBps,
@@ -1326,6 +1353,8 @@ func loadTasks() ([]SavedTask, error) {
 		cfg.SSHPublicKey = sshPublicKey.String
 		cfg.AllowedImageIDs = decodeStringSlice(allowedImageIDs.String)
 		cfg.ImageLimitConfigured = imageLimitConfigured != 0
+		cfg.Privileged = privileged != 0
+		cfg.Nesting = nesting != 0
 		normalizeSavedTaskConfigLimits(&cfg)
 		result = append(result, t)
 		configs = append(configs, cfg)

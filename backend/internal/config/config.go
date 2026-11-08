@@ -111,6 +111,8 @@ type Container struct {
 	Virtualization                string                 `json:"virtualization,omitempty"`
 	LXCName                       string                 `json:"lxc_name,omitempty"`
 	KVMName                       string                 `json:"kvm_name,omitempty"`
+	LXCPrivileged                 bool                   `json:"lxc_privileged,omitempty"`
+	LXCNesting                    bool                   `json:"lxc_nesting,omitempty"`
 	DiskImage                     string                 `json:"disk_image,omitempty"`
 	DataDisks                     []DataDisk             `json:"data_disks"`
 	ManualInstall                 bool                   `json:"manual_install,omitempty"`
@@ -1764,6 +1766,65 @@ func FindContainerByName(name string) *Container {
 		if c.Name == name {
 			return &AppConfig.Containers[i]
 		}
+	}
+	return nil
+}
+
+// RenameContainer changes the user-facing name while preserving the runtime
+// identity (LXC/KVM name, UUID, storage paths, and network assignments).
+func RenameContainer(id int, name string) error {
+	name = strings.TrimSpace(name)
+	if !IsValidContainerName(name) {
+		return fmt.Errorf("invalid container name: %s", name)
+	}
+
+	allocationMu.Lock()
+	defer allocationMu.Unlock()
+	if AppConfig == nil {
+		return fmt.Errorf("configuration is not initialized")
+	}
+	index := -1
+	for i := range AppConfig.Containers {
+		if AppConfig.Containers[i].ID == id {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return fmt.Errorf("container not found: %d", id)
+	}
+	oldName := AppConfig.Containers[index].Name
+	if oldName == name {
+		return nil
+	}
+	for i, c := range AppConfig.Containers {
+		if i != index && c.Name == name {
+			return fmt.Errorf("container name already exists: %s", name)
+		}
+	}
+	AppConfig.Containers[index].Name = name
+	for i := range AppConfig.SubUsers {
+		for j, allowedName := range AppConfig.SubUsers[i].ContainerNames {
+			if allowedName == oldName {
+				AppConfig.SubUsers[i].ContainerNames[j] = name
+			}
+		}
+	}
+	for i := range AppConfig.Snapshots {
+		if AppConfig.Snapshots[i].ContainerID == id || AppConfig.Snapshots[i].ContainerName == oldName {
+			AppConfig.Snapshots[i].ContainerName = name
+		}
+	}
+	if err := SaveConfig(); err != nil {
+		AppConfig.Containers[index].Name = oldName
+		for i := range AppConfig.SubUsers {
+			for j, allowedName := range AppConfig.SubUsers[i].ContainerNames {
+				if allowedName == name {
+					AppConfig.SubUsers[i].ContainerNames[j] = oldName
+				}
+			}
+		}
+		return err
 	}
 	return nil
 }

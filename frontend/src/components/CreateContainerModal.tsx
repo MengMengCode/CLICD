@@ -27,6 +27,8 @@ interface CreateContainerModalProps {
 const defaultForm: CreateContainerRequest = {
   name: '',
   virtualization: 'lxc',
+  privileged: false,
+  nesting: false,
   template_id: '',
   storage_pool_id: '',
   vcpu: 1,
@@ -70,6 +72,10 @@ const defaultForm: CreateContainerRequest = {
   expires_at: '',
 }
 
+const KVM_MIN_VCPU = 1
+const KVM_MIN_RAM_MB = 1024
+const KVM_MIN_DISK_GB = 10
+
 export default function CreateContainerModal({ isOpen, onClose, onSuccess, existingNames = [] }: CreateContainerModalProps) {
   const navigate = useNavigate()
   const dialog = useDialog()
@@ -101,9 +107,11 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
 
   useEffect(() => {
     if (!isOpen) return
+    let active = true
 
     getEnabledImages(form.virtualization)
       .then((res) => {
+        if (!active) return
         const data = res.data.data || []
         setTemplates(data)
         setForm((prev) => {
@@ -118,11 +126,18 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
           }, data.find((item) => item.id === templateID))
         })
       })
-      .catch(console.error)
+      .catch((error) => {
+        if (active) console.error(error)
+      })
 
-    getIPv6NATSettings().then(res => setIPv6NATStatus(res.data.data || null)).catch(() => setIPv6NATStatus(null))
+    getIPv6NATSettings().then(res => {
+      if (active) setIPv6NATStatus(res.data.data || null)
+    }).catch(() => {
+      if (active) setIPv6NATStatus(null)
+    })
     getIPv6Status()
       .then((res) => {
+        if (!active) return
         const status = res.data.data || null
         setIPv6Status(status)
         if (!status?.available) {
@@ -130,18 +145,28 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
         }
       })
       .catch(() => {
+        if (!active) return
         setIPv6Status({ available: false, reachable: false, reason: 'IPv6 status check failed', prefixes: [] })
         setForm((prev) => ({ ...prev, assign_ipv6: false }))
       })
 
     getHostInfo()
-      .then((res) => setHostInfo(res.data.data || null))
-      .catch(() => setHostInfo(null))
+      .then((res) => {
+        if (active) setHostInfo(res.data.data || null)
+      })
+      .catch(() => {
+        if (active) setHostInfo(null)
+      })
 
     getHostReport()
-      .then((res) => setHostReport(res.data.data || null))
-      .catch(() => setHostReport(null))
+      .then((res) => {
+        if (active) setHostReport(res.data.data || null)
+      })
+      .catch(() => {
+        if (active) setHostReport(null)
+      })
 
+    return () => { active = false }
   }, [isOpen, form.virtualization])
 
   useEffect(() => {
@@ -478,7 +503,10 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                   <div className="grid grid-cols-2 gap-2">
                     <Button variant={form.virtualization === 'lxc' ? 'default' : 'outline'}
                       type="button"
-                      onClick={() => setForm((prev) => applyTemplateDefaults({ ...prev, virtualization: 'lxc', template_id: '', storage_pool_id: '', allowed_image_ids: [], image_limit_configured: false }))}
+                      onClick={() => {
+                        setTemplates([])
+                        setForm((prev) => applyTemplateDefaults({ ...prev, virtualization: 'lxc', template_id: '', storage_pool_id: '', allowed_image_ids: [], image_limit_configured: false }))
+                      }}
                       className="h-9 px-3 py-2 text-sm font-medium"
                     >
                       LXC 容器
@@ -489,7 +517,20 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                       title={kvmAvailable ? '' : '当前宿主机不支持 KVM'}
                       onClick={() => {
                         if (kvmAvailable) {
-                          setForm((prev) => applyTemplateDefaults({ ...prev, virtualization: 'kvm', template_id: '', storage_pool_id: '', allowed_image_ids: [], image_limit_configured: false }))
+                          setTemplates([])
+                          setForm((prev) => applyTemplateDefaults({
+                            ...prev,
+                            virtualization: 'kvm',
+                            privileged: false,
+                            nesting: false,
+                            template_id: '',
+                            storage_pool_id: '',
+                            allowed_image_ids: [],
+                            image_limit_configured: false,
+                            vcpu: Math.max(KVM_MIN_VCPU, Math.round(Number.isFinite(prev.vcpu) ? prev.vcpu : KVM_MIN_VCPU)),
+                            ram_mb: Math.max(KVM_MIN_RAM_MB, Math.round(Number.isFinite(prev.ram_mb) ? prev.ram_mb : KVM_MIN_RAM_MB)),
+                            disk_gb: Math.max(KVM_MIN_DISK_GB, Math.round(Number.isFinite(prev.disk_gb) ? prev.disk_gb : KVM_MIN_DISK_GB)),
+                          }))
                         }
                       }}
                       className="h-9 px-3 py-2 text-sm font-medium"
@@ -498,6 +539,36 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
                     </Button>
                   </div>
                 </Field>
+                {form.virtualization === 'lxc' && (
+                  <FormSection title="容器权限">
+                    <Field layout="row" label="运行模式">
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Button
+                          type="button"
+                          variant={!form.privileged ? 'default' : 'outline'}
+                          className="h-9 min-w-0 whitespace-nowrap px-3 py-2 text-sm font-medium"
+                          onClick={() => setForm(prev => ({ ...prev, privileged: false }))}
+                        >
+                          非特权容器
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={form.privileged ? 'destructive' : 'outline'}
+                          className="h-9 min-w-0 whitespace-nowrap px-3 py-2 text-sm font-medium"
+                          onClick={() => setForm(prev => ({ ...prev, privileged: true }))}
+                        >
+                          特权容器
+                        </Button>
+                      </div>
+                    </Field>
+                    <Field layout="row" label="嵌套容器">
+                      <Label className="flex items-start gap-2 text-xs leading-5 text-foreground">
+                        <Checkbox checked={form.nesting === true} onCheckedChange={checked => setForm(prev => ({ ...prev, nesting: checked === true }))} />
+                        <span>允许 Docker / LXC 嵌套</span>
+                      </Label>
+                    </Field>
+                  </FormSection>
+                )}
                 <Field htmlFor="create-storage" layout="row" label="存储磁盘">
                   {storageLoading ? (
                     <Card className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
@@ -1180,6 +1251,8 @@ export default function CreateContainerModal({ isOpen, onClose, onSuccess, exist
               <ReviewItem label={t('容器名称')} value={batchCount > 1 ? `${form.name}-${batchStartIndex} … ${form.name}-${batchStartIndex + batchCount - 1}` : form.name} />
               <ReviewItem label={t('创建数量')} value={String(batchCount)} />
               <ReviewItem label={t('虚拟化架构')} value={form.virtualization === 'kvm' ? 'KVM' : 'LXC'} />
+              {form.virtualization === 'lxc' && <ReviewItem label="LXC 隔离" value={form.privileged ? '特权模式' : '非特权模式'} />}
+              {form.virtualization === 'lxc' && <ReviewItem label="嵌套容器" value={form.nesting ? '已启用' : '未启用'} />}
               <ReviewItem label={t('存储磁盘')} value={selectedStoragePool ? `${selectedStoragePool.name} · ${selectedStoragePool.mount_point || selectedStoragePool.path}` : t('自动选择')} />
               <ReviewItem label="vCPU" value={String(form.vcpu)} />
               <ReviewItem label={t('内存')} value={`${form.ram_mb} MB`} />
@@ -1368,13 +1441,13 @@ function NumberInput({
 }
 
 function getTemplateMinDiskGB(templateID: string, virtualization: string, manualISO = false): number {
-  if (manualISO) return 1
+  if (manualISO) return KVM_MIN_DISK_GB
   const id = (templateID || '').toLowerCase()
   if (virtualization === 'kvm') {
-    if (id.includes('windows-11') || id.includes('win11')) return 64
+    if (isWindows11Template(templateID)) return 64
     if (id.includes('windows') || id.includes('win')) return 30
     if (id.includes('desktop') || id.includes('xfce') || id.includes('gnome')) return 20
-    return 5
+    return KVM_MIN_DISK_GB
   }
   // LXC
   if (id.includes('alpine')) return 0.5
@@ -1393,9 +1466,9 @@ function normalizeLXCDisk(value: number) {
 function validateResourceInputs(form: CreateContainerRequest, maxVCPU: number, maxRAMMB?: number, maxDiskGB?: number, manualISO = false, templateMin = 0) {
   const errors: Partial<Record<'vcpu' | 'ram_mb' | 'disk_gb', string>> = {}
   const windows = !manualISO && isWindowsTemplate(form.template_id)
-  const windows11 = windows && form.template_id.toLowerCase().includes('windows-11')
-  const minVCPU = windows ? 2 : (form.virtualization === 'kvm' ? 1 : 0.25)
-  const minRAMMB = manualISO ? 512 : windows11 ? 4096 : windows ? 2048 : 128
+  const windows11 = windows && isWindows11Template(form.template_id)
+  const minVCPU = windows ? 2 : (form.virtualization === 'kvm' ? KVM_MIN_VCPU : 0.25)
+  const minRAMMB = manualISO ? KVM_MIN_RAM_MB : windows11 ? 4096 : windows ? 2048 : form.virtualization === 'kvm' ? KVM_MIN_RAM_MB : 128
   const minDiskGB = Math.max(getTemplateMinDiskGB(form.template_id, form.virtualization, manualISO), templateMin)
 
   if (!Number.isFinite(form.vcpu)) {
@@ -1454,6 +1527,8 @@ function normalizeCreateForm(form: CreateContainerRequest, template?: Template):
   const sshAuthMode = linuxTemplate ? (normalized.ssh_auth_mode || 'auto_password') : 'auto_password'
   return {
     ...normalized,
+    privileged: normalized.virtualization === 'lxc' && normalized.privileged === true,
+    nesting: normalized.virtualization === 'lxc' && normalized.nesting === true,
     vcpu: normalized.virtualization === 'kvm' ? Math.round(normalized.vcpu) : normalizeLXCvCPU(normalized.vcpu),
     ram_mb: Math.round(normalized.ram_mb),
     disk_gb: normalized.virtualization === 'kvm' ? Math.round(normalized.disk_gb) : normalizeLXCDisk(normalized.disk_gb),
@@ -1507,18 +1582,32 @@ function isManualISOTemplate(template?: Template) {
 
 function applyTemplateDefaults(form: CreateContainerRequest, template?: Template): CreateContainerRequest {
   if (template?.min_disk_gb && form.disk_gb < template.min_disk_gb) form = { ...form, disk_gb: template.min_disk_gb }
-  if (isManualISOTemplate(template) || !isWindowsTemplate(form.template_id)) return form
+  if (form.virtualization !== 'kvm') return form
+  if (isManualISOTemplate(template) || !isWindowsTemplate(form.template_id)) {
+    return {
+      ...form,
+      vcpu: Math.max(KVM_MIN_VCPU, Math.round(Number.isFinite(form.vcpu) ? form.vcpu : KVM_MIN_VCPU)),
+      ram_mb: Math.max(KVM_MIN_RAM_MB, Math.round(Number.isFinite(form.ram_mb) ? form.ram_mb : KVM_MIN_RAM_MB)),
+      disk_gb: Math.max(KVM_MIN_DISK_GB, Math.round(Number.isFinite(form.disk_gb) ? form.disk_gb : KVM_MIN_DISK_GB)),
+    }
+  }
+  const windows11 = isWindows11Template(form.template_id)
   return {
     ...form,
     virtualization: 'kvm',
-    vcpu: Math.max(2, Math.round(Number.isFinite(form.vcpu) ? form.vcpu : 2)),
-    ram_mb: Math.max(2048, Math.round(Number.isFinite(form.ram_mb) ? form.ram_mb : 2048)),
-    disk_gb: Math.max(30, Math.round(Number.isFinite(form.disk_gb) ? form.disk_gb : 30)),
+    vcpu: Math.max(windows11 ? 2 : KVM_MIN_VCPU, Math.round(Number.isFinite(form.vcpu) ? form.vcpu : KVM_MIN_VCPU)),
+    ram_mb: Math.max(windows11 ? 4096 : 2048, Math.round(Number.isFinite(form.ram_mb) ? form.ram_mb : KVM_MIN_RAM_MB)),
+    disk_gb: Math.max(windows11 ? 64 : 30, Math.round(Number.isFinite(form.disk_gb) ? form.disk_gb : KVM_MIN_DISK_GB)),
   }
 }
 
 function isWindowsTemplate(templateID: string) {
   return templateID.toLowerCase().includes('windows')
+}
+
+function isWindows11Template(templateID: string) {
+  const id = templateID.toLowerCase()
+  return id.includes('windows-11') || id.includes('windows11') || id.includes('win11')
 }
 
 function normalizeLXCvCPU(value: number) {

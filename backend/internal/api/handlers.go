@@ -103,6 +103,11 @@ func HandleSingleContainer(w http.ResponseWriter, r *http.Request) {
 		HandleContainerTransfer(w, r, id, action)
 	case action == "installation-media":
 		handleInstallationMedia(w, r, id)
+	case action == "name" && (r.Method == http.MethodPatch || r.Method == http.MethodPut):
+		if !requireScope(w, r, "container:resize") {
+			return
+		}
+		updateContainerName(w, r, id)
 	case action == "start" && r.Method == http.MethodPost:
 		if !requireScope(w, r, "container:power") {
 			return
@@ -241,6 +246,48 @@ func HandleSingleContainer(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func updateContainerName(w http.ResponseWriter, r *http.Request, id int) {
+	var request struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Invalid request body"})
+		return
+	}
+	container := config.FindContainer(id)
+	if container == nil {
+		jsonResponse(w, http.StatusNotFound, APIResponse{Success: false, Message: "Container not found"})
+		return
+	}
+	oldName := container.Name
+	if err := config.RenameContainer(id, request.Name); err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "already exists") {
+			status = http.StatusConflict
+		} else if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		jsonResponse(w, status, APIResponse{Success: false, Message: err.Error()})
+		return
+	}
+	updated := config.FindContainer(id)
+	auditRequest(r, "container.rename", updated.Name, fmt.Sprintf("from=%s", oldName), true, "")
+	jsonResponse(w, http.StatusOK, APIResponse{Success: true, Message: "Container name updated", Data: containerResponse(*updated)})
+}
+
+func isAdministratorRequest(r *http.Request) bool {
+	ctx, ok := authContextFromRequest(r)
+	if !ok {
+		// Unit-level callers may invoke handlers without middleware. The real
+		// server always attaches an authentication context first.
+		return true
+	}
+	if ctx.Type == authTypeAdmin {
+		return true
+	}
+	return ctx.Type == authTypeAPIKey && scopeAllowed(ctx.Scopes, "admin:access")
+}
+
 func listContainers(w http.ResponseWriter, r *http.Request) {
 	containers, _ := listByRuntime()
 	containers = filterContainersForRequest(r, containers)
@@ -282,6 +329,14 @@ func createContainer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg.Virtualization = runtimeFromRequest(cfg.Virtualization)
+	if cfg.Virtualization != config.VirtualizationLXC && (cfg.Privileged || cfg.Nesting) {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Privileged and nesting options are only supported for LXC containers"})
+		return
+	}
+	if cfg.Privileged && !isAdministratorRequest(r) {
+		jsonResponse(w, http.StatusForbidden, APIResponse{Success: false, Message: "Privileged LXC containers require administrator permission"})
+		return
+	}
 	if cfg.TemplateID == "" {
 		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Template is required"})
 		return
