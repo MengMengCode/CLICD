@@ -24,6 +24,24 @@ ss -lntp | grep 8999
 - 在任务队列里查看失败原因。
 - 如下载卡住，可尝试取消任务后重新下载。
 
+## Debian 12 等 LXC 容器启动后立即退出
+
+如果启动日志包含 `Failed to create control group inotify object` 和 `Too many open files`，请先在宿主机查看 inotify 实例上限：
+
+```bash
+sysctl fs.inotify.max_user_instances
+```
+
+多个非特权 LXC 容器可能使用相同的宿主机 UID 映射，并共同消耗 inotify 实例配额。配额耗尽时，systemd 可能在初始化阶段退出，即使容器内的 `nofile` 上限足够高。
+
+主机报告中的 `fs.inotify.max_user_instances` 检查会显示当前上限和建议下限。每次通过 CLICD 启动 LXC 容器时，如果运行中的宿主机上限低于 2048，CLICD 会尝试把它提高到 2048。如果 2048 仍不足，可以排查持有大量 inotify 实例的进程，或按负载在宿主机设置更高的上限。例如，可将以下内容写入 `/etc/sysctl.d/99-local-lxc-inotify.conf`，数值应高于当前上限：
+
+```ini
+fs.inotify.max_user_instances = 4096
+```
+
+在宿主机执行 `sudo sysctl -p /etc/sysctl.d/99-local-lxc-inotify.conf`，确认新值生效后再启动容器。配置文件会在宿主机下次启动时重新加载。
+
 ## 容器无法联网
 
 - 检查宿主机 NAT 和转发规则。

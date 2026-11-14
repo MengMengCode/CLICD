@@ -1916,6 +1916,15 @@ func detectHostEnvironment() []HostEnvCheck {
 		commandCheck("smartctl", "硬盘健康检测", false, "smartctl", ""),
 		certbotCheck(),
 	}
+	if envCheckOK(checks, "lxc-start") {
+		limit, err := lxc.HostInotifyInstances()
+		check := HostEnvCheck{Key: lxc.InotifyInstancesKey, Label: lxc.InotifyInstancesKey, Detail: "—"}
+		if err == nil {
+			check.OK = limit >= lxc.MinInotifyInstances
+			check.Detail = fmt.Sprintf("%d / ≥ %d", limit, lxc.MinInotifyInstances)
+		}
+		checks = append(checks, check)
+	}
 	checks = append(checks, HostEnvCheck{Key: "dev-kvm", Label: "/dev/kvm 硬件虚拟化", OK: fileExists("/dev/kvm"), Required: false, Detail: boolDetail(fileExists("/dev/kvm"))})
 	checks = append(checks, HostEnvCheck{Key: "ipv4-forward", Label: "IPv4 转发", OK: strings.TrimSpace(readFirstExistingFile("/proc/sys/net/ipv4/ip_forward")) == "1", Required: true, Detail: strings.TrimSpace(readFirstExistingFile("/proc/sys/net/ipv4/ip_forward"))})
 	checks = append(checks, HostEnvCheck{Key: "lxcfs", Label: "lxcfs 服务", OK: serviceActive("lxcfs"), Required: false, Detail: serviceDetail("lxcfs")})

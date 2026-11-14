@@ -2203,7 +2203,7 @@ func (m *Manager) StartContainer(id int) error {
 	logFile, consoleLog, output, err := m.startLXCContainerDaemon(lxcName)
 	if err != nil {
 		config.UpdateContainerStatus(id, "stopped")
-		return fmt.Errorf("failed to start container: %v, output: %s, lxc log: %s, console: %s", err, string(output), tailFile(logFile, 80), tailFile(consoleLog, 80))
+		return lxcStartupError(fmt.Sprintf("failed to start container: %v, output: %s", err, output), logFile, consoleLog)
 	}
 	if err := m.waitForLXCStartup(lxcName, logFile, consoleLog); err != nil {
 		config.UpdateContainerStatus(id, "stopped")
@@ -2267,6 +2267,11 @@ func (m *Manager) StartContainer(id int) error {
 }
 
 func (m *Manager) startLXCContainerDaemon(lxcName string) (string, string, []byte, error) {
+	if limit, err := ensureInotifyInstances(inotifyInstancesPath); err != nil {
+		fmt.Printf("Warning: could not ensure host %s >= %d before starting %s: %v\n", InotifyInstancesKey, MinInotifyInstances, lxcName, err)
+	} else if limit < MinInotifyInstances {
+		fmt.Printf("Raised host %s from %d to %d before starting %s\n", InotifyInstancesKey, limit, MinInotifyInstances, lxcName)
+	}
 	logFile := filepath.Join(os.TempDir(), "clicd-"+lxcName+"-start.log")
 	consoleLog := filepath.Join(os.TempDir(), "clicd-"+lxcName+"-console.log")
 	os.Remove(logFile)
@@ -2298,7 +2303,15 @@ func (m *Manager) waitForLXCStartup(lxcName, logFile, consoleLog string) error {
 			break
 		}
 	}
-	return fmt.Errorf("container exited immediately after start (status: %s), lxc log: %s, console: %s", lastStatus, tailFile(logFile, 80), tailFile(consoleLog, 80))
+	return lxcStartupError(fmt.Sprintf("container exited immediately after start (status: %s)", lastStatus), logFile, consoleLog)
+}
+
+func lxcStartupError(message, logFile, consoleLog string) error {
+	console := tailFile(consoleLog, 80)
+	if hint := inotifyStartupHint(console); hint != "" {
+		message += ". " + hint
+	}
+	return fmt.Errorf("%s, lxc log: %s, console: %s", message, tailFile(logFile, 80), console)
 }
 
 // applyBandwidthLimit applies tc-based bandwidth limit on container's veth interface
@@ -3784,7 +3797,7 @@ func (m *Manager) ReinstallContainer(id int, templateID string, authConfig ...Co
 		fmt.Printf("Warning: failed to start container after reinstall: %v\n", err)
 		c.Status = "stopped"
 		config.SaveConfig()
-		return fmt.Errorf("reinstalled but failed to start: %v, output: %s, lxc log: %s, console: %s", err, string(output), tailFile(logFile, 80), tailFile(consoleLog, 80))
+		return lxcStartupError(fmt.Sprintf("reinstalled but failed to start: %v, output: %s", err, output), logFile, consoleLog)
 	}
 	if err := m.waitForLXCStartup(lxcName, logFile, consoleLog); err != nil {
 		c.Status = "stopped"

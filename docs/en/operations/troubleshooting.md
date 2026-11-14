@@ -24,6 +24,24 @@ If a reverse proxy is used, check proxy logs and upstream address settings as we
 - Review the failure reason in the task queue.
 - If a download is stuck, cancel it and start again.
 
+## Debian 12 and Other LXC Containers Exit on Startup
+
+If the startup log contains `Failed to create control group inotify object` and `Too many open files`, check the inotify instance limit on the host:
+
+```bash
+sysctl fs.inotify.max_user_instances
+```
+
+Unprivileged LXC containers can share the same host UID mapping, so processes in several containers can draw from the same inotify instance quota. If they exhaust it, systemd can exit during initialization even when the container's `nofile` limit is high enough.
+
+The `fs.inotify.max_user_instances` check in the Host Report shows the current limit and the recommended minimum. When CLICD starts an LXC container, it tries to raise the host's running limit to 2048 if the current limit is lower. If 2048 is still insufficient, check for processes holding many inotify instances or configure a higher limit for the host's workload. For example, add the following to `/etc/sysctl.d/99-local-lxc-inotify.conf`, using a value above the current limit:
+
+```ini
+fs.inotify.max_user_instances = 4096
+```
+
+Run `sudo sysctl -p /etc/sysctl.d/99-local-lxc-inotify.conf` on the host, confirm that the new value is active, then start the container again. The configuration file is loaded on the next host boot.
+
 ## Container Cannot Access the Network
 
 - Check host NAT and forwarding rules.
