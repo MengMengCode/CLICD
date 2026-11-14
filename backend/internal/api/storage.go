@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -234,7 +235,13 @@ func storagePoolIdentity(disk storageDiskInfo) (string, string) {
 	if devicePath == "" {
 		devicePath = strings.TrimSpace(disk.Name)
 	}
-	return "disk-" + storageID(baseName), fmt.Sprintf("%s (%s)", baseName, devicePath)
+	id := "disk-" + storageID(baseName)
+	if disk.FSType == "zfs" {
+		// Datasets can have the same leaf mount directory under different pools.
+		sum := sha256.Sum256([]byte(mountPoint))
+		id = fmt.Sprintf("disk-zfs-%x", sum[:12])
+	}
+	return id, fmt.Sprintf("%s (%s)", baseName, devicePath)
 }
 
 func managedStoragePath(mountPoint string) string {
@@ -283,6 +290,58 @@ func storageID(name string) string {
 }
 
 func detectStorageDisks() []storageDiskInfo {
+	disks := detectBlockStorageDisks()
+	// ZFS datasets are mounted by name and have no lsblk entry of their own.
+	// Read the kernel's mount table so discovery works without ZFS tools.
+	out, err := exec.Command("findmnt", "--kernel", "--json", "--list", "--uniq",
+		"-o", "SOURCE,FSTYPE,TARGET,OPTIONS,FSROOT").Output()
+	if err == nil {
+		disks = appendZFSStorageMounts(disks, out)
+	}
+	for i := range disks {
+		disks[i].SizeBytes, disks[i].UsedBytes, disks[i].FreeBytes = dfPath(disks[i].MountPoint)
+	}
+	return disks
+}
+
+func appendZFSStorageMounts(disks []storageDiskInfo, mountTable []byte) []storageDiskInfo {
+	var payload struct {
+		Filesystems []struct {
+			Source  string `json:"source"`
+			FSType  string `json:"fstype"`
+			Target  string `json:"target"`
+			Options string `json:"options"`
+			FSRoot  string `json:"fsroot"`
+		} `json:"filesystems"`
+	}
+	if err := json.Unmarshal(mountTable, &payload); err != nil {
+		return disks
+	}
+	seen := make(map[string]bool, len(disks))
+	for _, disk := range disks {
+		seen[pathpkg.Clean(disk.MountPoint)] = true
+	}
+	for _, fs := range payload.Filesystems {
+		if fs.FSType != "zfs" || fs.Source == "" || fs.FSRoot != "/" ||
+			!isUsableStorageMount("dataset", fs.FSType, fs.Source, fs.Target, hasMountOption(fs.Options, "ro")) {
+			continue
+		}
+		if !hasMountOption(fs.Options, "rw") {
+			continue
+		}
+		mountPoint := pathpkg.Clean(fs.Target)
+		if seen[mountPoint] {
+			continue
+		}
+		seen[mountPoint] = true
+		disks = append(disks, storageDiskInfo{
+			Name: fs.Source, Path: fs.Source, Type: "dataset", FSType: fs.FSType, MountPoint: mountPoint,
+		})
+	}
+	return disks
+}
+
+func detectBlockStorageDisks() []storageDiskInfo {
 	type lsblkDevice struct {
 		Name       string        `json:"name"`
 		Path       string        `json:"path"`
@@ -317,7 +376,6 @@ func detectStorageDisks() []storageDiskInfo {
 			SizeBytes:  dev.Size,
 		}
 		if isUsableStorageMount(dev.Type, dev.FSType, dev.Path, dev.MountPoint, dev.ReadOnly) && !mountIsReadOnly(dev.MountPoint) {
-			info.SizeBytes, info.UsedBytes, info.FreeBytes = dfPath(dev.MountPoint)
 			result = append(result, info)
 		}
 		for _, child := range dev.Children {
@@ -376,8 +434,12 @@ func mountIsReadOnly(mountPoint string) bool {
 	if err != nil {
 		return false
 	}
-	for _, option := range strings.Split(strings.TrimSpace(string(out)), ",") {
-		if strings.TrimSpace(option) == "ro" {
+	return hasMountOption(string(out), "ro")
+}
+
+func hasMountOption(options, name string) bool {
+	for _, option := range strings.Split(options, ",") {
+		if strings.TrimSpace(option) == name {
 			return true
 		}
 	}

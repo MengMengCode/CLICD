@@ -98,6 +98,58 @@ func TestNormalizeStoragePoolsRejectsUncontrolledPath(t *testing.T) {
 	}
 }
 
+func TestMountedZFSDatasetsCanBeConfiguredAsStorage(t *testing.T) {
+	disks := appendZFSStorageMounts([]storageDiskInfo{{Path: "/dev/sda2", FSType: "ext4", MountPoint: "/"}}, []byte(`{
+		"filesystems": [
+			{"source":"tank/root","fstype":"zfs","target":"/","options":"rw","fsroot":"/"},
+			{"source":"tank/volume","fstype":"zfs","target":"/vol1","options":"rw,relatime","fsroot":"/"},
+			{"source":"tank/volume/data","fstype":"zfs","target":"/vol1/data","options":"rw,relatime","fsroot":"/"},
+			{"source":"other/data","fstype":"zfs","target":"/vol2/data","options":"rw,relatime","fsroot":"/"},
+			{"source":"tank/with-space","fstype":"zfs","target":"/mnt/with space","options":"rw","fsroot":"/"},
+			{"source":"tank/volume/data","fstype":"zfs","target":"/vol1/data","options":"rw","fsroot":"/"},
+			{"source":"tank/read-only","fstype":"zfs","target":"/vol1/archive","options":"ro,relatime","fsroot":"/"},
+			{"source":"tank/bind[/some-dir]","fstype":"zfs","target":"/vol1/bind","options":"rw","fsroot":"/some-dir"},
+			{"source":"tank/boot","fstype":"zfs","target":"/boot/zfs","options":"rw","fsroot":"/"},
+			{"source":"tank/not-mounted","fstype":"zfs","target":"","options":"rw","fsroot":"/"},
+			{"source":"/dev/sdc1","fstype":"zfs_member","target":"/vol3","options":"rw","fsroot":"/"}
+		]
+	}`))
+	want := []string{"/", "/vol1", "/vol1/data", "/vol2/data", "/mnt/with space"}
+	if len(disks) != len(want) {
+		t.Fatalf("unexpected storage candidates: %+v", disks)
+	}
+	var items []config.StoragePool
+	for i, disk := range disks {
+		if disk.MountPoint != want[i] {
+			t.Fatalf("candidate %d mount = %q, want %q", i, disk.MountPoint, want[i])
+		}
+		items = append(items, config.StoragePool{MountPoint: disk.MountPoint, Enabled: true})
+	}
+	pools, err := normalizeStoragePoolsRequestWithDisks(items, disks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pools[0].ID != "disk-root" || pools[2].ID == pools[3].ID || pools[2].Path != managedStoragePath("/vol1/data") {
+		t.Fatalf("unexpected storage identities: %+v", pools)
+	}
+	if _, err := normalizeStoragePoolsRequestWithDisks([]config.StoragePool{{MountPoint: "/vol1/archive", Enabled: true}}, disks); err == nil {
+		t.Fatal("read-only mount was accepted")
+	}
+}
+
+func TestRootOnZFSRetainsSystemStorageIdentity(t *testing.T) {
+	disks := appendZFSStorageMounts(nil, []byte(`{"filesystems":[
+		{"source":"rpool/ROOT/system","fstype":"zfs","target":"/","options":"rw,relatime","fsroot":"/"}
+	]}`))
+	pools, err := normalizeStoragePoolsRequestWithDisks([]config.StoragePool{{MountPoint: "/", Enabled: true}}, disks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pools[0].ID != "disk-root" || pools[0].Path != managedStoragePath("/") {
+		t.Fatalf("unexpected root pool: %+v", pools[0])
+	}
+}
+
 func TestDirSizeBytesUsesAllocatedBlocks(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("allocated-block behavior is provided by the Linux du command")

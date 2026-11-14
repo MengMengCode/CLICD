@@ -146,7 +146,7 @@ export default function Storage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t('存储管理')}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t('只显示已挂载磁盘；勾选后，对应功能可以选择该磁盘保存数据。')}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t('显示已挂载的可写存储。勾选用途后，对应功能可以选择此位置保存数据。')}</p>
         </div>
         <div className="flex shrink-0 gap-2">
           <Button variant="outline" size="sm" onClick={fetchData} className="inline-flex items-center gap-2 px-3 py-2 text-sm">
@@ -173,12 +173,12 @@ export default function Storage() {
 
       <Card className="overflow-hidden text-sm">
         <div className="hidden grid-cols-[minmax(170px,0.65fr)_minmax(320px,1.2fr)_minmax(480px,1.8fr)] gap-4 border-b border-border bg-muted px-4 py-3 text-xs text-muted-foreground 2xl:grid">
-          <div className="font-medium">{t('磁盘')}</div>
+          <div className="font-medium">{t('存储位置')}</div>
           <div className="font-medium">{t('空间分布')}</div>
           <div className="font-medium">{t('用于存储')}</div>
         </div>
         {mountedDisks.length === 0 ? (
-          <div className="px-4 py-10 text-center text-muted-foreground">{t('未检测到已挂载磁盘')}</div>
+          <div className="px-4 py-10 text-center text-muted-foreground">{t('未检测到已挂载的可写存储')}</div>
         ) : (
           <div className="divide-y divide-border">
             {mountedDisks.map((disk) => {
@@ -191,7 +191,7 @@ export default function Storage() {
                   className="grid min-w-0 grid-cols-1 gap-4 px-4 py-4 hover:bg-muted/70 2xl:grid-cols-[minmax(170px,0.65fr)_minmax(320px,1.2fr)_minmax(480px,1.8fr)]"
                 >
                   <div className="min-w-0">
-                    <div className="mb-2 text-xs font-medium text-muted-foreground 2xl:hidden">{t('磁盘')}</div>
+                    <div className="mb-2 text-xs font-medium text-muted-foreground 2xl:hidden">{t('存储位置')}</div>
                     <div className="flex min-w-0 items-start gap-3">
                       <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
                         <HardDrive className="h-5 w-5" />
@@ -318,9 +318,8 @@ function DiskUsageBar({
 function poolForDisk(pool: StoragePool, disk: StorageDisk) {
   if (!disk.mount_point) return false
   const mount = cleanPath(disk.mount_point)
-  const poolMount = cleanPath(pool.mount_point || '')
-  const poolPath = cleanPath(pool.path || '')
-  return poolMount === mount || poolPath === mount || poolPath.startsWith(`${mount}/`)
+  if (pool.mount_point) return cleanPath(pool.mount_point) === mount
+  return cleanPath(pool.path) === managedStoragePath(mount)
 }
 
 function defaultPoolForDisk(disk: StorageDisk): StoragePool {
@@ -330,12 +329,16 @@ function defaultPoolForDisk(disk: StorageDisk): StoragePool {
   return {
     id: `disk-${slugID(mount === '/' ? 'root' : baseName)}`,
     name: `${baseName} (${disk.path || disk.name})`,
-    path: mount === '/' ? '/var/lib/clicd' : `${mount}/clicd`,
+    path: managedStoragePath(mount),
     content_types: primaryContents,
     default_contents: [...primaryContents],
     enabled: true,
     mount_point: disk.mount_point,
   }
+}
+
+function managedStoragePath(mount: string) {
+  return mount === '/' ? '/var/lib/clicd' : `${mount}/clicd`
 }
 
 function cleanPath(value: string) {

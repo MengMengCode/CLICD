@@ -2,6 +2,10 @@
 
 Administrators manage disks and backups from instance details. Sub-users can read disk information for their assigned instances. Long operations return a `task_id` through the [task queue](./tasks); wait for completion before the next disk or lifecycle operation.
 
+## Storage Locations
+
+Storage Management lists mounted, writable ZFS datasets on the host. Administrators can select content types for each mount and save the configuration, for example to store LXC containers, KVM disks or backups. CLICD stores data in the `clicd` directory under the mount point and uses `/var/lib/clicd` for the system root mount `/`. The host manages creating and mounting ZFS pools and datasets.
+
 ## Grow a System Disk
 
 Shut down the instance first. The backend checks the actual LXC/libvirt state; running, paused and frozen instances cannot change disks.

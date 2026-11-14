@@ -485,7 +485,7 @@ func storagePoolFreeBytes(pool StoragePool) (int64, bool) {
 		}
 	}
 	if mountPoint := strings.TrimSpace(pool.MountPoint); mountPoint != "" {
-		out, err := exec.Command("findmnt", "-n", "-o", "TARGET", "--target", pool.Path).Output()
+		out, err := exec.Command("findmnt", "-n", "-o", "TARGET", "--target", pool.Path, "--options", "rw").Output()
 		if err != nil || filepath.Clean(strings.TrimSpace(string(out))) != filepath.Clean(mountPoint) {
 			return 0, false
 		}
