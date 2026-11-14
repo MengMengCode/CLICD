@@ -911,6 +911,10 @@ func HandleBatchCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.Containers[i].NormalizeResourceAliases()
+		if strings.EqualFold(strings.TrimSpace(req.Containers[i].Virtualization), "podman") {
+			jsonResponse(w, http.StatusBadRequest, APIResponse{Message: "Use the Podman container endpoint for OCI applications"})
+			return
+		}
 		req.Containers[i].Virtualization = runtimeFromRequest(req.Containers[i].Virtualization)
 		if req.Containers[i].Virtualization != config.VirtualizationLXC && (req.Containers[i].Privileged || req.Containers[i].Nesting) {
 			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: name + ": privileged and nesting options are only supported for LXC containers"})

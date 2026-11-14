@@ -328,6 +328,10 @@ func createContainer(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Container name is required"})
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(cfg.Virtualization), "podman") {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{Message: "Use the Podman container endpoint for OCI applications"})
+		return
+	}
 	cfg.Virtualization = runtimeFromRequest(cfg.Virtualization)
 	if cfg.Virtualization != config.VirtualizationLXC && (cfg.Privileged || cfg.Nesting) {
 		jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: "Privileged and nesting options are only supported for LXC containers"})

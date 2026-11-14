@@ -30,6 +30,7 @@ const zhSidebar = [
     items: [
       { text: '控制面板', link: '/features/dashboard' },
       { text: '容器管理', link: '/features/containers' },
+      { text: 'Podman 容器', link: '/features/podman' },
       { text: '镜像管理', link: '/features/images' },
       { text: '网络与路由', link: '/features/networking' },
       { text: '快照管理', link: '/features/snapshots' },
@@ -74,6 +75,7 @@ const enSidebar = [
     items: [
       { text: 'Dashboard', link: '/en/features/dashboard' },
       { text: 'Containers', link: '/en/features/containers' },
+      { text: 'Podman Containers', link: '/en/features/podman' },
       { text: 'Images', link: '/en/features/images' },
       { text: 'Networking & Routing', link: '/en/features/networking' },
       { text: 'Snapshots', link: '/en/features/snapshots' },

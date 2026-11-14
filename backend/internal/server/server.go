@@ -75,6 +75,7 @@ func setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/routing/ipv4-scan", corsMiddleware(api.AdminMiddleware(api.HandleRoutingIPv4Scan)))
 	mux.HandleFunc("/api/routing", corsMiddleware(api.AdminMiddleware(api.HandleRouting)))
 	mux.HandleFunc("/api/storage", corsMiddleware(api.AdminMiddleware(api.HandleStorage)))
+	mux.HandleFunc("/api/podman/", corsMiddleware(api.AuthMiddleware(api.HandlePodman)))
 	mux.HandleFunc("/api/ipv6/status", corsMiddleware(api.AdminMiddleware(api.HandleIPv6Status)))
 	mux.HandleFunc("/api/ipv6/nat", corsMiddleware(api.AdminMiddleware(api.HandleIPv6NATSettings)))
 	mux.HandleFunc("/api/tasks", corsMiddleware(api.AuthMiddleware(api.SubUserMiddleware(api.HandleTasks))))

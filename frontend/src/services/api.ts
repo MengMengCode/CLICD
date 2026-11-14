@@ -1111,4 +1111,89 @@ export const updateLanguage = (language: PanelLanguage) =>
 export const getVersion = () =>
   api.get<APIResponse<{ version: string }>>('/version')
 
+export interface PodmanStatus {
+  available: boolean
+  version?: string
+  message?: string
+}
+
+export interface PodmanPort {
+  host_port: number
+  container_port: number
+  protocol: 'tcp' | 'udp'
+}
+
+export interface PodmanContainer {
+  id: string
+  name: string
+  image: string
+  status: string
+  created_at?: string
+  ports?: PodmanPort[]
+  memory_mb?: number
+  cpus?: number
+  volumes?: string[]
+  exit_code?: number
+  started_at?: string
+  finished_at?: string
+  health?: string
+}
+
+export interface PodmanImage {
+  id: string
+  tags: string[]
+  size_bytes: number
+  created_at?: string
+}
+
+export interface PodmanStats {
+  cpu_percent: number | null
+  memory_used_bytes: number
+  memory_limit_bytes: number
+  network_rx_bytes: number
+  network_tx_bytes: number
+  block_read_bytes: number
+  block_write_bytes: number
+  pids: number
+}
+
+export interface CreatePodmanContainerRequest {
+  name: string
+  image: string
+  cpus?: number
+  memory_mb?: number
+  ports: PodmanPort[]
+  env?: Record<string, string>
+  command?: string[]
+  volumes?: string[]
+}
+
+export type PodmanAction = 'start' | 'stop' | 'restart' | 'delete'
+
+export const getPodmanStatus = (signal: AbortSignal) =>
+  api.get<APIResponse<PodmanStatus>>('/podman/status', { signal })
+
+export const listPodmanContainers = (signal: AbortSignal) =>
+  api.get<APIResponse<PodmanContainer[]>>('/podman/containers', { signal })
+
+export const listPodmanImages = (signal: AbortSignal) =>
+  api.get<APIResponse<PodmanImage[]>>('/podman/images', { signal })
+
+export const pullPodmanImage = (image: string) =>
+  api.post<APIResponse<{ id: string }>>('/podman/images', { image }, { timeout: 300000 })
+
+export const createPodmanContainer = (request: CreatePodmanContainerRequest) =>
+  api.post<APIResponse<PodmanContainer>>('/podman/containers', request, { timeout: 300000 })
+
+export const runPodmanAction = (id: string, action: PodmanAction) => {
+  const path = `/podman/containers/${encodeURIComponent(id)}`
+  return action === 'delete' ? api.delete<APIResponse>(path) : api.post<APIResponse>(`${path}/${action}`)
+}
+
+export const getPodmanLogs = (id: string, signal: AbortSignal) =>
+  api.get<APIResponse<{ logs: string }>>(`/podman/containers/${encodeURIComponent(id)}/logs`, { signal })
+
+export const getPodmanStats = (id: string, signal: AbortSignal) =>
+  api.get<APIResponse<PodmanStats>>(`/podman/containers/${encodeURIComponent(id)}/stats`, { signal })
+
 export default api

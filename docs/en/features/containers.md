@@ -2,6 +2,8 @@
 
 Container Management is the core CLICD module. It covers creation, lifecycle operations, resource limits, network mappings, traffic statistics, password resets, and console access.
 
+To deploy an application from an OCI image, use [Podman Containers](./podman).
+
 ## Container List
 
 The list page scans container status. Administrators can view all containers. Sub-users only see containers within their authorization scope.

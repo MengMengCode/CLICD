@@ -1,4 +1,4 @@
-export async function copyToClipboard(text: string): Promise<boolean> {
+export async function copyToClipboard(text: string, container: HTMLElement = document.body): Promise<boolean> {
   if (!text) return false
 
   if (navigator.clipboard?.writeText) {
@@ -23,8 +23,9 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 
   const selection = document.getSelection()
   const selectedRange = selection?.rangeCount ? selection.getRangeAt(0) : null
+  const previousFocus = document.activeElement
 
-  document.body.appendChild(textarea)
+  container.appendChild(textarea)
   textarea.focus({ preventScroll: true })
   textarea.select()
   textarea.setSelectionRange(0, textarea.value.length)
@@ -33,11 +34,12 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   try {
     copied = document.execCommand('copy')
   } finally {
-    document.body.removeChild(textarea)
+    textarea.remove()
     if (selection && selectedRange) {
       selection.removeAllRanges()
       selection.addRange(selectedRange)
     }
+    if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus({ preventScroll: true })
   }
 
   return copied

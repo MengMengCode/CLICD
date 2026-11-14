@@ -17,6 +17,7 @@ import SubUserManagement from './pages/SubUserManagement'
 import Layout from './components/Layout'
 import PortableLibrary from './pages/PortableLibrary'
 import Tasks from './pages/Tasks'
+import PodmanContainers from './pages/PodmanContainers'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -45,6 +46,11 @@ function HomeRoute() {
   return <Dashboard />
 }
 
+function PodmanRoute() {
+  const { isSubUser } = useAuth()
+  return isSubUser ? <Navigate to="/containers" replace /> : <PodmanContainers />
+}
+
 function App() {
   return (
     <Routes>
@@ -59,6 +65,7 @@ function App() {
       >
         <Route index element={<HomeRoute />} />
         <Route path="containers" element={<Containers />} />
+        <Route path="podman" element={<PodmanRoute />} />
         <Route path="images" element={<ImageManagement />} />
         <Route path="container/:id" element={<ContainerDetail />} />
 

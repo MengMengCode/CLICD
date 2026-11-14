@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Code2,
+  Container,
   Cpu,
   Camera,
   HardDrive,
@@ -91,6 +92,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const navItems = [
     { path: '/', label: '控制面板', icon: LayoutDashboard, active: location.pathname === '/', admin: true },
     { path: '/containers', label: '容器管理', icon: Server, active: location.pathname.startsWith('/container'), admin: false },
+    { path: '/podman', label: 'Podman 容器', icon: Container, active: location.pathname === '/podman', admin: true },
     { path: '/images', label: '镜像管理', icon: Package, active: location.pathname.startsWith('/images'), admin: true },
     { path: '/snapshots', label: '快照管理', icon: Camera, active: location.pathname.startsWith('/snapshots'), admin: true },
     { path: '/backups', label: '备份与恢复', icon: Archive, active: location.pathname.startsWith('/backups'), admin: true },

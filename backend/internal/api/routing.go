@@ -317,6 +317,15 @@ func handleRoutingPoolsUpdate(w http.ResponseWriter, r *http.Request) {
 			jsonResponse(w, http.StatusBadRequest, APIResponse{Success: false, Message: err.Error()})
 			return
 		}
+		podmanPortConfiguration.Lock()
+		defer podmanPortConfiguration.Unlock()
+		currentStart, currentEnd := config.NATPortRange()
+		if start != currentStart || end != currentEnd {
+			if err := checkNATRangeAgainstPodman(r.Context(), start, end); err != nil {
+				podmanError(w, err)
+				return
+			}
+		}
 		config.AppConfig.NATPortStart = start
 		config.AppConfig.NATPortEnd = end
 		if config.AppConfig.NextSSHPort < start || config.AppConfig.NextSSHPort > end {
