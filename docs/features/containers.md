@@ -37,6 +37,8 @@ Linux 容器和 Linux KVM 虚拟机创建时支持配置 SSH 登录方式：
 
 LXC 创建还支持两个隔离选项：`nesting=true` 允许 Docker/LXC-in-LXC 和 systemd 所需的嵌套能力；`privileged=true` 创建特权容器，仅管理员可用，适合可信工作负载。特权模式会降低隔离强度，已有实例不能在线切换模式，默认应保持 `privileged=false`。
 
+开启嵌套时，CLICD 会保留 Docker/runc 默认需要的 `CAP_MKNOD`。已有嵌套容器升级面板后，通过面板停止再启动或重启一次，新的能力配置才会应用到容器进程。
+
 实例名称可以单独修改。该操作只更新面板展示名称，不改变运行时名称、UUID、磁盘路径、MAC 地址或系统 hostname：
 
 ```http

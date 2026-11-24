@@ -37,6 +37,8 @@ Network allocation can combine NAT, public IPv4, and IPv6 as needed. API fields 
 
 LXC creation also supports two isolation options: `nesting=true` enables the nesting capabilities needed by Docker/LXC-in-LXC and systemd; `privileged=true` creates a privileged container and is restricted to administrators for trusted workloads. Privileged mode reduces isolation, cannot be switched on an existing instance, and should remain `false` by default.
 
+When nesting is enabled, CLICD retains `CAP_MKNOD`, which Docker/runc requires in its default capability set. After upgrading the panel, stop and start or restart an existing nested container through the panel once to apply the updated capabilities to its processes.
+
 Instance names can be changed independently. The operation updates only the panel display name; the runtime name, UUID, disk paths, MAC address, and guest hostname remain unchanged:
 
 ```http

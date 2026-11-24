@@ -1239,9 +1239,7 @@ func (m *Manager) applyResourceLimits(lxcName string, cfg ContainerConfig) error
 		newLines = append(newLines, "lxc.apparmor.allow_nesting = 1", "lxc.seccomp.allow_nesting = 1")
 	}
 	newLines = append(newLines, "lxc.no_new_privs = 1")
-	// Keep sys_admin: unprivileged containers need it to mount tmpfs (/dev/shm, /run, etc.)
-	// All capabilities are already confined to the container's user namespace.
-	newLines = append(newLines, "lxc.cap.drop = mac_admin mac_override sys_module sys_rawio sys_time sys_boot sys_nice sys_resource sys_ptrace sys_pacct mknod audit_control audit_read")
+	newLines = append(newLines, managedCapabilityDropLine(cfg.Nesting))
 	newLines = append(newLines, managedPrlimitLines()...)
 	newLines = append(newLines, "", "# clicd managed resource limits (cgroup v2)")
 
@@ -1270,6 +1268,16 @@ func (m *Manager) applyResourceLimits(lxcName string, cfg ContainerConfig) error
 		return fmt.Errorf("failed to write container config: %v", err)
 	}
 	return nil
+}
+
+func managedCapabilityDropLine(nesting bool) string {
+	// Nested OCI runtimes include MKNOD in their default capability set.
+	// Removing it from the outer bounding set makes runc's capset fail.
+	dropped := "mac_admin mac_override sys_module sys_rawio sys_time sys_boot sys_nice sys_resource sys_ptrace sys_pacct"
+	if !nesting {
+		dropped += " mknod"
+	}
+	return "lxc.cap.drop = " + dropped + " audit_control audit_read"
 }
 
 func managedPrlimitLines() []string {
@@ -2164,7 +2172,9 @@ func (m *Manager) StartContainer(id int) error {
 			return err
 		}
 	}
-	if m.rootfsShifted(lxcName) {
+	// Privileged guests have no shift marker, but their persisted security
+	// options also need to be refreshed before the first boot after an upgrade.
+	if c.LXCPrivileged || m.rootfsShifted(lxcName) {
 		if err := m.applyResourceLimits(lxcName, ContainerConfig{
 			Name:             c.Name,
 			Privileged:       c.LXCPrivileged,
