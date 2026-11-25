@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 )
 
@@ -54,7 +55,14 @@ func TestOwnershipRewriteHonorsCancellationAndPreservesUnchangedSetID(t *testing
 
 func TestParseSubIDRangeRejectsOutOfRangeStarts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "subuid")
-	for _, value := range []string{"-1:65536", "4294967296:65536", "4294901761:65536"} {
+	for _, value := range []string{
+		"-1:65536",          // negative start
+		"4294967296:65536",  // start outside the 32-bit ID space
+		"4294901761:65536",  // 65536-id range crossing 2^32
+		"4294967295:65536",  // same, at the upper edge
+		"100000:65535",      // fewer than 65536 ids
+		"100000:4294967296", // count outside the 32-bit ID space
+	} {
 		if err := os.WriteFile(path, []byte("root:"+value+"\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -67,5 +75,15 @@ func TestParseSubIDRangeRejectsOutOfRangeStarts(t *testing.T) {
 	}
 	if got, err := parseSubIDRange(path, "root"); err != nil || got != 100000 {
 		t.Fatalf("valid subordinate ID range = %d, %v", got, err)
+	}
+	// Starts above math.MaxInt32 are representable on 64-bit hosts only; the
+	// parser must keep accepting them there instead of narrowing the range.
+	if strconv.IntSize == 64 {
+		if err := os.WriteFile(path, []byte("root:3000000000:65536\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := parseSubIDRange(path, "root"); err != nil || got != 3000000000 {
+			t.Fatalf("valid 64-bit subordinate ID range = %d, %v", got, err)
+		}
 	}
 }

@@ -1953,12 +1953,23 @@ func parseSubIDRange(path, user string) (int, error) {
 		if len(fields) != 3 || fields[0] != user {
 			continue
 		}
-		start, startErr := strconv.ParseUint(fields[1], 10, 32)
+		// start is returned as int, so parse it directly: that avoids a
+		// narrowing conversion while still rejecting values int cannot hold
+		// on 32-bit hosts. count only participates in bounds checks.
+		start, startErr := strconv.Atoi(fields[1])
 		count, countErr := strconv.ParseUint(fields[2], 10, 32)
-		maxInt := uint64(^uint(0) >> 1)
-		if startErr == nil && countErr == nil && count >= 65536 && start <= maxInt && start+count <= uint64(1)<<32 {
-			return int(start), nil
+		if startErr != nil || countErr != nil || start < 0 || count < 65536 {
+			continue
 		}
+		// Keep the range inside the 32-bit ID space; int64 arithmetic cannot
+		// overflow here because both values are below 2^32.
+		if int64(start) > (1<<32)-1 {
+			continue
+		}
+		if int64(start)+int64(count) > 1<<32 {
+			continue
+		}
+		return start, nil
 	}
 	return 0, fmt.Errorf("%s must contain a %s subordinate id range with at least 65536 ids", path, user)
 }
